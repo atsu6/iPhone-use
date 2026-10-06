@@ -2,7 +2,7 @@
 
 给 Codex 的本地 iPhone 视觉操作插件。默认读取 WDA 原生截图，由模型从画面选择目标并执行坐标操作。效率优先：直接使用已经看过的截图，操作后返回的截图可以继续指导下一步；无需在每次动作前重复观察。
 
-从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.1.1**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
+从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.1.2**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
 
 **运行条件：macOS、完整 Xcode、USB 连接的真实 iPhone、Python 3.9+、Node.js 20.19+/22.12+/24+ 和 npm 10+。** 不需要 Appium Server。WDA 固定为 16.14.0 / `d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6`。
 
@@ -14,14 +14,16 @@
 sh scripts/install.sh
 ```
 
-脚本通过 Codex CLI 注册独立的本地 marketplace 并安装。重新连接聊天后加载 `iphone-wda-vision-setup`、`iphone-wda-vision-use` 与 15 个工具。
+脚本安装本地 marketplace 插件及两个 skills，同时通过 `codex mcp add` 将安装后的服务器注册为 `iphone_wda_vision`。保留所有 `wda_vision_` 工具名称，使用同一份服务器代码；重新连接聊天后直接调用 15 个 MCP 工具。
+
+Codex 0.160.1 的 AgentPlugin 工具共用 64KB 模型说明预算，原版 WDA 在前占用预算后，视觉版会被裁剪到只剩 3 个工具，尽管服务器 tools/list 完整返回 15 个。标准 MCP 注册避开这项插件预算，已经通过实际模型调用验证，无需为手机操作逐次运行 Python。重复安装会更新同一个 MCP 注册到当前安装版本，不增加第二套工具名称。
 
 ```sh
 sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-打包输出为 `dist/iphone-use-wda-vision-0.1.1-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
+打包输出为 `dist/iphone-use-wda-vision-0.1.2-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
 
 ## 开始操作
 
@@ -69,6 +71,8 @@ batch 适合点击已经看见的输入框后输入，或 Home 后启动已核�
 
 密码、PIN、验证码及系统认证由用户在手机完成。接管期间暂停该手机的动作、读取和截图，收到用户明确完成通知后再观察并继续。
 
-MCP 绑定不可用时可按 [代码回退](skills/iphone-wda-vision-use/references/tool-fallback.md) 使用单次 CLI 或持久 CLI；无需为了观察 ID 强制持久进程。
+正常任务直接使用 MCP。只有具体工具确实缺失或宿主封装失败时，才按 [代码回退](skills/iphone-wda-vision-use/references/tool-fallback.md) 临时回退该操作；不要把全部操作改成 Python 调用。
+
+卸载时一并运行 `codex mcp remove iphone_wda_vision`，移除安装脚本创建的标准 MCP 注册。
 
 详细规则见 [操作 skill](skills/iphone-wda-vision-use/SKILL.md)、[安装 skill](skills/iphone-wda-vision-setup/SKILL.md)、[运行架构](docs/architecture.md) 与 [合成评测场景](evals/cases.json)。

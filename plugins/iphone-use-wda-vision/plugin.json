@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "iphone-use-wda-vision",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Efficient screenshot-first WDA iPhone control and guided setup for Codex.",
   "author": {
     "name": "ZHONG XIN"

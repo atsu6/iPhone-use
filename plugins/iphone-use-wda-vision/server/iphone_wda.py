@@ -17,7 +17,7 @@ from wda_vision_controller import VisualPhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 TOOL_PREFIX="wda_vision_"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
