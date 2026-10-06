@@ -17,7 +17,7 @@ from wda_controller import PhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.2"
+VERSION="0.1.3"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -313,7 +313,7 @@ def serve(runtime):
             method=request["method"]
             if method=="initialize":
                 offered=params.get("protocolVersion")
-                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Resolve bundle IDs with wda_apps. Swipe supports observe separately from verification; standalone observe uses mode. If no_scroll_progress, inspect returned state and actual list entrance; no progress does not prove an empty or complete list. On wda_recovering poll its setup job then run READY again. If action_executed=true with action_complete=false, inspect state before continuing; do not replay the whole operation. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
+                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Resolve bundle IDs with wda_apps. If an app requires password or Face ID, follow the use skill authentication handoff: ask the user to authenticate on iPhone, pause iPhone tool calls, and resume remaining work from fresh state after confirmation. Swipe supports observe separately from verification; standalone observe uses mode. If no_scroll_progress, inspect returned state and actual list entrance; no progress does not prove an empty or complete list. On wda_recovering poll its setup job then run READY again. If action_executed=true with action_complete=false, inspect state before continuing; do not replay the whole operation. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
             elif method=="ping":result={}
             elif method=="tools/list":result={"tools":TOOLS}
             elif method=="tools/call":

@@ -28,6 +28,8 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 先核对 READY 返回的设备、会话、视口和观察证据。用 `wda_observe(mode="tree")` 读取当前设备界面；需要判读视觉内容再用 `mode="screenshot"` 或 `"both"`。可以在主屏幕或用户选定的无副作用页面做一次导航并核对返回，避免拿发消息、提交订单等操作测试通道。
 
+通道 READY 后，目标 App 仍可能要求密码、验证码或 Face ID。按 [认证接管与恢复](../iphone-wda-use/references/authentication.md) 提示用户在 iPhone 上完成并通知继续；接管期间暂停手机调用，完成后重新观察 App 和目标页。App 认证不是 WDA 故障，不为此重复 build / start / recover；手机真正锁屏或通道中断时才恢复 READY。
+
 断线、重启、停止测试进程或 USB 转发退出后，先 `wda_setup(action="status")`，再 `wda_doctor`；按缺失层恢复连接或 `start`，最后重新 `wda_ready`。用户接管手机后重新观察当前 App，不继续使用接管前的坐标或猜测原页面。
 
 若导航报 `XCTDaemonErrorDomain Code=41` / `Not authorized for performing UI testing actions`，或当前应用变成 `local.pid.0` / `wda_foreground_unavailable` 而无法观察，不把 `status.ready=true` 当作可操作证明。这是 WDA / XCTest 通道故障，不能靠改 selector 解决。`wda_observe` 保持只读并给出 READY 指引；先调用 `wda_ready(screenshot=false)`。失效前台会清理旧会话和观察，重新读取一次；成功时返回 `recovery.state="read_recovered"`。持续失效前台或 XCTest 授权错误才进入服务恢复，且不会重放失败的导航、输入或提交。

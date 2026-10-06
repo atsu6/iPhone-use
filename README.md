@@ -14,7 +14,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 16 个 tools。
 
-也可将 `dist/iphone-use-wda-0.1.2-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.3-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -117,3 +117,7 @@ MCP 绑定不可用时，可按 [直接代码回退](skills/iphone-wda-use/refer
 `wda_swipe` 支持与其他动作一致的 `observe`，包括 `none`；省略输出仍保留默认进展验证。selector 支持 `enabled` 布尔值及树中的 `"true"` / `"false"`，精确多行 label 自动安全编码。其他未知字段继续在操作前拒绝，并返回允许字段和准确参数路径，batch 也保留该诊断。
 
 无滚动进展时返回已执行的手势数、当前观察及下一步，`observe="both"` 可直接附 MCP 图像；这不能证明列表为空或已读全。操作成功后读取失败也保留 `action_executed:true` / `action_complete:false`，避免重复执行写入。具体归因、接口与模型责任边界见 [工具报错审计](docs/tool-error-audit.md)。
+
+## 0.1.3 认证接管
+
+操作 skill 增加密码 / Face ID 接管规则：看到实际认证提示时请用户在 iPhone 上完成，暂停手机调用；用户通知完成后重新观察 App / 目标页并继续剩余任务。保留进度、作废旧定位、不重复接管期间已完成的提交。完整流程见 [认证接管与恢复](skills/iphone-wda-use/references/authentication.md)。

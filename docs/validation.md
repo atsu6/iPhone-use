@@ -72,3 +72,9 @@ Python 3.9 的 stdlib unittest 覆盖真实 loopback HTTP、合成控件与独�
 这些时间不包含模型响应，也不是端到端业务评测。新增 skill 与协议提示改善恢复和继续执行，但没有对 DeepSeek 与其他模型做同输入对照，不能保证模型不再提前 final；归因边界见 [报错审计](tool-error-audit.md)。
 
 本机安装缓存 0.1.2 已通过独立 stdio smoke：initialize / tools/list / ping / READY、16 tools、完整截图证明和直接 MCP 图像均成功，READY 样本 1.683 秒。缓存内容与源代码暂存包逐文件一致；48 文件发布包检查未发现本机设备 / Team / 签名 bundle 配置，也不包含运行日志、截图、构建产物或 node_modules。
+
+## 0.1.3 的认证接管指引
+
+日期：2026-10-07（Asia/Shanghai）。本次更新操作 / 安装 skill、认证参考和 MCP 初始化提示，没有新增认证工具或改变手机操作逻辑。人工审查确认 App 认证、手机锁屏、WDA 故障的分流一致，并覆盖接管期间暂停、完成通知、新观察后继续及已提交动作不重放；三个认证参考链接均有效。150 项现有回归、包校验和 stdio initialize / tools/list / ping 通过，保持 2 skills / 16 tools。
+
+本轮没有让用户实际输入密码或触发金融 App 生物识别；以上验证说明指引与插件契约一致，不代表已做不同模型的认证接管端到端评测。

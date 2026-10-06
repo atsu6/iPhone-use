@@ -20,7 +20,7 @@
 | wda_recovery_required，recovery.state=cooldown / manual | 冷却剩余时间、配置、worker 和监听端口归属、有效构建 | 120 秒冷却期间按 retry_after_seconds 诊断；归属不明或外部服务不得按端口杀进程，按返回的手动步骤恢复。 |
 | HTTP timeout 出现在点击、输入或提交后 | 新观察中的实际页面 / 字段 / 消息 | 先只读复核；结果不确定时报告 uncertain。不能自动重放可能已经生效的操作。 |
 | action_executed=true，action_complete=false | 至少一个已接收动作后的真实状态 | 即使 uncertain=false 也先回读，不重放完整输入、提交或批次；通道恢复只恢复读取 / 控制能力，不代替业务验收。 |
-| App 要求登录、密码或生物识别 | 目标 App 当前登录页及正常入口 | 用户自己完成认证，之后重新 observe 核对目标页；READY 不能代表 App 已登录，也不能绕过保护。 |
+| App 要求登录、密码或生物识别 | 目标 App 当前认证提示及正常入口 | 按 [认证接管与恢复](../../iphone-wda-use/references/authentication.md) 提示用户亲自完成；接管期间暂停手机调用，收到完成通知后重新 observe 核对 App / 目标页并继续原任务。READY 不能代表 App 已登录，App 认证本身不需要重启 WDA。 |
 | WDA 可用，但控件树缺少内容 | 页面是否自绘、受保护或树是否截断 | 截图核对；可定位元素不足时在当前观察坐标下操作，仍无法观察则报告具体限制。 |
 
 WDA 路径不依赖 Mac 的 iPhone 镜像窗口、显示器原点或镜像锁屏互斥，但设备锁定、用户操作、USB 断开和 App 的认证策略仍会改变真机测试状态。只根据当前通道证据恢复，不套用“镜像必须锁定手机”的步骤。
