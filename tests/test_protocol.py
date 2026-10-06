@@ -19,10 +19,13 @@ class ProtocolTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
 
-    def exchange(self, requests):
+    def exchange(self, requests, url=None):
         payload = "".join(json.dumps(item, ensure_ascii=False, allow_nan=False) + "\n" if not isinstance(item, str) else item + "\n" for item in requests)
+        command = [sys.executable, str(ROOT / "server" / "iphone_wda.py"), "--state-dir", self.directory.name]
+        if url:
+            command.extend(["--url", url])
         process = subprocess.run(
-            [sys.executable, str(ROOT / "server" / "iphone_wda.py"), "--state-dir", self.directory.name],
+            command,
             input=payload, capture_output=True, text=True, encoding="utf-8", timeout=10)
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(process.stderr, "")
@@ -51,12 +54,40 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(responses[1]["result"], {})
         tools = responses[2]["result"]["tools"]
         names = [tool["name"] for tool in tools]
+        self.assertEqual(len(names), 16)
         self.assertEqual(len(names), len(set(names)))
-        for name in ("wda_ready", "wda_setup", "wda_observe", "wda_tap", "wda_type_text", "wda_batch", "wda_collect_list"):
+        for name in ("wda_ready", "wda_setup", "wda_observe", "wda_tap", "wda_type_text", "wda_batch", "wda_collect_list", "wda_apps"):
             self.assertIn(name, names)
         for tool in tools:
             self.assertEqual(tool["inputSchema"]["type"], "object")
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
+        apps = next(tool for tool in tools if tool["name"] == "wda_apps")
+        self.assertTrue(apps["annotations"]["readOnlyHint"])
+        self.assertFalse(apps["annotations"]["destructiveHint"])
+        self.assertTrue(apps["annotations"]["idempotentHint"])
+        self.assertEqual(apps["inputSchema"]["required"], ["query"])
+
+    def test_stdio_apps_catalog_returns_public_evidence_without_wda_access(self):
+        responses = self.exchange([
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                "name": "wda_apps", "arguments": {"query": "招商银行", "source": "catalog"}}},
+        ], url="http://127.0.0.1:1")
+        result = responses[0]["result"]
+        self.assertFalse(result["isError"])
+        data = result["structuredContent"]
+        self.assertEqual(json.loads(result["content"][0]["text"]), data)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["searched_sources"], ["catalog"])
+        self.assertEqual(data["candidates"][0]["bundle_id"], "com.cmbchina.MPBBank")
+        self.assertFalse(data["candidates"][0]["installed_verified"])
+
+    def test_apps_catalog_is_read_only_even_when_phone_is_locked(self):
+        runtime, client = self.runtime()
+        client.locked = True
+        result = runtime.call("wda_apps", {"query": "招商银行", "source": "catalog"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["candidates"][0]["bundle_id"], "com.cmbchina.MPBBank")
+        self.assertEqual(client.calls, [])
 
     def test_stdio_invalid_arguments_return_tool_error_without_wda_access(self):
         invalid_cases = [
@@ -65,6 +96,9 @@ class ProtocolTests(unittest.TestCase):
             ("wda_find", {"selector": {"label": "Target", "predicate": "label == 'Target'"}}),
             ("wda_batch", {"steps": [{"op": "tap", "args": {"selector": {"label": "Target"}}}, {"op": "unknown", "args": {}}]}),
             ("wda_missing", {}),
+            ("wda_apps", {"query": "招商银行", "source": "guess"}),
+            ("wda_apps", {"query": "招商银行", "country": "CHN"}),
+            ("wda_apps", {"query": ""}),
         ]
         responses = self.exchange([{"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {"name": name, "arguments": args}} for index, (name, args) in enumerate(invalid_cases)])
         self.assertEqual(len(responses), len(invalid_cases))

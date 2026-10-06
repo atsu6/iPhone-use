@@ -32,3 +32,25 @@ Python 3.9 的 stdlib unittest 覆盖真实 loopback HTTP、合成控件与独�
 自动化测试共 60 项，全部通过。真机两步 batch（进入通用 → 返回设置）完整通过，合计 4.663 秒；设置列表短拖动一次即验证内容/几何变化，3.882 秒。测试后清理搜索内容并返回主屏幕。
 
 这些组合测试只改变导航/滚动/搜索，没有更改系统设置，也没有发送消息或操作金融交易。
+
+## 0.1.1 的 T01 问题回归
+
+日期：2026-10-07（Asia/Shanghai）。本次没有重跑 T01 的完整金融数据采集，没有更改原评测分数。
+
+自动测试共 101 项全部通过，包含真实 TCP TIME_WAIT / 活跃监听器区分、直接脚本操作锁与手机锁、Home 200 无效 / 不确定不重放、区域外轮播放行、区域内变化与有/无标签原生浮层拒绝、商店失败与成功无匹配区分、MCP 查询协议和目录证据。
+
+本机安装缓存的 0.1.1 实际 stdio smoke 通过 initialize / tools/list / ping / READY，发现 16 个工具，source / viewport / screenshot 证明和直接 MCP image content 均通过。
+
+| 本次真实设备检查 | 结果 | 工具执行样本 |
+| --- | --- | --- |
+| 原 Home 接口 | POST 返回成功，但设置 App 仍在前台，复现 T01 症状 | 0.496 秒 POST；另 0.118 秒前台读取 |
+| 修复后 Home | 专用 homescreen 路径，SpringBoard 前台核验通过 | 1.079 秒，observe=none |
+| 重启后 READY / Home 后 READY | session / source / viewport 与解锁证明通过 | 1.295 / 1.305 秒，未取截图 |
+| 设置列表自选区域滚动 | 新 tree ID + region，短拖动一次即核验区域内容变化 | 2.333 秒 |
+| 招商银行 bundle 查询 | 安装清单确认 `com.cmbchina.MPBBank`，有发布者与来源 | 首次 0.377 秒；缓存 0.002 秒 |
+
+区域外轮播与浮层保护使用合成控件回归；真机滚动使用设置列表，未把它声明为原金融页面全流程复测。36 个常用 App 的商店条目以 Apple Search / Lookup 实际核验。以上为少量单设备工具时间，不含模型响应，不能推导整个 T01 的提速比例。
+
+恢复过程中还遇到 status.ready=true 但 XCTest Code 41（无 UI testing 操作权限）、前台 `local.pid.0` 的失效通道。只停止本插件已核验归属的 Runner / forward，再启动后恢复 READY。旧 Home 接口在这个失效状态下也返回成功；专用接口明确报告授权错误。setup skill 增加恢复步骤，并修复关闭转发后 TIME_WAIT 被误报为端口仍占用的问题。这次授权失效不被推定为 T01 当时的内部原因。
+
+三次提前 final 的原始日志结论与限制见 [model-termination-audit.md](model-termination-audit.md)。金融内容、设备/Team 标识和截图仅在仓库外私有目录；发布包只包含代码、公开 App 元数据和脱敏验证说明。

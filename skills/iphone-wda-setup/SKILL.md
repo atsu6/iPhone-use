@@ -30,6 +30,8 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 断线、重启、停止测试进程或 USB 转发退出后，先 `wda_setup(action="status")`，再 `wda_doctor`；按缺失层恢复连接或 `start`，最后重新 `wda_ready`。用户接管手机后重新观察当前 App，不继续使用接管前的坐标或猜测原页面。
 
+若导航报 `XCTDaemonErrorDomain Code=41` / `Not authorized for performing UI testing actions`，或当前应用变成 `local.pid.0` 而无法观察，不把 `status.ready=true` 当作可操作证明。读取 `status` 找到本插件拥有且仍在运行的 start 工作，执行 `stop(job_id=...)`，轮询该工作已停止后再 `start`，最后重新 `wda_ready` 并核对真实界面。复用已有构建即可；不要连续重试失效的按键，也不要因为 HTTP 200 就认为 Home 已成功。仅停止经过所有权核验的本插件工作；外部 WDA 服务请其所有者重新启动，不能按端口杀进程。重启后仍报授权错误时，按当前提示检查已解锁 iPhone 的开发者模式及“开发者 → 启用 UI 自动化”，信任或认证确认由用户完成。
+
 按实际日志处理签名、容量、连接、开发模式和版本问题，读取 [故障排查](references/troubleshooting.md)。恢复时复用可用的构建与 WDA；只有签名过期、二进制不兼容或构建失效时才重新 build。输出 READY 或 NEEDS_USER_ACTION，并附已经验证的层、准确缺项及下一步；没有验证完就保持未就绪。
 
 ## 官方依据

@@ -67,8 +67,8 @@ class PhoneController:
         finite(v.get("width"),"width",1,10000);finite(v.get("height"),"height",1,10000)
         return {"width":v["width"],"height":v["height"],"units":"iPhone points"}
 
-    def active_app(self):
-        result=self.client.request("GET", "/wda/activeAppInfo").get("value") or {}
+    def active_app(self,timeout=None):
+        result=self.client.request("GET", "/wda/activeAppInfo",timeout=timeout).get("value") or {}
         return result.get("bundleId")
 
     def tree(self, include_invisible=False, expensive_visibility=False):
@@ -86,7 +86,7 @@ class PhoneController:
         nodes=[]
         for element in tree.iter():
             a=element.attrib
-            if not any(a.get(k) for k in ("label","name","value")):
+            if not any(a.get(k) for k in ("label","name","value")) and a.get("type") not in ("XCUIElementTypeAlert","XCUIElementTypeSheet"):
                 continue
             try:
                 rect={k:float(a.get(k,0)) for k in ("x","y","width","height")}
@@ -104,17 +104,20 @@ class PhoneController:
             nodes.append(node)
         return nodes,viewport
 
-    def signature(self,nodes,region=None):
+    def region_nodes(self,nodes,region=None):
         if region:
             x,y,w,h=region["x"],region["y"],region["width"],region["height"]
             nodes=[n for n in nodes if x<=n["rect"]["x"]+n["rect"]["width"]/2<=x+w and y<=n["rect"]["y"]+n["rect"]["height"]/2<=y+h]
         # Ignore status bar clocks/battery values. Compare visible content and geometry.
         nodes=[n for n in nodes if n["type"]!="XCUIElementTypeStatusBar" and n["rect"]["y"]>=45]
-        return hashlib.sha256(json.dumps(nodes,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+        return nodes
 
-    def remember(self,nodes,viewport,app,image_signature=None):
+    def signature(self,nodes,region=None):
+        return hashlib.sha256(json.dumps(self.region_nodes(nodes,region),ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+
+    def remember(self,nodes,viewport,app,image_signature=None,has_tree=True):
         ident=uuid.uuid4().hex
-        self.snapshots[ident]={"time":time.monotonic(),"signature":self.signature(nodes),"viewport":viewport,"app":app,"image_signature":image_signature}
+        self.snapshots[ident]={"time":time.monotonic(),"signature":self.signature(nodes),"viewport":viewport,"app":app,"image_signature":image_signature,"nodes":nodes if has_tree else None}
         while len(self.snapshots)>32:
             self.snapshots.popitem(last=False)
         return ident
@@ -128,7 +131,7 @@ class PhoneController:
             nodes,viewport=[],self.viewport()
         else:
             nodes,viewport=self.tree(include_invisible,expensive_visibility)
-        result={"observation_id":self.remember(nodes,viewport,app),"observed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"app":app,"viewport":viewport,
+        result={"observation_id":self.remember(nodes,viewport,app,has_tree=mode!="screenshot"),"observed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"app":app,"viewport":viewport,
                 "warnings":["Viewport intersection does not prove hittability; fixed headers can occlude controls."]}
         if mode in ("tree","both"):
             result.update({"nodes":nodes[:max_nodes],"total_nodes":len(nodes),"truncated":len(nodes)>max_nodes,"visibility_computed":expensive_visibility})
@@ -151,12 +154,16 @@ class PhoneController:
             result["image"]={"path":str(dest),"mimeType":"image/png","coordinates":"Map image pixels to viewport points before tapping."}
         return result
 
-    def guard(self,observation_id):
+    def snapshot(self,observation_id):
         old=self.snapshots.get(observation_id)
         if not old or time.monotonic()-old["time"]>30:
             fail("stale_observation","Observe again; coordinate observations expire after 30 seconds.")
         if self.active_app()!=old["app"]:
             fail("stale_observation","The foreground app changed. Observe again.")
+        return old
+
+    def guard(self,observation_id):
+        old=self.snapshot(observation_id)
         if old.get("image_signature"):
             viewport=self.viewport()
             encoded=self.client.request("GET","/screenshot").get("value")
@@ -168,6 +175,23 @@ class PhoneController:
         if viewport!=old["viewport"] or changed:
             fail("stale_observation","Page or orientation changed. Observe again before a coordinate action.")
         return viewport
+
+    def guard_region(self,observation_id,region):
+        old=self.snapshot(observation_id)
+        if old.get("nodes") is None:
+            fail("stale_observation","A custom scroll region needs a tree/both observation. Observe both, or inspect the current screen and use the default region.")
+        nodes,viewport=self.tree()
+        area=self.region(region,viewport)
+        if viewport!=old["viewport"]:
+            fail("stale_observation","Orientation or viewport changed. Observe again before scrolling.")
+        previous=self.region_nodes(old["nodes"],area)
+        current=self.region_nodes(nodes,area)
+        # Scrolling is guarded by its target region, so an unrelated carousel
+        # cannot invalidate it. Global modal changes remain a read barrier.
+        modals=lambda items:[n for n in items if n["type"] in ("XCUIElementTypeAlert","XCUIElementTypeSheet")]
+        if not previous or not current or self.signature(previous)!=self.signature(current) or modals(old["nodes"])!=modals(nodes):
+            fail("stale_observation","Scroll target region or a modal changed. Observe tree/both again and choose a stable list region; a carousel outside the region is ignored.")
+        return nodes,viewport
 
     def find(self,selector,limit=10):
         integer(limit,"limit",1,30)
@@ -261,8 +285,27 @@ class PhoneController:
         if name not in ("home","volumeup","volumedown"):
             fail("invalid_argument","Supported buttons: home, volumeup, volumedown.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
-        self.client.session("POST","/wda/pressButton",{"name":name})
-        return self.after(observe=observe)
+        if name!="home":
+            self.client.session("POST","/wda/pressButton",{"name":name})
+            return self.after(observe=observe)
+        # XCTest pressButton can acknowledge Home without changing foreground.
+        # WDA's dedicated endpoint activates the system application instead.
+        self.client.request("POST","/wda/homescreen",{})
+        deadline=time.monotonic()+2
+        app=None
+        try:
+            while True:
+                app=self.active_app(timeout=max(.05,deadline-time.monotonic()))
+                if app=="com.apple.springboard":break
+                if time.monotonic()>=deadline:
+                    fail("postcondition_failed","Home request returned, but SpringBoard did not become foreground. Inspect fresh state; do not loop on the same button.",foreground_app=app)
+                time.sleep(min(.1,max(0,deadline-time.monotonic())))
+            result={"action_executed":True,"verified":True,"foreground_verified":True,"foreground_app":app,"verification_scope":"Home navigation: SpringBoard is foreground; user task completion is separate."}
+            if observe!="none":result["observation"]=self.observe(observe)
+            return result
+        except WDAError as exc:
+            exc.details.update({"action_executed":True,"home_foreground_verified":app=="com.apple.springboard","verification_required":"Home was requested. Inspect fresh state before another action; do not automatically replay."})
+            raise
 
     def type_text(self,selector,text,allow_newlines=False,submit=False,replace=True,observe="tree"):
         if not isinstance(text,str) or not 1<=len(text)<=10000 or "\x00" in text:
@@ -306,8 +349,8 @@ class PhoneController:
         if direction not in ("up","down","left","right"):fail("invalid_argument","Invalid direction.")
         integer(max_attempts,"max_attempts",1,2)
         if expect:predicate(expect)
-        if region is not None:self.guard(observation_id)
-        before,viewport=self.tree();area=self.region(region,viewport)
+        before,viewport=self.guard_region(observation_id,region) if region is not None else self.tree()
+        area=self.region(region,viewport)
         x=area["x"]+area["width"]/2;y=area["y"]+area["height"]/2
         dx=area["width"]*.32;dy=area["height"]*.32
         points={"up":(x,y+dy,x,y-dy),"down":(x,y-dy,x,y+dy),"left":(x+dx,y,x-dx,y),"right":(x-dx,y,x+dx,y)}[direction]

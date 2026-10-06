@@ -12,9 +12,9 @@ cd iPhone-use-wda
 sh scripts/install.sh
 ```
 
-此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 15 个 tools。
+此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 16 个 tools。
 
-也可将 `dist/iphone-use-wda-0.1.0-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.1-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -36,6 +36,7 @@ sh scripts/install.sh
 |---|---|
 | `wda_doctor`, `wda_setup`, `wda_ready` | 诊断、后台安装/启动与完整就绪证明 |
 | `wda_observe` | 精简树/原生截图，观察 ID 和 iPhone 点坐标 viewport |
+| `wda_apps` | 优先查本机安装清单和 36 个已核验别名，必要时查 Apple API；区分商店元数据与安装证据 |
 | `wda_find` | 查询标签、name、value、type 或 predicate，避免为一个按钮读取全树 |
 | `wda_tap` | 唯一目标、viewport 与 hittable 检查，点击后等待 expect 并观察 |
 | `wda_swipe` | 短拖动，比较区域内容，再最多切换一次原生 swipe |
@@ -102,3 +103,9 @@ python3 scripts/smoke_mcp.py --ready
 Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊断写 stderr。测试使用合成 UI 和本机 HTTP fixture，涵盖会话恢复、不重放超时操作、坐标过期、遮挡、Unicode 回读、无效滚动和批量中止。真实设备测试另记，不把 mock 测试当作真机任务完成。
 
 技术依据：[Appium WebDriverAgent](https://github.com/appium/WebDriverAgent)、[固定版本源代码](https://github.com/appium/WebDriverAgent/tree/d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6)、[Apple 开发账户说明](https://developer.apple.com/help/account/basics/about-your-developer-account)。
+
+## 0.1.1 修复与查询
+
+Home 改走 WDA `/wda/homescreen`，只有 SpringBoard 前台才返回 verified。自定义滚动只核对目标区域及浮层，区域外轮播不再使其过期；坐标点击继续保持严格页面检查。`wda_apps(query="招商银行")` 可直接查到 `com.cmbchina.MPBBank`，来源和安装状态随结果返回。常用 App 与刷新办法见 [bundle ID 参考](skills/iphone-wda-use/references/apps.md)。
+
+MCP 绑定不可用时，可按 [直接代码回退](skills/iphone-wda-use/references/tool-fallback.md) 使用 `scripts/phone.py` 或 `Runtime`；复用相同会话、操作锁和权限检查。已不确定是否执行的写入不能重放。T01 三次提前 final 的日志调查见 [model-termination-audit.md](docs/model-termination-audit.md)：没有发现 MCP 进程崩溃或协议错误，具体模型 / provider 阶段归因仍需原始响应流。Skill 增加全部交付项核验与同回合继续执行规则。

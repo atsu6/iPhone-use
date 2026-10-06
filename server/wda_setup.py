@@ -96,6 +96,8 @@ def _node_supported(version):
 def _diagnose(text):
     text = text.lower()
     cases = [
+        (("not authorized for performing ui testing actions", "xctdaemonerror code=41", "xctdaemonerror code = 41"),
+         "XCTest UI automation authorization is unavailable even if WDA status.ready is true. Inspect setup status, stop only this plugin's owned start job, start it again and verify wda_ready with a current UI observation. Preserve external services and ask their owner to restart them. If authorization still fails, check Developer Mode and Enable UI Automation on the unlocked iPhone; do not bypass trust or authentication prompts."),
         (("maximum number", "three apps", "3 apps", "0xe8008029"),
          "Personal Team app limit: review development apps on the phone yourself. Do not uninstall automatically; remove an app only with the owner's explicit instruction, or use a paid team."),
         (("no accounts", "authentication", "not logged in", "unable to log in", "session has expired"),
@@ -112,7 +114,7 @@ def _diagnose(text):
          "Unlock the iPhone yourself and keep it awake while the WDA test runner starts. Do not share the passcode."),
         (("not paired", "trust this computer", "pairing"),
          "Reconnect USB, unlock the iPhone, accept Trust This Computer yourself and verify pairing in Xcode Window > Devices and Simulators."),
-        (("address already in use", "eaddrinuse"),
+        (("address already in use", "eaddrinuse", "local forward port is occupied"),
          "The local forward port is in use. Reuse an already healthy WDA, stop only this plugin's owned job, or configure another local port; do not kill unrelated processes."),
     ]
     return [hint for needles, hint in cases if any(needle in text for needle in needles)]
@@ -469,6 +471,11 @@ class SetupManager:
                     if not _node_supported(_run(["node", "--version"])["stdout"]):
                         raise ValueError("USB forwarding requires Node.js 20.19+ / 22.12+ / 24+; update Node.js before start.")
                     with socket.socket() as probe:
+                        # Node listeners use address reuse. A recently stopped
+                        # owned forward can leave connections in TIME_WAIT;
+                        # match that reuse policy without permitting an active
+                        # listener to be displaced or killed.
+                        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         try:
                             probe.bind(("127.0.0.1", config["local_port"]))
                         except OSError:

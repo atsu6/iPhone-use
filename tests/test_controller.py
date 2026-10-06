@@ -35,10 +35,18 @@ class FakeWDA:
                           "hittable": True, "value": ""}]
         self.input_override = None
         self.click_error = None
+        self.home_effective = True
+        self.home_error = None
         self.screenshot = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXuoAAAAASUVORK5CYII=")
 
     def request(self, method, path, payload=None, timeout=None):
         self.calls.append((method, path, payload))
+        if method == "POST" and path == "/wda/homescreen":
+            if self.home_error:
+                raise self.home_error
+            if self.home_effective:
+                self.app = "com.apple.springboard"
+            return {"value": None}
         if path == "/wda/activeAppInfo":
             return {"value": {"bundleId": self.app}}
         if path == "/screenshot":
@@ -174,6 +182,135 @@ class ControllerTests(unittest.TestCase):
         self.assert_code("stale_observation", lambda: self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none"))
         self.assertEqual(self.client.actions(), [])
 
+    def test_custom_scroll_ignores_carousel_changes_outside_region(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        for mode in ("tree", "both"):
+            with self.subTest(mode=mode):
+                self.setUp()
+                self.client.nodes = [node("Banner A", y=100), node("Row 1", y=400)]
+                observed = self.phone.observe(mode)
+                self.client.source_pages = [
+                    [node("Banner B", y=100), node("Row 1", y=400)],
+                    [node("Banner C", y=100), node("Row 2", y=400)],
+                ]
+                self.client.screenshot += b"changed carousel outside gesture area"
+                self.client.calls.clear()
+                result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+                self.assertTrue(result["verified"])
+                self.assertEqual(self.client.swipe_count, 1)
+                self.assertEqual(self.client.actions()[0][1], "/wda/dragfromtoforduration")
+                self.assertFalse(any(path == "/screenshot" for _, path, _ in self.client.calls))
+
+    def test_custom_scroll_rejects_changed_target_region_before_gesture(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        self.client.nodes = [node("Banner A", y=100), node("Row 1", y=400)]
+        observed = self.phone.observe()
+        self.client.nodes = [node("Banner A", y=100), node("Different list", y=400)]
+        self.client.calls.clear()
+        self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+        self.assertEqual(self.client.actions(), [])
+
+    def test_custom_scroll_rejects_new_modal_even_outside_gesture_region(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        self.client.nodes = [node("Row 1", y=400)]
+        observed = self.phone.observe()
+        self.client.nodes.append(node("Blocking alert", y=100, kind="Alert"))
+        self.client.calls.clear()
+        self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+        self.assertEqual(self.client.actions(), [])
+
+    def test_custom_scroll_rejects_unlabeled_modal_appearing_or_disappearing(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        for kind in ("Alert", "Sheet"):
+            for appearing in (True, False):
+                with self.subTest(kind=kind, appearing=appearing):
+                    self.setUp()
+                    modal = node("", y=100, kind=kind)
+                    self.client.nodes = [node("Row 1", y=400)] + ([] if appearing else [modal])
+                    observed = self.phone.observe("both")
+                    self.client.nodes = [node("Row 1", y=400)] + ([modal] if appearing else [])
+                    self.client.calls.clear()
+                    self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+                    self.assertEqual(self.client.actions(), [])
+
+    def test_custom_scroll_guard_keeps_anchors_beyond_response_truncation(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        self.client.nodes = [node("Banner", y=100), node("Row 1", y=400)]
+        observed = self.phone.observe(max_nodes=1)
+        self.assertTrue(observed["truncated"])
+        self.client.source_pages = [self.client.nodes, [node("Banner", y=100), node("Row 2", y=400)]]
+        result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+        self.assertTrue(result["verified"])
+        self.assertEqual(self.client.swipe_count, 1)
+
+    def test_custom_scroll_rejects_expired_app_or_orientation_observation(self):
+        # Keep the rectangle valid in both viewports so this exercises freshness,
+        # rather than rejecting a region that falls outside the rotated screen.
+        area = {"x": 30, "y": 100, "width": 300, "height": 250}
+        for change in ("expired", "app", "orientation"):
+            with self.subTest(change=change):
+                self.setUp()
+                self.client.nodes = [node("Row 1", y=200)]
+                observed = self.phone.observe()
+                if change == "expired":
+                    self.phone.snapshots[observed["observation_id"]]["time"] -= 31
+                elif change == "app":
+                    self.client.app = "com.example.other"
+                else:
+                    self.client.size = {"width": 844, "height": 390}
+                self.client.calls.clear()
+                self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+                self.assertEqual(self.client.actions(), [])
+
+    def test_custom_scroll_refuses_screenshot_only_or_empty_region_anchors(self):
+        area = {"x": 30, "y": 300, "width": 300, "height": 400}
+        for condition in ("screenshot_only", "no_anchor"):
+            with self.subTest(condition=condition):
+                self.setUp()
+                self.client.nodes = [node("Banner outside target", y=100)]
+                observed = self.phone.observe("screenshot" if condition == "screenshot_only" else "tree")
+                self.client.calls.clear()
+                self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+                self.assertEqual(self.client.actions(), [])
+
+    def test_home_navigation_requires_foreground_evidence(self):
+        result = self.phone.press_button("home", observe="none")
+        self.assertTrue(result["action_executed"])
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["foreground_verified"])
+        self.assertEqual(self.client.app, "com.apple.springboard")
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
+        self.assertTrue(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
+
+    def test_home_http_success_without_foreground_change_is_failure(self):
+        self.client.home_effective = False
+        self.assert_code("postcondition_failed", lambda: self.phone.press_button("home", observe="none"))
+        self.assertEqual(self.client.app, "com.example.phone")
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
+
+    def test_uncertain_home_navigation_is_not_replayed(self):
+        self.client.home_error = WDAError("action_uncertain", "Timeout after sending Home", uncertain=True)
+        error = self.assert_code("action_uncertain", lambda: self.phone.press_button("home", observe="none"))
+        self.assertTrue(error.uncertain)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
+        self.assertFalse(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
+
+    def test_home_post_action_read_failure_retains_execution_evidence(self):
+        with patch.object(self.phone, "active_app", side_effect=WDAError("wda_unreachable", "read timed out")):
+            error = self.assert_code("wda_unreachable", lambda: self.phone.press_button("home", observe="none"))
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["home_foreground_verified"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
+
+    def test_volume_button_transport_success_remains_unverified(self):
+        for name in ("volumeup", "volumedown"):
+            with self.subTest(name=name):
+                self.setUp()
+                result = self.phone.press_button(name, observe="none")
+                self.assertTrue(result["action_executed"])
+                self.assertFalse(result["verified"])
+                self.assertEqual(self.client.actions(), [("POST", "/wda/pressButton", {"name": name})])
+
     def test_exact_target_offscreen_or_occluded_is_not_clicked(self):
         for condition, code in (("offscreen", "offscreen_target"), ("occluded", "occluded_target")):
             with self.subTest(condition=condition):
@@ -295,6 +432,7 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(result["error"]["uncertain"])
         self.assertEqual(result["stop_reason"], "action_uncertain")
         self.assertFalse(any(path == "/wda/pressButton" for _, path, _ in self.client.actions()))
+        self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in self.client.actions()))
 
     def test_batch_submission_is_a_verification_barrier(self):
         result = self.phone.batch([
@@ -304,6 +442,17 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "submission_requires_verification")
         self.assertEqual(result["completed_steps"], 1)
         self.assertFalse(any(path == "/wda/pressButton" for _, path, _ in self.client.actions()))
+        self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in self.client.actions()))
+
+    def test_batch_continues_after_verified_home_navigation(self):
+        result = self.phone.batch([
+            {"op": "press_button", "args": {"name": "home", "observe": "none"}},
+            {"op": "observe", "args": {}},
+        ])
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["completed_steps"], 2)
+        self.assertTrue(result["results"][0]["foreground_verified"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
 
     def test_batch_completes_observation_and_verified_input_steps(self):
         result = self.phone.batch([

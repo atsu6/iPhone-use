@@ -23,11 +23,12 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 | `wda_setup` | discover / fetch / configure / build / start / stop / status | 构建、Runner 运行和 USB 转发分层检查；长操作 status 跟踪，不重复启动。 |
 | `wda_ready` | WDA 状态、会话、有效视口与当前观察验收 | READY 表示通道可用；App 登录与业务结果独立验证。 |
 | `wda_observe` | tree / screenshot / both，当前设备视口与观察 ID | 默认最多 100 个节点、过滤视口外节点、跳过昂贵 visible 属性；截断和无标签需截图。 |
+| `wda_apps` | 已选设备安装列表、本地核验别名、Apple Search 元数据 | 返回来源 / 发布者 / 核验时间；商店存在不表示本机已安装，失败是明确工具错误。 |
 | `wda_find` / `wda_wait` | 精确查询与有界等待目标 selector | 唯一目标与当前页面语义；通用标签不代表正确页面。 |
 | `wda_tap` | selector 点击或引用新观察的设备点点击 | 视口与观察约束、可选 expect 与后续观察；HTTP 成功不是业务成功。 |
 | `wda_swipe` | 当前区域短拖动，必要时原生 swipe | 默认验证、最多 2 次尝试；停止无进展循环。 |
 | `wda_type_text` | 对明确文本框输入并回读 | 默认无换行、无 submit；不一致 / 不可核验不能继续提交。 |
-| `wda_press_button` / `wda_launch_app` | 支持的系统按钮与 App 启动 | 核对目标 App / 页面的实际状态。 |
+| `wda_press_button` / `wda_launch_app` | 支持的系统按钮与 App 启动 | Home 用专用 homescreen 并核验 SpringBoard；音量只表示执行；启动核对实际前台。 |
 | `wda_batch` | 最多 20 步的已知短路径 | 顺序执行，failed / uncertain 停止；不能预测未知页面或盲批发送。 |
 | `wda_scroll_find` | 最多 10 次 swipe 查找目标 | 返回找到 / 未找到及边界，不无限滚动。 |
 | `wda_collect_list` | 默认 Cell / 6 页、最多 10 页的列表采集与去重 | complete 始终 false；end_selector 的可点击终点证据不代替条数 / 金额对账。 |
@@ -37,7 +38,7 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 
 ## 观察与动作约束
 
-观察由 WDA 的 source / screenshot 和设备 window size 形成；screenshot 模式跳过 source。返回坐标单位为设备点，截图像素可能具有不同缩放。坐标动作必须使用对应当前视口的 `observation_id`，30 秒过期，动作前再检查 App、页面 / 图像签名与视口变化。切换 App、用户接管、重新连接、设备旋转或页面变化后重新观察，不能复用过去的坐标。
+观察由 WDA 的 source / screenshot 和设备 window size 形成；screenshot 模式跳过 source。返回坐标单位为设备点，截图像素可能具有不同缩放。坐标点击必须使用对应当前视口的 `observation_id`，30 秒过期，动作前再检查 App、页面 / 图像签名与视口变化。自选滚动区域使用 tree/both 的完整内部节点（不受返回截断影响），只比较中心位于区域内的控件及全页原生 Alert/Sheet，包括无标签浮层；区域外轮播不影响滚动。区域内异步刷新仍需新观察；截图单独模式不能提供区域语义锚点。切换 App、用户接管、重新连接或设备旋转后重新观察。
 
 默认轻量树避免为每个节点计算昂贵属性，但无法保证元素真实可点击。固定表头、浮层、自绘和无标签控件需要截图验证。树中元素、`visible=true`、HTTP 200 和页面指纹变化分别只证明一个层次的事实，不能扩展为完整任务成功。
 

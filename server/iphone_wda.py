@@ -15,8 +15,9 @@ import time
 from wda_client import WDAClient, WDAError
 from wda_controller import PhoneController
 from wda_setup import SetupManager
+from wda_apps import AppCatalog
 
-VERSION="0.1.0"
+VERSION="0.1.1"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -52,6 +53,7 @@ SCHEMAS={
  "wait":obj({"selector":SEL,"timeout_seconds":num(0,20)},("selector",)),
  "scroll_find":obj({"selector":SEL,"direction":string(enum=["up","down","left","right"]),"max_swipes":num(0,10,"integer")},("selector",)),
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
+ "apps":obj({"query":string(max_length=100),"country":string(max_length=2),"source":string(enum=["auto","catalog","installed","apple"]),"limit":num(1,30,"integer")},("query",)),
  "doctor":obj({}),"ready":obj({"screenshot":BOOL}),"metrics":obj({}),
  "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string()},("action",))
 }
@@ -65,9 +67,9 @@ DESCRIPTIONS={
  "observe":"Fresh compact phone controls or native WDA screenshot with iPhone point viewport and observation_id. Fast tree skips expensive visibility; geometry does not prove hittability.",
  "find":"Query exact semantic fields or a WDA predicate directly without a whole tree. Returns matches and rectangles; duplicates are explicit.",
  "tap":"Resolve unique, on-screen, hittable target and tap; optionally wait for an expected selector and observe in one call. Coordinate taps require fresh matching observation_id.",
- "swipe":"Short drag, verify content change, then at most one native swipe fallback. Stops on no progress. A custom region requires observation_id. Direction names describe finger movement.",
+ "swipe":"Short drag, verify content change, then at most one native swipe fallback. Stops on no progress. A custom region requires fresh tree/both observation_id; compares only that region plus modal state, ignoring outside carousels. Direction names describe finger movement.",
  "type_text":"Enter Unicode into a verified editable field and require exact value readback. Stops before submit on mismatch. Newlines need explicit multiline intent; submit defaults false.",
- "press_button":"Press home/volumeup/volumedown then return current state. No automatic business verification.",
+ "press_button":"Home uses dedicated WDA homescreen activation and verifies SpringBoard foreground; fails on no effect. Volume buttons execute without result verification. Navigation verification is separate from task completion.",
  "launch_app":"Activate an app by verified bundle ID; verify foreground app and optionally expected page in one call.",
  "wait":"Bounded semantic presence polling for expected target. Presence is a UI postcondition, not proof of business correctness.",
  "batch":"Up to 20 known steps in one model round trip. Validate all arguments before actions; stop on failed postcondition, uncertainty or unverified mutation.",
@@ -75,7 +77,8 @@ DESCRIPTIONS={
  "collect_list":"Collect/deduplicate accessibility rows over bounded pages. Returns evidence and explicit coverage limits; always requires reconciliation before declaring business completeness.",
  "metrics":"In-process HTTP and tool timing summary without text, app data or images. Model response latency is not measured here."
 }
-READS={"doctor","observe","find","wait","metrics"}
+DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
+READS={"doctor","observe","find","wait","metrics","apps"}
 TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":schema,
         "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
 
@@ -139,6 +142,7 @@ class Runtime:
         self.client=WDAClient(self.base_url)
         self.phone=PhoneController(self.client,self.state_dir)
         self.setup_manager=SetupManager(self.state_dir,self.base_url)
+        self.apps=AppCatalog(self.state_dir,self.setup_manager)
 
     def call(self,name,args):
         # WDA has one active session. Serialize independent Codex MCP processes
@@ -178,6 +182,7 @@ class Runtime:
         start=time.monotonic();error=None
         try:
             if op=="doctor":return self.setup_manager.doctor()
+            if op=="apps":return self.apps.lookup(**args)
             if op=="setup":
                 manager=self.setup_manager
                 candidate_url=self.base_url
@@ -189,6 +194,7 @@ class Runtime:
                     self.client.close();self.client.session_id=None;self.phone.snapshots.clear()
                 if result.get("ok") and args["action"]=="configure" and "local_port" in args:
                     self.base_url=candidate_url;self.setup_manager=manager
+                    self.apps.setup_manager=manager
                     self.client=WDAClient(self.base_url);self.phone.client=self.client
                 return result
             if op=="ready":
@@ -237,7 +243,7 @@ def serve(runtime):
             method=request["method"]
             if method=="initialize":
                 offered=params.get("protocolVersion")
-                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Use compound tools with expected postconditions; never replay uncertain mutations."}
+                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Resolve bundle IDs with wda_apps. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
             elif method=="ping":result={}
             elif method=="tools/list":result={"tools":TOOLS}
             elif method=="tools/call":

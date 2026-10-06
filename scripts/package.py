@@ -9,7 +9,7 @@ import sys
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore')
+FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore')
 DIRS=('assets','server','skills','scripts','docs','evals','tests','.github')
 
 
@@ -31,7 +31,7 @@ def validate():
     assert (ROOT/'tooling/package-lock.json').is_file()
     sys.path.insert(0,str(ROOT/'server'))
     from iphone_wda import TOOLS,SCHEMAS,VERSION
-    assert VERSION==manifest['version'] and len(TOOLS)==15
+    assert VERSION==manifest['version'] and len(TOOLS)==16
     assert len(set(t['name'] for t in TOOLS))==len(TOOLS)
     for t in TOOLS:assert t['inputSchema']['additionalProperties'] is False
     return manifest
@@ -41,7 +41,7 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--validate-only',action='store_true');parser.add_argument('--stage-only',action='store_true');args=parser.parse_args()
     manifest=validate()
     if args.validate_only:
-        print('Plugin manifests, 2 skills and 15 MCP tools validated.');return
+        print('Plugin manifests, 2 skills and 16 MCP tools validated.');return
     stage=ROOT/'dist'/manifest['name']
     if stage.exists():shutil.rmtree(stage)
     stage.mkdir(parents=True)

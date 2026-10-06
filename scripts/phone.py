@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Named WDA operations when an MCP binding is unavailable; same runtime guards."""
+import argparse
+import json
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
+from iphone_wda import Runtime, SCHEMAS
+from wda_client import WDAError
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("tool", choices=["wda_" + name for name in SCHEMAS])
+    parser.add_argument("arguments", nargs="?", default="{}", help="JSON object matching the MCP tool schema")
+    parser.add_argument("--state-dir")
+    parser.add_argument("--url")
+    args = parser.parse_args()
+    runtime = None
+    try:
+        arguments = json.loads(args.arguments, parse_constant=lambda value: (_ for _ in ()).throw(ValueError("Non-finite JSON number")))
+        runtime = Runtime(args.state_dir, args.url)
+        result = runtime.call(args.tool, arguments)
+    except WDAError as exc:
+        result = {"error": exc.as_dict()}
+    except (ValueError, TypeError) as exc:
+        result = {"error": {"code": "invalid_argument", "message": str(exc), "uncertain": False}}
+    finally:
+        if runtime:
+            runtime.close()
+    print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+    return 1 if "error" in result else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

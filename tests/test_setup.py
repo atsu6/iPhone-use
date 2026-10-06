@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import signal
+import socket
 import sys
 import tempfile
 import time
@@ -155,6 +156,69 @@ class SetupTests(unittest.TestCase):
             result = self.manager.setup("start")
         self.assertTrue(result["already_ready"])
         create.assert_not_called()
+
+    def prepare_start(self, port):
+        self.manager = wda_setup.SetupManager(Path(self.temp.name) / "state", f"http://127.0.0.1:{port}")
+        result = self.configure(local_port=port)
+        self.assertTrue(result["ok"], result)
+        wda_setup._write_json(self.manager.state_dir / "build.json", {
+            "config_fingerprint": wda_setup._fingerprint(self.manager.config), "commit": wda_setup.WDA_COMMIT,
+        })
+
+    def start_without_device(self):
+        # Exercise actual TCP availability logic while replacing Xcode, Node
+        # discovery and worker creation; no real device or process is touched.
+        with patch.object(self.manager, "_source", return_value=Path(self.temp.name)), \
+             patch.object(self.manager, "_probe_status", return_value={"ready": False}), \
+             patch.object(wda_setup.sys, "platform", "darwin"), \
+             patch.object(wda_setup.shutil, "which", return_value="/test/tool"), \
+             patch.object(wda_setup, "_run", return_value={"ok": True, "stdout": "v24.18.0"}), \
+             patch.object(self.manager, "_create_job", return_value={"ok": True, "job_id": "fixture"}) as create:
+            result = self.manager.setup("start")
+        return result, create
+
+    def test_start_reuses_port_after_closed_forward_connection(self):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        listener.listen(1)
+        client = socket.create_connection(("127.0.0.1", port), timeout=2)
+        accepted, _ = listener.accept()
+        # The server side closes first and owns TIME_WAIT, as a stopped USB
+        # forward may do. A bare bind reproduces the original false rejection.
+        accepted.close()
+        self.assertEqual(client.recv(1), b"")
+        client.close()
+        listener.close()
+        with socket.socket() as bare_probe:
+            with self.assertRaises(OSError):
+                bare_probe.bind(("127.0.0.1", port))
+        self.prepare_start(port)
+        result, create = self.start_without_device()
+        self.assertTrue(result["ok"], result)
+        create.assert_called_once()
+
+    def test_start_refuses_existing_listener_without_stopping_it(self):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+            listener.listen(1)
+            self.prepare_start(port)
+            result, create = self.start_without_device()
+            self.assertFalse(result["ok"])
+            self.assertIn("Local forward port is occupied", result["error"])
+            self.assertTrue(any("do not kill unrelated" in hint for hint in result["next_steps"]))
+            create.assert_not_called()
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as client:
+                accepted, _ = listener.accept()
+                accepted.close()
+
+    def test_xctest_authorization_failure_has_owned_restart_diagnostic(self):
+        hints = wda_setup._diagnose("Error Domain=XCTDaemonErrorDomain Code=41: Not authorized for performing UI testing actions")
+        self.assertTrue(any("status.ready is true" in hint and "owned start job" in hint for hint in hints))
+        self.assertTrue(any("Preserve external services" in hint and "wda_ready" in hint for hint in hints))
 
     def test_build_command_uses_explicit_build_for_testing_no_shell(self):
         self.configure()
