@@ -17,7 +17,7 @@ from wda_controller import PhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.1"
+VERSION="0.1.2"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -37,16 +37,26 @@ def num(low,high,kind="number"):
 
 
 BOOL={"type":"boolean"}
-SEL=obj({k:string(max_length=2000 if k=="predicate" else 1000) for k in ("label","name","value","type","predicate")})
+SEL=obj({
+ "label":string("Exact accessibility label copied from fresh nodes; real newlines and punctuation are preserved automatically. Do not use partial text.",max_length=1000),
+ "name":string("Exact accessibility identifier/name copied from fresh nodes; combine with label/type to disambiguate.",max_length=1000),
+ "value":string("Exact current accessibility value; not the text to enter. Omit values that change asynchronously.",max_length=1000),
+ "type":string("Exact element type, e.g. Button or XCUIElementTypeButton. Not an application bundle ID.",max_length=1000),
+ "enabled":{"oneOf":[{"type":"boolean"},{"type":"string","enum":["true","false"]}],"description":"Optional exact enabled filter; accepts boolean or the tree string true/false. This does not prove hittability."},
+ "predicate":string("Advanced NSPredicate query used alone. Cannot be combined with label/name/value/type/enabled. Prefer exact fields so text is safely encoded.",max_length=2000)})
+SEL["description"]="Choose exact label/name/value/type/enabled fields, or a standalone predicate. Do not copy rect, visible, in_viewport or other observation fields into selector. Target must match uniquely."
+SEL["examples"]=[{"label":"返回","type":"Button","enabled":True}]
 SEL["minProperties"]=1
-OBS=string(enum=["none","tree","screenshot","both"])
+OBS=string("Post-action output: none omits observation, tree returns compact controls, screenshot returns image, both returns both. Default tree. It never disables required action/progress verification.",enum=["none","tree","screenshot","both"])
+OBS["default"]="tree"
 EXPECT={"expect":SEL,"observe":OBS}
 REGION=obj({k:num(0 if k in ("x","y") else 1,10000) for k in ("x","y","width","height")},("x","y","width","height"))
+REGION["description"]="Current scrollable list rectangle in iPhone points (not screenshot pixels). Requires fresh tree/both observation_id. Omit region for default central area."
 SCHEMAS={
- "observe":obj({"mode":string(enum=["tree","screenshot","both"]),"include_invisible":BOOL,"max_nodes":num(1,500,"integer"),"expensive_visibility":BOOL}),
+ "observe":obj({"mode":string("Standalone observation output, default tree. Use mode here; observe is a post-action option on mutation tools. none is not a standalone observation mode.",enum=["tree","screenshot","both"]),"include_invisible":BOOL,"max_nodes":num(1,500,"integer"),"expensive_visibility":BOOL}),
  "find":obj({"selector":SEL,"limit":num(1,30,"integer")},("selector",)),
  "tap":obj({"selector":SEL,"x":num(0,10000),"y":num(0,10000),"observation_id":string(),**EXPECT}),
- "swipe":obj({"direction":string(enum=["up","down","left","right"]),"region":REGION,"observation_id":string(),"expect":SEL,"verify":BOOL,"max_attempts":num(1,2,"integer")}),
+ "swipe":obj({"direction":string("Finger movement; up usually reveals later rows. Default up.",enum=["up","down","left","right"]),"region":REGION,"observation_id":string("Fresh observation ID from this MCP process's tree/both output; required only for custom region. Expires after 30 seconds."),"expect":SEL,"verify":{"type":"boolean","default":True,"description":"Verify content/geometry progress internally, default true. Keep true even with observe=none."},"max_attempts":num(1,2,"integer"),"observe":OBS}),
  "type_text":obj({"selector":SEL,"text":string(max_length=10000),"allow_newlines":BOOL,"submit":BOOL,"replace":BOOL,"observe":OBS},("selector","text")),
  "press_button":obj({"name":string(enum=["home","volumeup","volumedown"]),"observe":OBS},("name",)),
  "launch_app":obj({"bundle_id":string(),**EXPECT},("bundle_id",)),
@@ -54,7 +64,7 @@ SCHEMAS={
  "scroll_find":obj({"selector":SEL,"direction":string(enum=["up","down","left","right"]),"max_swipes":num(0,10,"integer")},("selector",)),
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
  "apps":obj({"query":string(max_length=100),"country":string(max_length=2),"source":string(enum=["auto","catalog","installed","apple"]),"limit":num(1,30,"integer")},("query",)),
- "doctor":obj({}),"ready":obj({"screenshot":BOOL}),"metrics":obj({}),
+ "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"Also verify screenshot; false retains status/session/source/viewport/unlock checks."},"recover":{"type":"boolean","default":True,"description":"On a persistent local.pid foreground or XCTest authorization fault, queue one bounded restart of a proven owned WDA. Returns ready=false with job/poll guidance while recovering. False performs diagnostics without restarting."}}),"metrics":obj({}),
  "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string()},("action",))
 }
 # Each batch operation carries the same closed argument schema as its standalone tool.
@@ -63,11 +73,11 @@ SCHEMAS["batch"]=obj({"steps":{"type":"array","minItems":1,"maxItems":20,"items"
 DESCRIPTIONS={
  "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and WDA health without changing the phone. Start here for setup.",
  "setup":"Manage WDA checkout, explicit signing config, nonblocking build/run jobs and loopback USB forwarding. Read iphone-wda-setup skill. Never uninstalls apps.",
- "ready":"Prove status.ready, usable session, viewport and current source; optionally test screenshot. Only this successful check establishes READY.",
+ "ready":"Prove real WDA usability, not status alone. Retry a stale foreground read once; persistent local.pid/authorization failure can queue owned asynchronous recovery. If error says ready=false, follow recovery polling and check READY again. No phone action is replayed.",
  "observe":"Fresh compact phone controls or native WDA screenshot with iPhone point viewport and observation_id. Fast tree skips expensive visibility; geometry does not prove hittability.",
  "find":"Query exact semantic fields or a WDA predicate directly without a whole tree. Returns matches and rectangles; duplicates are explicit.",
  "tap":"Resolve unique, on-screen, hittable target and tap; optionally wait for an expected selector and observe in one call. Coordinate taps require fresh matching observation_id.",
- "swipe":"Short drag, verify content change, then at most one native swipe fallback. Stops on no progress. A custom region requires fresh tree/both observation_id; compares only that region plus modal state, ignoring outside carousels. Direction names describe finger movement.",
+ "swipe":"Scroll a real list with at most two gesture strategies. Supports observe=none/tree/screenshot/both independently of verify=true. Custom region needs fresh tree/both ID. No-progress error includes executed=true and fresh state; check overview/list entrance, boundary or modal, not schema or missing holdings. Do not loop the same gesture.",
  "type_text":"Enter Unicode into a verified editable field and require exact value readback. Stops before submit on mismatch. Newlines need explicit multiline intent; submit defaults false.",
  "press_button":"Home uses dedicated WDA homescreen activation and verifies SpringBoard foreground; fails on no effect. Volume buttons execute without result verification. Navigation verification is separate from task completion.",
  "launch_app":"Activate an app by verified bundle ID; verify foreground app and optionally expected page in one call.",
@@ -85,6 +95,11 @@ TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":schema
 
 def validate(value,schema,path="arguments"):
     if "oneOf" in schema:
+        if isinstance(value,dict) and "op" in value:
+            # Surface the chosen batch step's precise argument error instead
+            # of hiding it behind the union of unrelated operation schemas.
+            chosen=[candidate for candidate in schema["oneOf"] if candidate.get("properties",{}).get("op",{}).get("const")==value["op"]]
+            if len(chosen)==1:return validate(value,chosen[0],path)
         matches=0
         for candidate in schema["oneOf"]:
             try:validate(value,candidate,path);matches+=1
@@ -98,7 +113,7 @@ def validate(value,schema,path="arguments"):
     if "enum" in schema and value not in schema["enum"]:raise WDAError("invalid_argument",f"Invalid {path} option.")
     if kind=="object":
         props=schema.get("properties",{})
-        if schema.get("additionalProperties") is False and set(value)-set(props):raise WDAError("invalid_argument",f"Unknown fields in {path}: {', '.join(sorted(set(value)-set(props)))}.")
+        if schema.get("additionalProperties") is False and set(value)-set(props):raise WDAError("invalid_argument",f"Unknown fields in {path}: {', '.join(sorted(set(value)-set(props)))}. Use only the declared fields.",details={"action_executed":False,"argument_path":path,"unknown_fields":sorted(set(value)-set(props)),"allowed_fields":sorted(props),"recovery":{"next_step":"Correct these fields using the current tool schema, then call once; no device action was executed."}})
         if set(schema.get("required",[]))-set(value):raise WDAError("invalid_argument",f"Missing required fields in {path}.")
         if len(value)<schema.get("minProperties",0):raise WDAError("invalid_argument",f"{path} cannot be empty.")
         for k,v in value.items():
@@ -176,6 +191,60 @@ class Runtime:
                 elif hasattr(self.client,"session_id") and cache_path.exists():cache_path.unlink()
                 fcntl.flock(lock,fcntl.LOCK_UN)
 
+    @staticmethod
+    def channel_fault(error):
+        text=str(error).lower()
+        if "not authorized for performing ui testing actions" in text or ("xctdaemonerrordomain" in text and "code=41" in text):
+            return "xctest_authorization"
+        if error.code=="wda_foreground_unavailable" or ("local.pid." in text and error.code=="stale element reference"):
+            return "foreground_unavailable"
+        return None
+
+    def ready_once(self,screenshot):
+        status=self.client.request("GET","/status").get("value") or {}
+        if status.get("ready") is not True:raise WDAError("not_ready","WDA is not accepting commands. Run wda_doctor and inspect setup status.")
+        if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself, keep it awake, and verify READY again.")
+        sid=self.client.ensure_session()
+        observation=self.phone.observe("both" if screenshot else "tree")
+        if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and WDA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
+        return {"ready":True,"proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
+
+    def ready(self,screenshot=True,recover=True):
+        retried=False
+        try:return self.ready_once(screenshot)
+        except WDAError as error:
+            original=error
+        fault=self.channel_fault(original)
+        if fault=="foreground_unavailable":
+            # The one retry is a fresh session/source read, never a replay of
+            # a click, key, submission or an element ID from an older session.
+            self.client.close();self.client.session_id=None;self.phone.snapshots.clear()
+            retried=True
+            try:
+                result=self.ready_once(screenshot)
+                result["recovery"]={"state":"read_recovered","session_recreated":True,"replayed_action":False}
+                return result
+            except WDAError as error:
+                original=error;fault=self.channel_fault(error)
+        if original.code=="phone_locked":raise original
+        pending=self.setup_manager.pending_recovery() if hasattr(self.setup_manager,"pending_recovery") else None
+        if pending and original.code in ("wda_unreachable","not_ready","invalid session id","wda_foreground_unavailable","stale element reference","unknown error","invalid argument"):
+            recovery={"ok":True,"recovery":pending,"job_id":pending.get("job_id")}
+        elif fault and recover:
+            recovery=self.setup_manager.recover()
+        else:
+            if fault:
+                raise WDAError("wda_recovery_required","The WDA/XCTest channel is unusable; this is not a schema error. Run READY with recover=true or restart the service through its owner.",details={"ready":False,"action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":{"next_step":"wda_ready(screenshot=false, recover=true)","replay_action":False}})
+            raise original
+        info=dict(recovery.get("recovery") or {})
+        job_id=recovery.get("job_id") or info.get("job_id")
+        if recovery.get("ok") and job_id:
+            self.client.close();self.client.session_id=None;self.phone.snapshots.clear()
+            info.update(job_id=job_id,status_tool="wda_setup",status_arguments={"action":"status","job_id":job_id},next_tool="wda_ready",next_arguments={"screenshot":screenshot},retry_after_seconds=1,replay_action=False)
+            raise WDAError("wda_recovering","Owned WDA recovery is running in the background. Poll the supplied setup job; once the service is reachable, run READY again. Do not replay the failed user action.",details={"ready":False,"action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":info})
+        info.update(next_steps=recovery.get("next_steps",[]),replay_action=False)
+        raise WDAError("wda_recovery_required","Automatic WDA recovery was not started: "+str(recovery.get("error","service ownership could not be proven")),details={"ready":False,"action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":info})
+
     def _call(self,name,args):
         if not isinstance(name,str) or not name.startswith("wda_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown WDA tool.")
         op=name[4:];validate(args,SCHEMAS[op]);validate_semantics(op,args)
@@ -198,20 +267,20 @@ class Runtime:
                     self.client=WDAClient(self.base_url);self.phone.client=self.client
                 return result
             if op=="ready":
-                status=self.client.request("GET","/status").get("value") or {}
-                if status.get("ready") is not True:raise WDAError("not_ready","WDA is not accepting commands. Run wda_doctor and inspect setup status.")
-                if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself, keep it awake, and verify READY again.")
-                sid=self.client.ensure_session()
-                observation=self.phone.observe("both" if args.get("screenshot",True) else "tree")
-                if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and WDA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
-                return {"ready":True,"proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"source_readable":True,"viewport_readable":True,"screenshot_readable":args.get("screenshot",True)},"observation":observation}
+                return self.ready(**args)
             if op=="metrics":
                 records=self.phone.tool_records
                 return {**self.client.metrics(),"tools":{"count":len(records),"seconds":round(sum(r["seconds"] for r in records),4),"errors":sum(bool(r["error"]) for r in records)},"latency_scope":"This plugin measures HTTP and tool execution only. It cannot measure or eliminate host/model response delays."}
             if op in ("tap","swipe","type_text","launch_app","press_button","batch","scroll_find","collect_list"):
                 if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself before operations; observe again afterward.")
             return getattr(self.phone,op)(**args)
-        except WDAError as exc:error=exc.code;raise
+        except WDAError as exc:
+            error=exc.code
+            if op in READS:
+                exc.details.setdefault("action_executed",False)
+            if self.channel_fault(exc):
+                exc.details.update(category="channel_runtime",recovery={"tool":"wda_ready","arguments":{"screenshot":False},"replay_action":False})
+            raise
         except (ValueError,TypeError) as exc:error="invalid_argument";raise WDAError(error,str(exc)) from exc
         finally:self.phone.tool_records.append({"tool":name,"seconds":round(time.monotonic()-start,4),"error":error})
 
@@ -222,6 +291,7 @@ def result_content(data):
     content=[{"type":"text","text":json.dumps(data,ensure_ascii=False,allow_nan=False)}]
     # Direct image content supports visual inspection without another file-tool round trip.
     image=data.get("image") or data.get("observation",{}).get("image")
+    if not image and isinstance(data.get("error"),dict):image=data["error"].get("observation",{}).get("image")
     if not image and data.get("results"):
         last=data["results"][-1];image=last.get("image") or last.get("observation",{}).get("image")
     if image and Path(image["path"]).is_file():content.append({"type":"image","data":base64.b64encode(Path(image["path"]).read_bytes()).decode(),"mimeType":"image/png"})
@@ -243,7 +313,7 @@ def serve(runtime):
             method=request["method"]
             if method=="initialize":
                 offered=params.get("protocolVersion")
-                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Resolve bundle IDs with wda_apps. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
+                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. READY requires status, session and observation. Resolve bundle IDs with wda_apps. Swipe supports observe separately from verification; standalone observe uses mode. If no_scroll_progress, inspect returned state and actual list entrance; no progress does not prove an empty or complete list. On wda_recovering poll its setup job then run READY again. If action_executed=true with action_complete=false, inspect state before continuing; do not replay the whole operation. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
             elif method=="ping":result={}
             elif method=="tools/list":result={"tools":TOOLS}
             elif method=="tools/call":

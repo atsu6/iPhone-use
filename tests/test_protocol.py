@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime
+from iphone_wda import Runtime, result_content
 from wda_client import WDAError
 from wda_controller import PhoneController
 from test_controller import FakeWDA
@@ -114,6 +114,60 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(responses[0]["error"]["code"], -32700)
         self.assertEqual(responses[1]["result"], {})
 
+    def test_swipe_schema_accepts_observe_none_and_preserves_verification(self):
+        runtime, client = self.runtime()
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_swipe", {"direction": "up", "observe": "none"})
+        self.assertEqual(caught.exception.code, "no_scroll_progress")
+        self.assertEqual(caught.exception.details["attempts"], 2)
+        self.assertTrue(caught.exception.details["action_executed"])
+        self.assertEqual(client.swipe_count, 2)
+
+    def test_unknown_argument_reports_allowed_fields_without_device_access(self):
+        runtime, client = self.runtime()
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_observe", {"observe": "none"})
+        error = caught.exception.as_dict()
+        self.assertEqual(error["code"], "invalid_argument")
+        self.assertFalse(error["action_executed"])
+        self.assertEqual(error["unknown_fields"], ["observe"])
+        self.assertIn("mode", error["allowed_fields"])
+        self.assertNotIn("observe", error["allowed_fields"])
+        self.assertEqual(error["argument_path"], "arguments")
+        self.assertEqual(client.calls, [])
+
+    def test_no_progress_error_image_is_mcp_image_content_and_retains_details(self):
+        runtime, client = self.runtime()
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_swipe", {"observe": "screenshot", "max_attempts": 1})
+        result = result_content({"error": caught.exception.as_dict()})
+        self.assertTrue(result["isError"])
+        self.assertEqual(result["structuredContent"]["error"]["code"], "no_scroll_progress")
+        self.assertTrue(result["structuredContent"]["error"]["action_executed"])
+        self.assertEqual([item["type"] for item in result["content"]], ["text", "image"])
+        self.assertEqual(result["content"][1]["mimeType"], "image/png")
+        import base64
+        self.assertEqual(base64.b64decode(result["content"][1]["data"]), client.screenshot)
+
+    def test_batch_accepts_swipe_observe_none_and_stops_on_no_progress(self):
+        runtime, client = self.runtime()
+        result = runtime.call("wda_batch", {"steps": [
+            {"op": "swipe", "args": {"observe": "none"}},
+            {"op": "press_button", "args": {"name": "home", "observe": "none"}},
+        ]})
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["error"]["code"], "no_scroll_progress")
+        self.assertTrue(result["error"]["action_executed"])
+        self.assertEqual(client.swipe_count, 2)
+        self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in client.actions()))
+
+    def test_exact_enabled_tree_string_survives_protocol_schema(self):
+        runtime, client = self.runtime()
+        result = runtime.call("wda_find", {"selector": {"label": "Target", "enabled": "true"}})
+        self.assertEqual(result["matches"], 1)
+        query = next(body["value"] for _, path, body in client.calls if path == "/elements")
+        self.assertIn("enabled == true", query)
+
     def test_stdio_unknown_method_and_invalid_params_are_rpc_errors(self):
         responses = self.exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "not/a/method"},
@@ -131,6 +185,11 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(WDAError) as caught:
             runtime.call("wda_batch", {"steps": steps})
         self.assertEqual(caught.exception.code, "invalid_argument")
+        details = caught.exception.as_dict()
+        self.assertEqual(details["argument_path"], "arguments.steps[1].args")
+        self.assertEqual(details["unknown_fields"], ["extra"])
+        self.assertIn("observe", details["allowed_fields"])
+        self.assertFalse(details["action_executed"])
         self.assertEqual(client.calls, [])
 
     def test_malformed_later_selector_is_checked_before_any_phone_request(self):

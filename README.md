@@ -14,7 +14,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 16 个 tools。
 
-也可将 `dist/iphone-use-wda-0.1.1-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.2-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -88,6 +88,8 @@ sh scripts/install.sh
 
 `WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 `device_busy`，不执行动作。断线或操作超时会标记 uncertain，先重新观察，不能盲目重放点击/输入。仅在明确 invalid session 的非元素读操作自动重建 session 后重试；旧元素 ID 不跨会话重用。
 
+`wda_ready` 默认对失效前台读状态重建 session 并只重试一次；持续 `local.pid.0` / XCTest 授权错误会异步恢复经过进程、配置和监听端口归属核验的插件服务。恢复中返回 `ready:false` 和 job 轮询参数，服务启动后再验 READY；`recover:false` 可只做诊断。120 秒冷却限制重复重启，外部服务由其所有者恢复。
+
 `wda_setup(action="stop")` 只停止本插件拥有并核验身份的后台进程组。已有健康 WDA 可复用，其外部进程不会被停止。
 
 ## 开发与验证
@@ -109,3 +111,9 @@ Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊�
 Home 改走 WDA `/wda/homescreen`，只有 SpringBoard 前台才返回 verified。自定义滚动只核对目标区域及浮层，区域外轮播不再使其过期；坐标点击继续保持严格页面检查。`wda_apps(query="招商银行")` 可直接查到 `com.cmbchina.MPBBank`，来源和安装状态随结果返回。常用 App 与刷新办法见 [bundle ID 参考](skills/iphone-wda-use/references/apps.md)。
 
 MCP 绑定不可用时，可按 [直接代码回退](skills/iphone-wda-use/references/tool-fallback.md) 使用 `scripts/phone.py` 或 `Runtime`；复用相同会话、操作锁和权限检查。已不确定是否执行的写入不能重放。T01 三次提前 final 的日志调查见 [model-termination-audit.md](docs/model-termination-audit.md)：没有发现 MCP 进程崩溃或协议错误，具体模型 / provider 阶段归因仍需原始响应流。Skill 增加全部交付项核验与同回合继续执行规则。
+
+## 0.1.2 工具报错修复
+
+`wda_swipe` 支持与其他动作一致的 `observe`，包括 `none`；省略输出仍保留默认进展验证。selector 支持 `enabled` 布尔值及树中的 `"true"` / `"false"`，精确多行 label 自动安全编码。其他未知字段继续在操作前拒绝，并返回允许字段和准确参数路径，batch 也保留该诊断。
+
+无滚动进展时返回已执行的手势数、当前观察及下一步，`observe="both"` 可直接附 MCP 图像；这不能证明列表为空或已读全。操作成功后读取失败也保留 `action_executed:true` / `action_complete:false`，避免重复执行写入。具体归因、接口与模型责任边界见 [工具报错审计](docs/tool-error-audit.md)。

@@ -1,7 +1,10 @@
 import base64
 import copy
+import json
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,7 +13,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 from wda_client import WDAError
-from wda_controller import ELEMENT_KEY, PhoneController
+from wda_controller import ELEMENT_KEY, PhoneController, predicate
 
 
 def node(label="Row 1", y=200, kind="Cell", **extra):
@@ -81,6 +84,9 @@ class FakeWDA:
             value = payload["value"]
             labels = re.findall(r"label == '([^']*)'", value)
             matches = [item for item in self.elements if not labels or item["label"] == labels[0]]
+            enabled = re.search(r"enabled == (true|false)", value)
+            if enabled:
+                matches = [item for item in matches if item.get("enabled", True) is (enabled[1] == "true")]
             return [{ELEMENT_KEY: item["id"]} for item in matches]
         if path.startswith("/element/"):
             parts = path.split("/")
@@ -370,6 +376,135 @@ class ControllerTests(unittest.TestCase):
         error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe())
         self.assertEqual(error.details["attempts"], 2)
         self.assertEqual([call[1] for call in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["verified"])
+        self.assertFalse(error.details["changed"])
+        self.assertEqual(error.details["observation"]["nodes"][0]["label"], "Row 1")
+        self.assertFalse(error.details["recovery"]["same_gesture_retry"])
+        self.assertFalse(error.details["recovery"]["end_of_list_proven"])
+
+    def test_swipe_observation_modes_do_not_disable_progress_verification(self):
+        for mode in ("none", "tree", "screenshot", "both"):
+            with self.subTest(mode=mode):
+                self.setUp()
+                self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
+                result = self.phone.swipe(observe=mode)
+                self.assertTrue(result["verified"])
+                self.assertEqual(result["attempts"], 1)
+                self.assertEqual(self.client.swipe_count, 1)
+                if mode == "none":
+                    self.assertNotIn("observation", result)
+                else:
+                    observed = result["observation"]
+                    self.assertIn("observation_id", observed)
+                    self.assertEqual("image" in observed, mode in ("screenshot", "both"))
+                    self.assertEqual("nodes" in observed, mode in ("tree", "both"))
+                self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 2)
+
+    def test_no_progress_with_observe_none_still_executes_bounded_verification(self):
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(observe="none"))
+        self.assertNotIn("observation", error.details)
+        self.assertTrue(error.details["action_executed"])
+        self.assertEqual(error.details["attempts"], 2)
+        self.assertEqual(self.client.swipe_count, 2)
+
+    def test_post_swipe_tree_failure_preserves_accepted_gesture_without_retry(self):
+        baseline = self.client.source()
+        fault = WDAError("stale element reference", "Application local.pid.0 is not running")
+        with patch.object(self.client, "source", side_effect=[baseline, fault]) as source:
+            error = self.assert_code("stale element reference", lambda: self.phone.swipe(observe="tree"))
+        self.assertEqual(source.call_count, 2)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual(self.phone.accepted_actions, 1)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["action_complete"])
+        self.assertIn("verification_required", error.details)
+
+    def test_post_swipe_screenshot_failure_retains_accepted_gesture_and_stops(self):
+        self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
+        original = self.client.request
+
+        def request(method, path, payload=None, timeout=None):
+            if path == "/screenshot":
+                raise WDAError("wda_unreachable", "Screenshot channel disconnected")
+            return original(method, path, payload, timeout)
+
+        with patch.object(self.client, "request", side_effect=request):
+            error = self.assert_code("wda_unreachable", lambda: self.phone.swipe(observe="both"))
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["action_complete"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual(self.phone.accepted_actions, 1)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
+
+    def test_uncertain_first_gesture_does_not_claim_an_accepted_action(self):
+        original = self.client.session
+
+        def session(method, path, payload=None, timeout=None):
+            if path == "/wda/dragfromtoforduration":
+                self.client.calls.append((method, path, payload))
+                raise WDAError("action_uncertain", "Gesture response timed out", uncertain=True)
+            return original(method, path, payload, timeout)
+
+        with patch.object(self.client, "session", side_effect=session):
+            error = self.assert_code("action_uncertain", lambda: self.phone.swipe())
+        self.assertTrue(error.uncertain)
+        self.assertFalse(error.details.get("action_executed", False))
+        self.assertEqual(self.phone.accepted_actions, 0)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
+
+    def test_uncertain_fallback_preserves_known_first_gesture_without_third_attempt(self):
+        original = self.client.session
+
+        def session(method, path, payload=None, timeout=None):
+            if path == "/wda/swipe":
+                self.client.calls.append((method, path, payload))
+                raise WDAError("action_uncertain", "Fallback response timed out", uncertain=True)
+            return original(method, path, payload, timeout)
+
+        with patch.object(self.client, "session", side_effect=session):
+            error = self.assert_code("action_uncertain", lambda: self.phone.swipe())
+        self.assertTrue(error.uncertain)
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["action_complete"])
+        self.assertEqual(self.phone.accepted_actions, 1)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
+
+    def test_no_progress_returns_requested_screenshot_for_inspection(self):
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(observe="both", max_attempts=1))
+        observed = error.details["observation"]
+        self.assertEqual(Path(observed["image"]["path"]).read_bytes(), self.client.screenshot)
+        self.assertEqual(observed["nodes"][0]["label"], "Row 1")
+        self.assertIn(observed["observation_id"], self.phone.snapshots)
+        self.assertEqual(error.details["attempts"], 1)
+
+    def test_explicitly_disabled_swipe_verification_is_not_reported_as_success(self):
+        result = self.phone.swipe(verify=False, observe="none")
+        self.assertTrue(result["action_executed"])
+        self.assertFalse(result["verified"])
+        self.assertIn("verification_required", result)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertNotIn("observation", result)
+
+    def test_exact_enabled_accepts_tree_strings_and_booleans_equally(self):
+        self.client.elements.append({**self.client.elements[0], "id": "disabled", "enabled": False})
+        for value, expected_id in ((True, "target"), ("true", "target"), (False, "disabled"), ("false", "disabled")):
+            with self.subTest(value=value):
+                result = self.phone.find({"label": "Target", "enabled": value})
+                self.assertEqual(result["matches"], 1)
+                self.assertEqual(result["elements"][0]["element_id"], expected_id)
+
+    def test_exact_enabled_rejects_guesses_before_device_query(self):
+        for value in ("TRUE", "yes", 1, None):
+            with self.subTest(value=value):
+                self.assert_code("invalid_selector", lambda: predicate({"label": "Target", "enabled": value}))
+        self.assertEqual(self.client.calls, [])
+
+    def test_exact_selector_rejects_nul_instead_of_silently_mismatching(self):
+        self.assert_code("invalid_selector", lambda: self.phone.find({"label": "a\x00b"}))
+        self.assertEqual(self.client.calls, [])
 
     def test_native_fallback_can_verify_progress(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 1")], [node("Row 2")]]
@@ -489,6 +624,54 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertFalse(result["coverage_verified"])
         self.assertEqual(self.client.swipe_count, 2)
+
+
+@unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "Apple Foundation requires macOS and clang")
+class FoundationPredicateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.probe = Path(cls.directory.name) / "predicate-probe"
+        built = subprocess.run(["clang", "-framework", "Foundation", str(Path(__file__).with_name("predicate_probe.m")), "-o", str(cls.probe)],
+                               capture_output=True, text=True, timeout=60)
+        if built.returncode:
+            raise AssertionError("Foundation predicate probe did not build: " + built.stderr)
+
+    def evaluate(self, cases):
+        result = subprocess.run([str(self.probe)], input=json.dumps(cases, ensure_ascii=False), capture_output=True,
+                                text=True, encoding="utf-8", timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_exact_text_literals_preserve_controls_quotes_and_literal_escapes(self):
+        values = ["第一行\n第二行", "literal\\n", "a'b", "a\\b", "a\\'b", "a\r\nb", "a\tb", "a\x01\x7fb",
+                  "一\u2028二\u2029三", "你好 👋 Café e\u0301", "100%@", "a' OR TRUEPREDICATE OR label == 'b"]
+        cases = []
+        for value in values:
+            query = predicate({"label": value})
+            cases.extend([{"predicate": query, "object": {"label": value}},
+                          {"predicate": query, "object": {"label": "different " + value}}])
+        for index, result in enumerate(self.evaluate(cases)):
+            with self.subTest(value=values[index // 2], same=index % 2 == 0):
+                self.assertTrue(result["parsed"], result.get("error"))
+                self.assertEqual(result["matched"], index % 2 == 0)
+
+    def test_real_newline_and_literal_backslash_n_select_different_objects(self):
+        cases = [{"predicate": predicate({"label": text}), "object": {"label": other}}
+                 for text, other in (("a\nb", "a\\nb"), ("a\\nb", "a\nb"))]
+        self.assertEqual(self.evaluate(cases), [{"parsed": True, "matched": False}, {"parsed": True, "matched": False}])
+
+    def test_enabled_tree_strings_boolean_filter_and_combined_fields_match_exactly(self):
+        cases = []
+        for enabled in (True, "true", False, "false"):
+            flag = enabled is True or enabled == "true"
+            query = predicate({"label": "返回\n上一页", "name": "back", "type": "Button", "enabled": enabled})
+            obj = {"label": "返回\n上一页", "name": "back", "type": "XCUIElementTypeButton", "enabled": flag}
+            cases.extend([{"predicate": query, "object": obj}, {"predicate": query, "object": {**obj, "enabled": not flag}}])
+        for index, result in enumerate(self.evaluate(cases)):
+            self.assertTrue(result["parsed"], result.get("error"))
+            self.assertEqual(result["matched"], index % 2 == 0)
 
 
 if __name__ == "__main__":

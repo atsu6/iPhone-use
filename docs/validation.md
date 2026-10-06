@@ -54,3 +54,21 @@ Python 3.9 的 stdlib unittest 覆盖真实 loopback HTTP、合成控件与独�
 恢复过程中还遇到 status.ready=true 但 XCTest Code 41（无 UI testing 操作权限）、前台 `local.pid.0` 的失效通道。只停止本插件已核验归属的 Runner / forward，再启动后恢复 READY。旧 Home 接口在这个失效状态下也返回成功；专用接口明确报告授权错误。setup skill 增加恢复步骤，并修复关闭转发后 TIME_WAIT 被误报为端口仍占用的问题。这次授权失效不被推定为 T01 当时的内部原因。
 
 三次提前 final 的原始日志结论与限制见 [model-termination-audit.md](model-termination-audit.md)。金融内容、设备/Team 标识和截图仅在仓库外私有目录；发布包只包含代码、公开 App 元数据和脱敏验证说明。
+
+## 0.1.2 的报错回归
+
+日期：2026-10-07（Asia/Shanghai）。150 项自动测试全部通过，包含真实 Apple Foundation NSPredicate 解析 / 匹配测试：真实换行、Unicode 分隔符、引号、反斜线及字面量反斜线 n 都精确匹配；NUL 无法可靠匹配，因此在请求设备前拒绝。另覆盖 swipe 所有输出选项、无进展错误和图像、操作后读取失败的执行证据、首次 / 第二次不确定手势不重放、嵌套 batch 参数诊断、只读恢复和异步恢复去重 / 归属 / 冷却 / PID 发布中断。
+
+| 本次真实设备检查 | 结果 | 单次工具时间样本 |
+| --- | --- | --- |
+| 源码 stdio READY | 16 tools、foreground / source / viewport / screenshot 证明与 MCP 图像通过 | 1.541 秒 |
+| 设置列表 `observe="none"` 滚动 | 内容变化得到核验，返回省略观察 | 2.703 秒 |
+| 不可滚动的隔空投送设置页 | 两种手势后返回 no_scroll_progress，action_executed=true、attempts=2、changed=false；附新观察和直接 MCP 图像，end_of_list_proven=false | 2.614 秒 |
+| Home 返回主屏幕 | SpringBoard 前台核验成功 | 0.815 秒（先前同轮样本） |
+| 异步恢复真实拥有的 Runner / forward | 注入 Code 41 到 READY 读取入口，触发真实归属核验、旧组停止、新组启动及重新 READY | 排队 0.157 秒；7.305 秒观察到 serving；随后 READY 1.106 秒 |
+
+恢复测试采用故障注入来稳定触发路径，不把它声明为自然故障再次复现；实际停止和启动的是本插件拥有的真机服务，没有重放用户操作。之前自然发生的 Code 41 / local.pid 故障证据见 0.1.1 记录。无进展真机测试使用设置页，未重跑金融列表；设置导航测试没有切换任何选项，最后返回主屏幕。
+
+这些时间不包含模型响应，也不是端到端业务评测。新增 skill 与协议提示改善恢复和继续执行，但没有对 DeepSeek 与其他模型做同输入对照，不能保证模型不再提前 final；归因边界见 [报错审计](tool-error-audit.md)。
+
+本机安装缓存 0.1.2 已通过独立 stdio smoke：initialize / tools/list / ping / READY、16 tools、完整截图证明和直接 MCP 图像均成功，READY 样本 1.683 秒。缓存内容与源代码暂存包逐文件一致；48 文件发布包检查未发现本机设备 / Team / 签名 bundle 配置，也不包含运行日志、截图、构建产物或 node_modules。

@@ -4,14 +4,24 @@
 
 ## 先区分错误
 
-- 工具未发现、schema 拒绝或参数转发错误：核对本地插件版本及 tool schema；未执行动作时可改用下面的代码入口。
+- 工具未发现、schema 拒绝或参数转发错误：核对本地插件版本及 tool schema；未知字段错误给出 `argument_path`、`unknown_fields`、`allowed_fields` 和 `action_executed=false`，据此修正一次调用。未执行动作且 MCP 绑定仍不可用时可改用下面的代码入口。不要把未知字段自动忽略后继续点击。
 - `device_busy`：另一操作持有共享锁。等待它结束，不另建会话或改 state directory 绕过锁。
 - `stale_observation`：页面保护拒绝了动作。重新观察和定位；它不是 MCP 传输错误，代码调用也应保留同样的校验。
 - `postcondition_failed` 且 `action_executed=true`：WDA 已接收动作，但目标状态没有核验成功。读真实当前状态并调整一个具体变量，不重试同一按钮循环。
+- 动作后读取失败且 `action_executed=true`、`action_complete=false`：至少一部分动作已接收，即使 `uncertain=false` 也不能重放整项操作。先核对页面、输入内容或提交记录，再决定哪些步骤仍需执行。
 - `uncertain=true`、timeout 或连接在动作后中断：动作可能已经生效。先读真实状态；对发送、提交、删除等操作不得因切换到代码入口就自动再执行。
+- `wda_foreground_unavailable`、`local.pid.0` 或 XCTest Code 41：WDA / XCTest 通道状态异常，和 selector/schema 不清楚不同。`wda_observe` 只返回读取错误及 READY 指引，不自动重启；调用 `wda_ready(screenshot=false)` 后按下面的恢复状态继续。
 - WDA 断线、手机锁定、签名或信任问题：回到 `iphone-wda-setup` 恢复 READY，不用代码跳过手机确认。
 
 Home 的历史故障是通用 `/wda/pressButton` 可返回 HTTP 200，而前台 App 没有变化。本版本的 Home 使用专用 `/wda/homescreen`，并在有界时间内核对 `com.apple.springboard`。200 本身仍不是成功证据；精确的 iOS / XCTest 内部失效原因需要额外诊断，不能仅从这次响应推定。
+
+## READY 的有界恢复
+
+`wda_ready` 默认 `recover=true`。遇临时失效前台时，只清理旧观察 / 会话并再读取一次；成功返回 `recovery.state="read_recovered"`。持续失效的前台或 XCTest 授权错误才尝试后台重启已核验归属的本插件 WDA 服务，复用匹配的有效构建。不会重放 Home、launch、点击、输入或失败的业务动作。
+
+`wda_recovering` 是未就绪状态，带有 `recovery.job_id`、`status_tool` / `status_arguments` 及下一次 READY 参数。用指定 job_id 调用 `wda_setup(action="status", job_id=...)`，检查返回 jobs 中该工作的 recovery_phase：stopping → starting → serving；serving 后重新调用 READY 并读取真实界面。Runner 是长期运行服务，工作可以保持 running，不能等待它变成 succeeded 才继续。恢复失败时读取失败原因和日志，而不是再启动同一工作。`recover=false` 用于禁止发起自动重启的诊断；仍可返回已经存在的恢复工作。
+
+自动恢复要求设备配置、当前 endpoint、worker 身份和实际端口监听归属均匹配。归属无法证明、外部 WDA、端口被其他服务占用或构建缺失会拒绝重启并返回手动步骤；不要按端口杀进程或换运行目录绕过检查。近期恢复有 120 秒冷却，按返回的 retry_after_seconds 检查原因，不连续重启。需要信任、解锁或启用 UI 自动化时由用户完成系统确认。恢复后先验当前状态，再继续未完成任务。
 
 ## 直接执行提供的脚本
 
@@ -56,6 +66,10 @@ finally:
 
 ## 滚动的特殊情形
 
+独立读取参数为 `mode="tree" / "screenshot" / "both"`；`wda_swipe` 的输出参数为 `observe="none" / "tree" / "screenshot" / "both"`。none 省去返回观察，`verify=true` 仍读取并检查区域变化。调试时保留 tree 或 both，避免为了省输出又另调观察。`verify=false` 是显式关闭进展检查，工具不能证明这次手势成功滚动。
+
 自选 region 的节点校验只比较区域内内容；区域外轮播更新可以正常滚动。区域内轮播、价格或列表异步刷新仍可能使观察失效，这时选稳定列表区域并用新的 tree / both 观察。确已确认默认区域覆盖目标列表时，可调用默认区域的 `wda_swipe`，保留进展验证并回读新增行。截图上的“看起来没变化”不能作为复用旧 ID 的依据。
+
+`no_scroll_progress` 已执行有界手势，返回 `action_executed=true`、`verified=false`、`changed=false` 以及所选输出模式的新观察；`recovery.end_of_list_proven=false` 明确表示尚未证明到底。若是总览页，点击实际列表入口；若是边界，核对终点和条数；否则辨认浮层、自绘内容或改选稳定区域。相同手势无进展不能据此报告无数据、全量完成，也不能盲目增加尝试次数。
 
 一个工具恢复工作后继续完成剩余任务和最终交付。代码调用成功、Home 核验成功或某 App 已读完都只是阶段完成，不能提前结束跨 App 任务。

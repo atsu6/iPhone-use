@@ -14,7 +14,12 @@
 | build succeeded，但 HTTP 不可达 | Runner 测试是否仍在运行、USB 转发进程及本机端口 | 用 status 分开确认运行与转发，再 start 恢复；不把 BUILD SUCCEEDED 当 READY。 |
 | 端口冲突 | 是否已有正确设备的转发或无关程序 | 正确转发可复用；否则配置空闲的本机端口。不要杀掉归属不明的进程。 |
 | HTTP status 可达，会话或 source 失败 | 服务对应的设备、WDA session、设备锁屏 / 测试进程 | 先读取错误与状态，必要时重建会话 / 重启 Runner；重新验有效视口与当前观察。 |
+| stale element reference 含 local.pid.0 / wda_foreground_unavailable | WDA / XCTest 是否能解析当前真实前台，不能只看 status.ready | 调用 wda_ready；只重读一次会话 / 界面，持续故障再按 recovery 跟踪已核验归属的后台服务恢复。旧观察和元素 ID 作废。 |
+| XCTDaemonErrorDomain Code=41 / Not authorized for performing UI testing actions | 测试进程授权状态及手机开发者设置 | 调用 wda_ready 跟踪恢复；仍失败时用户检查解锁、开发者模式 / 启用 UI 自动化及信任提示，不连续重试按键。 |
+| wda_recovering，ready=false | recovery.job_id 对应的 setup status 和日志 | 轮询同一工作至 recovery_phase=serving，再重新验 READY。Runner 为长期服务，可以保持 running；不能重复 start 或等待 succeeded。 |
+| wda_recovery_required，recovery.state=cooldown / manual | 冷却剩余时间、配置、worker 和监听端口归属、有效构建 | 120 秒冷却期间按 retry_after_seconds 诊断；归属不明或外部服务不得按端口杀进程，按返回的手动步骤恢复。 |
 | HTTP timeout 出现在点击、输入或提交后 | 新观察中的实际页面 / 字段 / 消息 | 先只读复核；结果不确定时报告 uncertain。不能自动重放可能已经生效的操作。 |
+| action_executed=true，action_complete=false | 至少一个已接收动作后的真实状态 | 即使 uncertain=false 也先回读，不重放完整输入、提交或批次；通道恢复只恢复读取 / 控制能力，不代替业务验收。 |
 | App 要求登录、密码或生物识别 | 目标 App 当前登录页及正常入口 | 用户自己完成认证，之后重新 observe 核对目标页；READY 不能代表 App 已登录，也不能绕过保护。 |
 | WDA 可用，但控件树缺少内容 | 页面是否自绘、受保护或树是否截断 | 截图核对；可定位元素不足时在当前观察坐标下操作，仍无法观察则报告具体限制。 |
 

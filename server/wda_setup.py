@@ -34,6 +34,8 @@ WDA_REPOSITORY = "https://github.com/appium/WebDriverAgent.git"
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_STATE = Path.home() / ".local/share/iphone-use-wda"
 ACTIVE_STATES = {"queued", "running"}
+RECOVERY_COOLDOWN_SECONDS = 120
+PID_PUBLICATION_GRACE_SECONDS = 5
 
 
 def _now():
@@ -313,7 +315,7 @@ class SetupManager:
         except (ValueError, KeyError, AttributeError):
             return {"known": False, "note": "Could not decode the built provisioning profile; verify signing in Xcode."}
 
-    def _owned(self, job):
+    def _owned(self, job, *, base_url=None):
         pid = job.get("pid")
         if not isinstance(pid, int) or pid <= 1 or not job.get("owner_token"):
             return False
@@ -330,7 +332,182 @@ class SetupManager:
         # Private job metadata identifies the original worker even when this
         # manager now runs from a different Codex install or upgraded cache.
         marker = f" {entrypoint} --worker {self.state_dir} {job['id']} {job['owner_token']}"
-        return process["ok"] and marker in command and (marker + " " in command or command.rstrip().endswith(marker))
+        owned = process["ok"] and marker in command and (marker + " " in command or command.rstrip().endswith(marker))
+        if base_url is not None:
+            # Old installs did not record base_url, but every worker argv did.
+            # Recovery must prove which endpoint that live worker owns.
+            endpoint = marker + " --base-url " + base_url
+            owned = owned and (command.rstrip().endswith(endpoint) or endpoint + " " in command)
+        return owned
+
+    def _listener_pids(self, timeout=3):
+        """Return proven loopback listeners, or None when proof is unavailable.
+
+        lsof is used only for ownership evidence; a port number is never a
+        signal target. Refuse wildcard/non-loopback listeners on the same port.
+        """
+        query = _run(["lsof", "-nP", f"-iTCP:{self.port}", "-sTCP:LISTEN", "-Fpn"], timeout=timeout)
+        if not query["ok"]:
+            return [] if query.get("code") == 1 and not query.get("stdout") and not query.get("stderr") else None
+        current_pid, listeners = None, set()
+        accepted = {f"127.0.0.1:{self.port}", f"[::1]:{self.port}"}
+        for line in query["stdout"].splitlines():
+            if line.startswith("p"):
+                try:
+                    current_pid = int(line[1:])
+                except ValueError:
+                    return None
+            elif line.startswith("n"):
+                if not current_pid or current_pid <= 1 or line[1:] not in accepted:
+                    return None
+                listeners.add(current_pid)
+        return sorted(listeners) if listeners else None
+
+    def _owns_listener(self, job):
+        if not self._owned(job, base_url=self.base_url):
+            return False
+        listeners = self._listener_pids()
+        if not listeners:
+            return False
+        try:
+            return (all(os.getpgid(pid) == job["pid"] for pid in listeners)
+                    and self._owned(job, base_url=self.base_url))
+        except (ProcessLookupError, PermissionError):
+            return False
+
+    def _matching_job(self, job, config):
+        return (isinstance(job.get("config"), dict)
+                and _fingerprint(job["config"]) == _fingerprint(config)
+                and job["config"].get("local_port") == self.port
+                and job.get("base_url", self.base_url) == self.base_url)
+
+    def _require_build(self, config):
+        marker = _read_json(self.state_dir / "build.json", {})
+        if marker.get("config_fingerprint") != _fingerprint(config) or marker.get("commit") != WDA_COMMIT:
+            raise ValueError("Run build successfully for this configuration before start; start uses test-without-building.")
+
+    @staticmethod
+    def _publishing_pid(job):
+        """Only a newly queued job may briefly await Popen's PID publication."""
+        if job.get("state") != "queued" or job.get("pid") is not None:
+            return False
+        try:
+            created = dt.datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
+            elapsed = (dt.datetime.now(dt.timezone.utc) - created).total_seconds()
+            return 0 <= elapsed <= PID_PUBLICATION_GRACE_SECONDS
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return False
+
+    def pending_recovery(self):
+        """Read an existing startup recovery; never queue or stop anything."""
+        config = self.config
+        jobs = [_read_json(path, {}) for path in (self.state_dir / "jobs").glob("*.json")]
+        for job in sorted((job for job in jobs if isinstance(job, dict)), key=lambda item: str(item.get("created_at", "")), reverse=True):
+            if (job.get("action") == "recover" and job.get("state") in ACTIVE_STATES
+                    and job.get("recovery_phase") != "serving" and self._matching_job(job, config)
+                    and (self._publishing_pid(job) or self._owned(job, base_url=self.base_url))):
+                return {"state": job["state"], "phase": job.get("recovery_phase", "starting"),
+                        "job_id": job["id"], "recovery_of": job.get("recovery_of")}
+        return None
+
+    def recover(self):
+        """Queue one bounded restart of a verified owned service, never external WDA.
+
+        Called by READY after classified persistent UI failures. This method
+        only examines local ownership and starts an asynchronous worker; it
+        performs no phone action and does not wait for Xcode.
+        """
+        try:
+            with self._lock():
+                config = self.config
+                self._validate_config(config)
+                jobs = self._jobs()
+                recoveries = [job for job in jobs if job.get("action") == "recover" and self._matching_job(job, config)]
+                for job in reversed(recoveries):
+                    if (job.get("state") in ACTIVE_STATES and job.get("recovery_phase") != "serving"
+                            and (self._publishing_pid(job) or self._owned(job, base_url=self.base_url))):
+                        return {"ok": True, "job_id": job["id"], "already_running": True,
+                                "job": self._job_status(job), "recovery": {"state": job["state"], "job_id": job["id"], "recovery_of": job.get("recovery_of")},
+                                "next_steps": ["Poll wda_setup status with this job_id, then verify wda_ready again. Do not queue another restart."]}
+                for job in reversed(recoveries):
+                    try:
+                        last_attempt = max(dt.datetime.fromisoformat(job[key].replace("Z", "+00:00"))
+                                           for key in ("created_at", "service_started_at", "completed_at") if job.get(key))
+                        elapsed = (dt.datetime.now(dt.timezone.utc) - last_attempt).total_seconds()
+                    except (ValueError, TypeError, KeyError, AttributeError):
+                        continue
+                    if 0 <= elapsed < RECOVERY_COOLDOWN_SECONDS:
+                        return {"ok": False, "error": "A recent recovery attempt is still within the restart cooldown.",
+                                "job_id": job["id"], "job": self._job_status(job),
+                                "recovery": {"state": "cooldown", "job_id": job["id"], "retry_after_seconds": max(1, int(RECOVERY_COOLDOWN_SECONDS - elapsed + 1))},
+                                "next_steps": ["Inspect the recovery job and its log, unlock the iPhone and check Developer Mode / Enable UI Automation. Do not repeatedly restart WDA."]}
+                targets = [job for job in jobs if (job.get("action") == "start" or
+                                                  (job.get("action") == "recover" and job.get("recovery_phase") == "serving"))
+                           and job.get("state") in ACTIVE_STATES
+                           and self._matching_job(job, config) and self._owns_listener(job)]
+                if len(targets) != 1:
+                    return {"ok": False, "error": "The current WDA listener is not uniquely owned by a matching live plugin start job; automatic recovery refused.",
+                            "recovery": {"state": "manual"},
+                            "next_steps": ["Preserve external WDA services. Ask their owner to restart them, or inspect wda_setup status and start a service owned by this plugin."]}
+                self._source(config)
+                self._require_build(config)
+                if sys.platform != "darwin" or not all(shutil.which(name) for name in ("xcodebuild", "node", "npm")):
+                    raise ValueError("Recovery requires macOS, full Xcode and supported Node.js / npm.")
+                if not _node_supported(_run(["node", "--version"])["stdout"]):
+                    raise ValueError("USB forwarding requires Node.js 20.19+ / 22.12+ / 24+; update Node.js before recovery.")
+                target = targets[0]
+                snapshot = {key: target.get(key) for key in ("id", "pid", "owner_token", "worker_entrypoint")}
+                snapshot.update(config_fingerprint=_fingerprint(config), base_url=self.base_url)
+                result = self._create_job("recover", config, recovery_target=snapshot)
+                result["recovery"] = {"state": result.get("job", {}).get("state", "failed"),
+                                      "job_id": result.get("job_id"), "recovery_of": target["id"]}
+                return result
+        except (ValueError, OSError, KeyError) as error:
+            return {"ok": False, "error": _redact(error), "recovery": {"state": "manual"},
+                    "next_steps": _diagnose(str(error)) or ["Inspect wda_setup status and correct the reported prerequisite before recovery."]}
+
+    def _group_running(self, group, timeout=2):
+        members = _run(["ps", "-ax", "-o", "pid=,pgid=,stat="], timeout=timeout)
+        if not members["ok"]:
+            return True
+        for line in members["stdout"].splitlines():
+            try:
+                _, pgid, state = line.split()[:3]
+                if int(pgid) == group and not state.startswith("Z"):
+                    return True
+            except (ValueError, IndexError):
+                continue
+        return False
+
+    def _stop_recovery_target(self, job):
+        """Revalidate the private target snapshot immediately before signalling."""
+        snapshot = job.get("recovery_target", {})
+        target = _read_json(self._job_path(snapshot.get("id")), {})
+        if (not (target.get("action") == "start" or
+                 (target.get("action") == "recover" and target.get("recovery_phase") == "serving"))
+                or target.get("state") not in ACTIVE_STATES
+                or any(target.get(key) != snapshot.get(key) for key in ("id", "pid", "owner_token", "worker_entrypoint"))
+                or not self._matching_job(target, job["config"])
+                or _fingerprint(self.config) != _fingerprint(job["config"])
+                or snapshot.get("config_fingerprint") != _fingerprint(job["config"])
+                or snapshot.get("base_url") != self.base_url or not self._owns_listener(target)):
+            raise ValueError("Recovery target ownership or listener changed; no process was signalled.")
+        os.killpg(target["pid"], signal.SIGTERM)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            listeners = self._listener_pids(timeout=min(3, max(0.01, deadline - time.monotonic())))
+            if listeners is None:
+                raise ValueError("Cannot verify the old listener exited; recovery will not start another forward.")
+            if not listeners and time.monotonic() < deadline and not self._group_running(target["pid"], timeout=min(2, max(0.01, deadline - time.monotonic()))):
+                return
+            if listeners:
+                try:
+                    if any(os.getpgid(pid) != target["pid"] for pid in listeners):
+                        raise ValueError("Another service now owns the port; recovery preserved it and stopped.")
+                except ProcessLookupError:
+                    pass
+            time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        raise ValueError("The owned WDA group or listener did not exit within 10 seconds; recovery stopped without killing other processes.")
 
     def _job_path(self, job_id):
         if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
@@ -339,7 +516,7 @@ class SetupManager:
 
     def _job_status(self, job):
         result = dict(job)
-        if job.get("state") in ACTIVE_STATES and job.get("pid") and not self._owned(job):
+        if job.get("state") in ACTIVE_STATES and not (self._publishing_pid(job) or self._owned(job)):
             result["state"] = "interrupted"
             result["error"] = "The recorded worker no longer exists or its ownership cannot be verified. Start a new job; no unrelated process was signalled."
         log = self.state_dir / "logs" / (job["id"] + ".log")
@@ -351,6 +528,7 @@ class SetupManager:
             tail = ""
         result.pop("owner_token", None)
         result.pop("config", None)
+        result.pop("recovery_target", None)
         result["log_path"] = str(log)
         result["log_tail"] = _redact("\n".join(tail.splitlines()[-35:]))
         result["next_steps"] = _diagnose(tail + " " + result.get("error", ""))
@@ -362,18 +540,22 @@ class SetupManager:
                 del self._workers[job_id]
         return sorted((job for path in (self.state_dir / "jobs").glob("*.json")
                        if (job := _read_json(path)) and isinstance(job, dict) and job.get("id")),
-                      key=lambda job: job.get("created_at", ""))
+                      key=lambda job: str(job.get("created_at", "")))
 
-    def _create_job(self, action, config):
+    def _create_job(self, action, config, *, recovery_target=None):
         for job in self._jobs():
             if job.get("state") in ACTIVE_STATES and self._owned(job):
+                if action == "recover" and recovery_target and job["id"] == recovery_target["id"]:
+                    continue
                 if action == "start" and job["action"] == "start":
                     return {"ok": True, "already_running": True, "job": self._job_status(job)}
                 raise ValueError(f"An owned {job['action']} job is already running. Check status or stop that job before {action}.")
         job_id = uuid.uuid4().hex
         job = {"id": job_id, "action": action, "state": "queued", "created_at": _now(),
                "owner_token": uuid.uuid4().hex, "pid": None, "config": config,
-               "worker_entrypoint": str(Path(__file__).resolve())}
+               "worker_entrypoint": str(Path(__file__).resolve()), "base_url": self.base_url}
+        if recovery_target is not None:
+            job.update(recovery_of=recovery_target["id"], recovery_target=recovery_target, recovery_phase="queued")
         path = self._job_path(job_id)
         _write_json(path, job)
         log_path = self.state_dir / "logs" / (job_id + ".log")
@@ -463,9 +645,7 @@ class SetupManager:
                     if healthy["ready"]:
                         return {"ok": True, "already_ready": True, "service": healthy,
                                 "note": "Reusing reachable WDA. This plugin does not own or stop that external service."}
-                    marker = _read_json(self.state_dir / "build.json", {})
-                    if marker.get("config_fingerprint") != _fingerprint(config) or marker.get("commit") != WDA_COMMIT:
-                        raise ValueError("Run build successfully for this configuration before start; start uses test-without-building.")
+                    self._require_build(config)
                     if not shutil.which("node") or not shutil.which("npm"):
                         raise ValueError("Install supported Node.js and npm for the USB forward.")
                     if not _node_supported(_run(["node", "--version"])["stdout"]):
@@ -566,7 +746,7 @@ def _worker(state_dir, job_id, owner_token, base_url):
                 run(["git", "-C", str(source), "checkout", "--detach", "FETCH_HEAD"])
                 manager._source({"source_dir": str(source)})
             job["source_dir"] = str(source)
-        elif action in {"build", "start"}:
+        elif action in {"build", "start", "recover"}:
             manager._validate_config(config)
             source = manager._source(config)
             if action == "build":
@@ -576,6 +756,15 @@ def _worker(state_dir, job_id, owner_token, base_url):
                 run(manager._build_command(config, "build-for-testing"), cwd=source)
                 _write_json(manager.state_dir / "build.json", {"config_fingerprint": _fingerprint(config), "commit": WDA_COMMIT, "built_at": _now()})
             else:
+                if action == "recover":
+                    # /status.ready cannot verify XCTest authorization. This
+                    # path deliberately never uses start's healthy shortcut.
+                    manager._require_build(config)
+                    job["recovery_phase"] = "stopping"
+                    _write_json(path, job)
+                    manager._stop_recovery_target(job)
+                    job["recovery_phase"] = "starting"
+                    _write_json(path, job)
                 forward = manager.state_dir / "runtime/forward"
                 forward.mkdir(exist_ok=True, mode=0o700)
                 for name in ("package.json", "package-lock.json", "forward.mjs"):
@@ -590,8 +779,17 @@ def _worker(state_dir, job_id, owner_token, base_url):
                 if forward_child.poll() is not None:
                     raise RuntimeError("USB forward failed to start; inspect the log tail.")
                 xcode = launch(manager._build_command(config, "test-without-building"), source)
+                next_status_probe = 0
                 # Keep both children owned and watch either side fail.
                 while not stopping and all(child.poll() is None for child in (forward_child, xcode)):
+                    if action == "recover" and job.get("recovery_phase") == "starting" and time.monotonic() >= next_status_probe:
+                        # The old listener/group exited before these children
+                        # were launched. A ready status now belongs to the new
+                        # service; READY still verifies current UI authority.
+                        if manager._probe_status().get("ready"):
+                            job.update(recovery_phase="serving", service_started_at=_now())
+                            _write_json(path, job)
+                        next_status_probe = time.monotonic() + 1
                     time.sleep(0.25)
                 if stopping:
                     raise InterruptedError("Stopped by owner request.")

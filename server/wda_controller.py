@@ -2,6 +2,7 @@
 import base64
 import collections
 import datetime as dt
+from functools import wraps
 import hashlib
 import json
 import math
@@ -33,9 +34,30 @@ def integer(value, name, low, high):
     return value
 
 
+def action_result(function):
+    @wraps(function)
+    def wrapped(self,*args,**kwargs):
+        before=self.accepted_actions
+        try:return function(self,*args,**kwargs)
+        except WDAError as error:
+            if self.accepted_actions>before:
+                error.details.update(action_executed=True,action_complete=False)
+                if function.__name__=="swipe":
+                    error.details.setdefault("attempts",self.accepted_actions-before)
+                error.details.setdefault("verification_required","At least one phone action was accepted before the error. Read actual state; do not automatically replay the operation.")
+            raise
+    return wrapped
+
+
+def predicate_literal(value):
+    # NSPredicate rejects literal line breaks inside quoted strings. Its Unicode
+    # escapes preserve exact text, including a literal backslash followed by n.
+    return "".join("\\\\" if c=="\\" else "\\'" if c=="'" else f"\\u{ord(c):04x}" if ord(c)<32 or ord(c)==127 or c in "\u2028\u2029" else c for c in value)
+
+
 def predicate(selector):
-    if not isinstance(selector,dict) or not selector or set(selector)-{"label","name","value","type","predicate"}:
-        fail("invalid_selector", "Use a nonempty selector with label/name/value/type, or a WDA predicate.")
+    if not isinstance(selector,dict) or not selector or set(selector)-{"label","name","value","type","enabled","predicate"}:
+        fail("invalid_selector", "Use label/name/value/type/enabled, or a standalone WDA predicate.")
     if "predicate" in selector:
         if len(selector)!=1:
             fail("invalid_selector", "predicate cannot be mixed with exact fields.")
@@ -45,11 +67,19 @@ def predicate(selector):
         return result
     clauses=[]
     for key,value in selector.items():
+        if key=="enabled":
+            if not isinstance(value,bool) and value not in ("true","false"):
+                fail("invalid_selector","enabled must be a boolean or the exact tree string true/false.")
+            literal="true" if value is True or value=="true" else "false"
+            clauses.append("enabled == "+literal)
+            continue
         if not isinstance(value,str) or not 1 <= len(value) <= 1000:
             fail("invalid_selector", "Selector fields must be nonempty strings up to 1000 characters.")
+        if "\x00" in value:
+            fail("invalid_selector", "Exact selector strings cannot contain NUL; NSPredicate cannot match that character reliably.")
         if key=="type" and not value.startswith("XCUIElementType"):
             value="XCUIElementType"+value
-        escaped=value.replace("\\", "\\\\").replace("'", "\\'")
+        escaped=predicate_literal(value)
         clauses.append(f"{key} == '{escaped}'")
     return " AND ".join(clauses)
 
@@ -59,6 +89,12 @@ class PhoneController:
         self.client, self.state_dir = client, Path(state_dir)
         self.snapshots=collections.OrderedDict()
         self.tool_records=collections.deque(maxlen=500)
+        self.accepted_actions=0
+
+    def post(self,path,payload,timeout=None,session=True):
+        result=self.client.session("POST",path,payload,timeout=timeout) if session else self.client.request("POST",path,payload,timeout=timeout)
+        self.accepted_actions+=1
+        return result
 
     def viewport(self):
         v=self.client.session("GET", "/window/size")
@@ -69,7 +105,10 @@ class PhoneController:
 
     def active_app(self,timeout=None):
         result=self.client.request("GET", "/wda/activeAppInfo",timeout=timeout).get("value") or {}
-        return result.get("bundleId")
+        app=result.get("bundleId")
+        if not isinstance(app,str) or not app or app.startswith("local.pid."):
+            fail("wda_foreground_unavailable","WDA cannot resolve a running foreground application. This is a WDA/XCTest channel problem, not a selector or schema error.",foreground_app=app,recovery={"tool":"wda_ready","arguments":{"screenshot":False},"replay_action":False})
+        return app
 
     def tree(self, include_invisible=False, expensive_visibility=False):
         path="/source?format=xml"
@@ -253,6 +292,7 @@ class PhoneController:
             result["verification_required"]="Read the result and check the intended page or business state. HTTP success alone is insufficient."
         return result
 
+    @action_result
     def tap(self,selector=None,x=None,y=None,observation_id=None,expect=None,observe="tree"):
         if observe not in ("none","tree","screenshot","both"):
             fail("invalid_argument","Invalid observation mode.")
@@ -261,36 +301,38 @@ class PhoneController:
             if x is not None or y is not None:
                 fail("invalid_argument","Choose selector or coordinates.")
             path=self.target(selector)
-            self.client.session("POST",path+"/click",{})
+            self.post(path+"/click",{})
         else:
             finite(x,"x");finite(y,"y")
             viewport=self.guard(observation_id)
             if x>=viewport["width"] or y>=viewport["height"]:
                 fail("invalid_argument","Coordinates are outside the iPhone viewport.")
-            self.client.session("POST","/wda/tap",{"x":x,"y":y})
+            self.post("/wda/tap",{"x":x,"y":y})
         return self.after(expect,observe)
 
+    @action_result
     def launch_app(self,bundle_id,expect=None,observe="tree"):
         if not isinstance(bundle_id,str) or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+",bundle_id):
             fail("invalid_argument","Use the app's verified bundle ID.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         if expect:predicate(expect)
-        self.client.session("POST","/wda/apps/activate",{"bundleId":bundle_id},timeout=45)
+        self.post("/wda/apps/activate",{"bundleId":bundle_id},timeout=45)
         if self.active_app()!=bundle_id:
             fail("postcondition_failed","The requested app is not foreground. Check login or system prompts.")
         result=self.after(expect,observe);result["foreground_verified"]=True
         return result
 
+    @action_result
     def press_button(self,name,observe="tree"):
         if name not in ("home","volumeup","volumedown"):
             fail("invalid_argument","Supported buttons: home, volumeup, volumedown.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         if name!="home":
-            self.client.session("POST","/wda/pressButton",{"name":name})
+            self.post("/wda/pressButton",{"name":name})
             return self.after(observe=observe)
         # XCTest pressButton can acknowledge Home without changing foreground.
         # WDA's dedicated endpoint activates the system application instead.
-        self.client.request("POST","/wda/homescreen",{})
+        self.post("/wda/homescreen",{},session=False)
         deadline=time.monotonic()+2
         app=None
         try:
@@ -307,6 +349,7 @@ class PhoneController:
             exc.details.update({"action_executed":True,"home_foreground_verified":app=="com.apple.springboard","verification_required":"Home was requested. Inspect fresh state before another action; do not automatically replay."})
             raise
 
+    @action_result
     def type_text(self,selector,text,allow_newlines=False,submit=False,replace=True,observe="tree"):
         if not isinstance(text,str) or not 1<=len(text)<=10000 or "\x00" in text:
             fail("invalid_argument","text must have 1..10000 characters without NUL.")
@@ -318,19 +361,19 @@ class PhoneController:
         if ("\n" in text or "\r" in text) and kind!="XCUIElementTypeTextView":
             fail("newline_unsafe","Line breaks are allowed only for a verified TextView.")
         before=self.client.session("GET",path+"/attribute/value") or ""
-        self.client.session("POST",path+"/click",{})
+        self.post(path+"/click",{})
         if replace:
-            self.client.session("POST",path+"/clear",{})
+            self.post(path+"/clear",{})
             cleared=self.client.session("GET",path+"/attribute/value")
             # Empty fields may report their placeholder; only use replace expected text for final readback.
         expected=text if replace else str(before)+text
-        self.client.session("POST",path+"/value",{"text":text,"frequency":30})
+        self.post(path+"/value",{"text":text,"frequency":30})
         actual=self.client.session("GET",path+"/attribute/value")
         if actual!=expected:
             fail("input_mismatch","Typed text did not round-trip exactly. Do not submit or blindly type it again.",expected_length=len(expected),actual_length=len(str(actual or "")))
         result={"action_executed":True,"verified":True,"exact_readback":True,"characters":len(text),"submitted":False}
         if submit:
-            self.client.session("POST","/wda/keys",{"value":["\n"]})
+            self.post("/wda/keys",{"value":["\n"]})
             result.update({"submitted":True,"submission_verified":False,"verification_required":"Inspect the submission result; exact field text only verified input before submission."})
         if observe!="none":result["observation"]=self.observe(observe)
         return result
@@ -345,8 +388,23 @@ class PhoneController:
             fail("invalid_argument","Gesture region is outside viewport.")
         return region
 
-    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=True,max_attempts=2):
+    def scroll_observation(self,nodes,viewport,mode):
+        if mode=="none":return None
+        if mode in ("screenshot","both"):
+            observed=self.observe("screenshot")
+            if mode=="screenshot":return observed
+            # Reuse the verification tree. Do not take a second XML snapshot.
+            self.snapshots[observed["observation_id"]].update(nodes=nodes,signature=self.signature(nodes))
+        else:
+            app=self.active_app()
+            observed={"observation_id":self.remember(nodes,viewport,app),"viewport":viewport,"app":app}
+        observed.update(nodes=nodes[:100],total_nodes=len(nodes),truncated=len(nodes)>100)
+        return observed
+
+    @action_result
+    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=True,max_attempts=2,observe="tree"):
         if direction not in ("up","down","left","right"):fail("invalid_argument","Invalid direction.")
+        if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         integer(max_attempts,"max_attempts",1,2)
         if expect:predicate(expect)
         before,viewport=self.guard_region(observation_id,region) if region is not None else self.tree()
@@ -358,17 +416,25 @@ class PhoneController:
         for attempt in range(max_attempts if verify else 1):
             strategy="short_drag" if attempt==0 else "native_swipe"
             if attempt==0:
-                self.client.session("POST","/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
+                self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
             else:
-                self.client.session("POST","/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
-            if not verify:return {"action_executed":True,"verified":False,"strategy":strategy}
+                self.post("/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
+            if not verify:
+                result={"action_executed":True,"verified":False,"strategy":strategy,"verification_required":"Read actual scroll content and direction; progress verification was explicitly disabled."}
+                if observe!="none":result["observation"]=self.observe(observe)
+                return result
             after,v=self.tree();changed=self.signature(after,area)!=baseline
             if changed:
-                result={"action_executed":True,"verified":True,"changed":True,"verification_scope":"content/geometry changed within gesture region; inspect correct direction and coverage", "attempts":attempt+1,"strategy":strategy,
-                        "observation":{"observation_id":self.remember(after,v,self.active_app()),"viewport":v,"nodes":after[:100],"truncated":len(after)>100}}
+                result={"action_executed":True,"verified":True,"changed":True,"verification_scope":"content/geometry changed within gesture region; inspect correct direction and coverage", "attempts":attempt+1,"strategy":strategy}
+                observed=self.scroll_observation(after,v,observe)
+                if observed:result["observation"]=observed
                 if expect:result["postcondition"]=self.wait(expect)
                 return result
-        fail("no_scroll_progress","Content/geometry stayed unchanged after bounded gesture alternatives. Inspect a screenshot, select a different region, or check for a modal. Do not repeat the same gesture.",attempts=max_attempts)
+        details={"action_executed":True,"verified":False,"changed":False,"attempts":max_attempts,"region":area,
+                 "recovery":{"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, modal or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
+        observed=self.scroll_observation(after,v,observe)
+        if observed:details["observation"]=observed
+        fail("no_scroll_progress","Gestures executed but exposed content/geometry did not change. The page may be an overview, boundary, blocked region or custom-rendered list. No progress does not prove an empty or complete list; inspect returned state and change the actual target instead of repeating.",**details)
 
     def scroll_find(self,selector,direction="up",max_swipes=6):
         predicate(selector);integer(max_swipes,"max_swipes",0,10)
