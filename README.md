@@ -2,6 +2,8 @@
 
 给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App、核验输入与滚动，把常见连续动作合成一次 MCP 调用。
 
+另有独立的[截图视觉版插件](plugins/iphone-use-wda-vision/README.md)，基于 v0.1.4 复制，默认用截图确定并核验每次操作；XML 仅作为页面数据读取的可选工具。两版可共享已有 WDA 配置和运行通道。
+
 **macOS + 完整 Xcode + USB 连接的真实 iPhone。** Python 3.9+ 运行 MCP，Node.js 20.19+/22.12+/24+ 和 npm 10+ 负责 USB 转发。无需启动 Appium Server；WDA 本身通过 XCTest 执行操作。WDA 固定在 16.14.0 的已验证提交，下载与签名构建均保留在本机运行目录。
 
 ## 安装到 Codex

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "iphone-use-wda-vision",
+  "version": "0.1.1",
+  "description": "Efficient screenshot-first WDA iPhone control and guided setup for Codex.",
+  "author": {
+    "name": "ZHONG XIN"
+  },
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "iPhone Use WDA Vision",
+        "shortDescription": "Visual iPhone control",
+        "longDescription": "Efficient visual iPhone control with direct screenshot-grounded actions and real multi-step batches. No screenshot hashes, expiry gates or redundant pre-action captures; optional XML reads page data only.",
+        "developerName": "ZHONG XIN",
+        "category": "Productivity",
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg",
+        "defaultPrompt": [
+          "用视觉版 WDA 帮我安装并验证 iPhone READY。",
+          "用 WDA Vision 根据截图完成我的 iPhone 任务，操作后查看截图核验。"
+        ]
+      }
+    }
+  }
+}

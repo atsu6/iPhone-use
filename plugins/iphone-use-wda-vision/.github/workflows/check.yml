@@ -12,4 +12,3 @@ jobs:
         with:
           node-version: '24'
       - run: sh scripts/check.sh
-      - run: sh plugins/iphone-use-wda-vision/scripts/check.sh

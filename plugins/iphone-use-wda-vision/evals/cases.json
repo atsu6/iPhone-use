@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "title": "iPhone WDA Vision 合成场景评测",
+  "privacy": "仅示例 App、合成文字和合成记录；不使用生产联系人、凭据或用户账户数据。",
+  "provenance": "针对从 iphone-use-wda 0.1.4 复制的视觉插件，0.1.1 更新为截图优先和效率优先契约，不继承原插件成绩。",
+  "execution": "人工 / agent 场景规范，JSON 本身不执行设备动作。自动 fixture 与真机、业务任务结果分别记录。",
+  "status": "场景未执行；实际自动 / 只读预检结果另记 docs/validation.md。",
+  "cases": [
+    {
+      "id": "V01",
+      "task": "复用已有 WDA 并验截图 READY",
+      "expected_tools": [
+        "wda_vision_ready"
+      ],
+      "acceptance": [
+        "健康配置和服务直接复用，不重复 discover / build / install",
+        "READY 默认 recover=true、始终截图、无 XML",
+        "直接看 READY 截图用于下一步，不立即重复 observe",
+        "iPhone 镜像运行本身不拒绝 READY，按实际设备状态判断",
+        "recovering 查询同一 job；status jobs 为数组，service.ready 或 serving 后再 READY，不等 Runner succeeded"
+      ]
+    },
+    {
+      "id": "V02",
+      "task": "复用已看过的截图直接坐标点击与长按",
+      "expected_tools": [
+        "wda_vision_observe",
+        "wda_vision_tap",
+        "wda_vision_long_press"
+      ],
+      "fixture": {
+        "image_width": 1170,
+        "image_height": 2532,
+        "viewport_width": 390,
+        "viewport_height": 844
+      },
+      "acceptance": [
+        "按 image.pixel_to_point 转换设备点，拒绝 Mac / 缩略图坐标",
+        "observe 各读取一次截图 / viewport / 前台，共 3 GET",
+        "observation_id 可省略、跨进程或旧时间记录不阻止执行",
+        "时钟、光标、动画不触发哈希拒绝或分钟窗口等待",
+        "动作前无重复截图和前台读取，已知中间步骤 observe=false",
+        "目标因真实页面变化而不明时再观察，执行完成后模型按结果图核验任务"
+      ]
+    },
+    {
+      "id": "V03",
+      "task": "带前景浮层的列表单次滚动",
+      "expected_tools": [
+        "wda_vision_observe",
+        "wda_vision_swipe"
+      ],
+      "fixture": {
+        "overlay": true,
+        "sticky_header": true,
+        "overlap_rows": [
+          "Demo-A",
+          "Demo-B"
+        ]
+      },
+      "acceptance": [
+        "根据截图选前景可滚区域，避免背景页",
+        "一次调用恰好一次手势，无 XML 或备用手势",
+        "后置截图核对方向、进展与重复边界",
+        "无视觉进展不称空列表、已到底或全量"
+      ]
+    },
+    {
+      "id": "V04",
+      "task": "普通输入焦点与中文草稿核验",
+      "expected_tools": [
+        "wda_vision_tap",
+        "wda_vision_type_text",
+        "wda_vision_observe"
+      ],
+      "fixture": {
+        "text": "首字母 A +12.34 -5.67 中文测试；",
+        "existing_draft": "Demo draft",
+        "message_count": 0
+      },
+      "acceptance": [
+        "从截图确认目标输入框，点击与输入可批量执行，最终看草稿",
+        "text 为唯一必填字段，focused_input_confirmed 仅兼容且不设关卡",
+        "不提供 selector / replace / clear / submit / XML value 回读",
+        "核对输入文本和已有草稿处理结果，不假定覆盖"
+      ]
+    },
+    {
+      "id": "V05",
+      "task": "显式开启多行输入",
+      "expected_tools": [
+        "wda_vision_type_text"
+      ],
+      "fixture": {
+        "text": "第一行\n第二行",
+        "return_may_send": true
+      },
+      "acceptance": [
+        "默认 allow_newlines=false，换行拒绝发生在动作前",
+        "明确需要多行时仅传 allow_newlines=true 即可，multiline_confirmed 不是关卡",
+        "Return 可能提交，模型依据实际编辑器和授权选择执行",
+        "不擅自改变任务交付格式"
+      ]
+    },
+    {
+      "id": "V06",
+      "task": "已授权的一次合成消息发送",
+      "expected_tools": [
+        "wda_vision_type_text",
+        "wda_vision_tap",
+        "wda_vision_observe"
+      ],
+      "fixture": {
+        "chat": "Demo Self",
+        "text": "Demo report A +12.34 -5.67 中文测试；",
+        "expected_message_delta": 1,
+        "send_timeout": true
+      },
+      "preconditions": [
+        "用户授权在示例会话发送",
+        "完整草稿已视觉核验"
+      ],
+      "acceptance": [
+        "按用户授权核对对象与草稿，从截图选择发送按钮",
+        "核对会话、最终原文和新增次数",
+        "timeout 后先看实际会话，结果不明不重发"
+      ],
+      "live_requirements": [
+        "专用示例 App / 会话，禁止生产联系人"
+      ]
+    },
+    {
+      "id": "V07",
+      "task": "batch 连续执行已知步骤，最终截图核验",
+      "expected_tools": [
+        "wda_vision_batch"
+      ],
+      "acceptance": [
+        "最多 20 步，全部参数在动作前校验",
+        "点击已看见输入框 + 输入，或 Home + 已知 App 启动可以连续完成",
+        "默认跳过中间截图并返回一张最终截图，不在首个 mutation 强制停下",
+        "未知下一页目标先看下一页图，不预测坐标",
+        "失败或执行不确定即停，按 completed_steps / stopped_at 继续，不重放",
+        "complete 表示批次执行完成，仍由模型核验用户任务；最终截图失败保留执行边界"
+      ]
+    },
+    {
+      "id": "V08",
+      "task": "按需 XML 页面数据读取",
+      "expected_tools": [
+        "wda_vision_read_page"
+      ],
+      "fixture": {
+        "data_rows": 120
+      },
+      "acceptance": [
+        "默认截图读取，文字 / 列表用 XML 更高效时按需调用",
+        "reason 可选，默认 max_nodes=100 并记录 truncated",
+        "XML 不返回操作目标几何，不用于焦点 / 坐标 / 滚动 / 操作结果核验",
+        "纯读取保留已有截图，不作废观察元数据或强制 read 后 observe"
+      ]
+    },
+    {
+      "id": "V09",
+      "task": "密码与 Face ID 接管后继续",
+      "expected_tools": [
+        "wda_vision_observe",
+        "wda_vision_ready"
+      ],
+      "fixture": {
+        "auth": "Face ID / password",
+        "user_may_complete_submission": true
+      },
+      "acceptance": [
+        "凭据由用户在手机输入，不进入工具或日志",
+        "接管期间所有手机动作、读取、XML 与截图暂停",
+        "用户明确通知后新截图核对 App、目标页和已发生提交",
+        "认证本身不触发 build / restart，任务继续至最终交付"
+      ]
+    },
+    {
+      "id": "V10",
+      "task": "两插件共享配置与操作锁",
+      "expected_tools": [
+        "wda_vision_ready",
+        "wda_vision_apps",
+        "wda_vision_launch_app"
+      ],
+      "acceptance": [
+        "默认共享 ~/.local/share/iphone-use-wda、session 与 operation.lock",
+        "device_busy 不发送动作，不换目录避锁",
+        "未知 bundle ID 查候选与来源，已核实 ID 直接复用",
+        "launch / Home 无旧页面观察要求，不固定轮询前台",
+        "工具执行完成与视觉页面 / 登录 / 用户任务验收分开"
+      ]
+    },
+    {
+      "id": "V11",
+      "task": "跨 App 列表覆盖与任务完成",
+      "expected_tools": [
+        "wda_vision_observe",
+        "wda_vision_swipe"
+      ],
+      "fixture": {
+        "apps": [
+          "Demo Portfolio",
+          "Demo Wallet"
+        ],
+        "rows": [
+          "Demo-A",
+          "Demo-B",
+          "Demo-B2"
+        ]
+      },
+      "acceptance": [
+        "逐屏记录范围、重叠、缺失字段与真实记录去重",
+        "日期、币种、账户和状态保持实际页面含义",
+        "不把某 App 已读、HTTP 成功、图像变化当全部交付",
+        "用户取消立即停后续动作，未读部分不记为零"
+      ]
+    }
+  ]
+}
