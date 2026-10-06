@@ -163,9 +163,16 @@ class ProtocolTests(unittest.TestCase):
         for name in ("wda_tap", "wda_swipe"):
             self.assertNotIn("observation_id", tools[name]["inputSchema"].get("required", []))
         batch_steps = tools["wda_batch"]["inputSchema"]["properties"]["steps"]["items"]["oneOf"]
+        definitions = tools["wda_batch"]["inputSchema"]["$defs"]
+        def contract(value):
+            if isinstance(value, dict):
+                if "$ref" in value:return contract(definitions[value["$ref"].split("/")[-1]])
+                return {k:contract(v) for k,v in value.items() if k not in ("description", "examples")}
+            if isinstance(value, list):return [contract(v) for v in value]
+            return value
         for step in batch_steps:
             op = step["properties"]["op"]["const"]
-            self.assertEqual(step["properties"]["args"], tools["wda_" + op]["inputSchema"])
+            self.assertEqual(contract(step["properties"]["args"]), contract(tools["wda_" + op]["inputSchema"]))
 
     def test_stdio_apps_catalog_returns_public_evidence_without_wda_access(self):
         responses = self.exchange([

@@ -1,5 +1,13 @@
 # 验证记录
 
+## 0.1.6 的工具加载修复
+
+日期：2026-10-07（Asia/Shanghai）。普通版 244 项自动测试和独立视觉版 126 项回归全部通过，普通 manifest、2 skills、16 tools 与 Node 语法检查通过。新增回归覆盖全部公开 schema 的 5,000-byte 预算、batch 引用闭合与展开后的参数合同等价、宿主支持字段归一后的 8 类步骤完整性，以及标准 MCP 注册入口、路径空格和安装失败处理。
+
+本轮初始模型已有普通版 16 个实际绑定，不能把它说成已经缺失工具；检查发现相同插件共享预算风险及 batch 参数说明压缩问题，详见 [工具加载审计](tool-loading-audit.md)。安装 0.1.6 后，新启动的真实 Codex 模型从本回合原生定义枚举全部 16 个普通工具，确认 batch 的 8 类 op / args 及 selector / observe 参数可见，并成功执行一次原生 wda_metrics；事件记录为 completed，retained_requests=0、http_seconds=0。stdio initialize / tools/list / ping 也验证安装缓存返回 16 tools。
+
+本轮没有读取或操作手机，没有执行 READY、截图或完整 T01；上述验证证明实际工具绑定和参数说明可用，不代表业务任务端到端提速或任意模型都不会错误调用工具。
+
 ## 0.1.5 乐观执行回归
 
 日期：2026-10-07（Asia/Shanghai）。普通插件 235 项自动测试全部通过；未修改的独立视觉插件 126 项回归全部通过。普通 manifests、2 个 skills、16 个 MCP schemas 与 Node 转发语法校验通过。0.1.5 已安装缓存的真实 stdio initialize / tools/list / ping smoke 通过，发现 16 个工具；安装内容与暂存源码逐文件一致。

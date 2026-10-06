@@ -17,7 +17,7 @@ from wda_controller import PhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.5"
+VERSION="0.1.6"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -91,7 +91,25 @@ DESCRIPTIONS={
 }
 DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
 READS={"doctor","observe","find","wait","metrics","apps"}
-TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":schema,
+
+
+def published_schema(name):
+    if name!="batch":return SCHEMAS[name]
+    # Codex's default schema compaction budget is 5KB. Deduplicate repeated
+    # selectors/output options so it retains every op/args branch. Runtime
+    # validation still uses the full closed SCHEMAS above, without $ref parsing.
+    def compact(value,references=True):
+        if references and value==SEL:return {"$ref":"#/$defs/selector"}
+        if references and value==OBS:return {"$ref":"#/$defs/observe"}
+        if isinstance(value,dict):return {k:compact(v,references) for k,v in value.items() if k not in ("description","examples")}
+        if isinstance(value,list):return [compact(v,references) for v in value]
+        return value
+    schema=compact(SCHEMAS[name])
+    schema["$defs"]={"selector":compact(SEL,False),"observe":compact(OBS,False)}
+    return schema
+
+
+TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
         "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
 
 
