@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "iphone-use-wda",
+  "version": "0.1.0",
+  "description": "Local WDA iPhone control and guided setup for Codex.",
+  "author": {
+    "name": "ZHONG XIN"
+  },
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "iPhone Use WDA",
+        "shortDescription": "Fast verified iPhone control",
+        "longDescription": "Direct local WDA control with setup guidance, semantic actions, Unicode readback, bounded scrolling and verified batches.",
+        "developerName": "ZHONG XIN",
+        "category": "Productivity",
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg",
+        "defaultPrompt": [
+          "帮我把 WDA 安装到自己的 iPhone 并验证 READY。",
+          "用 WDA 完成我的手机任务，合并操作并核验结果。"
+        ]
+      }
+    }
+  }
+}
