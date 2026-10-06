@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 from wda_client import WDAClient, WDAError
@@ -271,22 +272,28 @@ class ClientTests(unittest.TestCase):
                 client.close()
 
     def test_read_reconnect_does_not_reset_total_deadline(self):
-        def respond(method, path, body, requests):
-            return (None, None, 0.025, True) if len(requests) == 1 else (200, {"value": []}, 0.2, False)
-
-        with fake_server(respond) as (url, requests, _):
-            client = WDAClient(url, timeout=0.08)
-            self.warm_session(client, "existing")
-            try:
-                started = time.monotonic()
-                with self.assertRaises(WDAError) as caught:
-                    client.session("POST", "/elements", {})
-                self.assertLess(time.monotonic() - started, 0.15)
-                self.assertEqual(caught.exception.code, "wda_unreachable")
-                self.assertFalse(caught.exception.uncertain)
-                self.assertEqual(len(requests), 2)
-            finally:
-                client.close()
+        # CI scheduling can consume an 80ms wall-clock budget before a second
+        # socket is accepted. Reconnect itself is covered by real HTTP fixtures;
+        # use a controlled clock here to test the remaining-budget contract.
+        clock = [100.0]
+        budgets = []
+        client = WDAClient(timeout=0.08)
+        self.warm_session(client, "existing")
+        def interrupted_read(method, path, payload, budget, readonly):
+            self.assertTrue(readonly)
+            budgets.append(budget)
+            clock[0] += 0.025 if len(budgets) == 1 else budget
+            raise WDAError("wda_unreachable", "Read connection interrupted")
+        with patch("wda_client.time.monotonic", side_effect=lambda: clock[0]), \
+                patch.object(client, "_request_once", side_effect=interrupted_read), \
+                self.assertRaises(WDAError) as caught:
+            client.session("POST", "/elements", {})
+        self.assertEqual(caught.exception.code, "wda_unreachable")
+        self.assertFalse(caught.exception.uncertain)
+        self.assertEqual(len(budgets), 2)
+        self.assertAlmostEqual(budgets[0], 0.08)
+        self.assertAlmostEqual(budgets[1], 0.055)
+        self.assertAlmostEqual(clock[0] - 100, 0.08)
 
     def test_backend_and_invalid_json_query_failures_are_not_retried_or_uncertain(self):
         for response, code in (({"value": {"error": "unknown error", "message": "Failed"}}, "unknown error"),
