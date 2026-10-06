@@ -44,17 +44,23 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 
 独立 `wda_observe` 使用 mode=tree/screenshot/both；动作输出使用 observe=none/tree/screenshot/both。swipe 默认 observe=tree，复用进展验证的树；none 省去返回观察，仍执行 verify=true 的内部检查。只有显式 verify=false 才省去滚动进展验证。`no_scroll_progress` 表示已接收有界手势、暴露的内容 / 几何未确认变化，携带执行和验证状态、所选新观察、尚未证明终点的恢复建议。实际页面可能仍是总览入口、边界、浮层或自绘列表，应据观察改变目标而非重复同一手势。
 
+0.1.4 在手势前检查原生 Alert / Sheet：默认区域被拒绝，有意滚动浮层列表需新观察及完全处于所有当前浮层边界内的区域。每次手势后先核对视口及原生浮层变化，再判断内容进展；上下文变化时停止备用手势。verify=false 仍执行上下文检查，仅省去进展比较。自绘面板未必有原生模态节点，不能据此证明无浮层。自选区域失效返回原因、新 tree 观察，以及节点数 / 内容 / 几何变化诊断；坐标 tap 仍保持全页保护。
+
+App 激活仅执行一次，之后最多 5 秒读取前台，匹配即继续。超时或读取失败保留已接受动作证据；等待不重放 activate，前台通过也不能代替目标页 / 登录 / 业务验收。
+
 默认轻量树避免为每个节点计算昂贵属性，但无法保证元素真实可点击。固定表头、浮层、自绘和无标签控件需要截图验证。树中元素、`visible=true`、HTTP 200 和页面指纹变化分别只证明一个层次的事实，不能扩展为完整任务成功。
 
 mutation 超时后可能已经作用于手机；先用只读新观察核对状态，不能自动重放可能产生重复写入的操作。控制器记录成功接收的 mutation；之后发生读取或后置条件错误时补充 action_executed=true、action_complete=false，即使 uncertain=false 也不能重放完整操作。多步工具保存边界并在失败 / 不确定处停下，由新证据决定是否继续。业务验收由用户目标决定，例如完整列表、准确字段、零误发送、正确收件位置或写后回读。
 
 ## 通道故障与服务恢复
 
-`local.pid.0` / `wda_foreground_unavailable` 表示 WDA 无法解析真实前台，XCTest Code 41 表示测试动作未获授权；这些错误和 schema 校验分属不同层。`wda_observe`、find、wait 保持读取职责，不自动重启服务。READY 对失效前台只清理旧会话 / 观察并重读一次；读取成功即可恢复，持续失效前台或授权故障才在默认 recover=true 时尝试后台服务恢复。recover=false 不发起重启，可以报告已有恢复工作。手机锁定、镜像冲突或其他未分类错误按各自原因处理。
+`local.pid.0` / `wda_foreground_unavailable` 表示 WDA 无法解析真实前台，XCTest Code 41 表示测试动作未获授权；这些错误和 schema 校验分属不同层。`wda_observe`、find、wait 保持读取职责，不自动重启服务。READY 对失效前台只清理旧会话 / 观察并重读一次；读取成功即可恢复，持续失效前台或授权故障才在默认 recover=true 时尝试后台服务恢复。正常操作任务首次核验使用默认 true，recover=false 仅用于明确禁止重启或明确要求只读诊断的用户指令；不发起新重启，可以报告已有恢复工作。手机锁定、镜像冲突或其他未分类错误按各自原因处理。
 
 恢复队列复用配置和有效构建，在停止前再次核验 worker 身份、owner token、配置指纹、endpoint、实际回环监听及进程组归属。只有唯一匹配的本插件服务可重启；外部服务、归属证据缺失、端口换成其他所有者或缺少构建时拒绝恢复。后台工作去重，同一配置近期恢复有 120 秒冷却，不暴露可任意杀进程或重放手机动作的工具。
 
-`wda_recovering` 明确返回 ready=false 和 recovery.job_id/status_arguments/下一次 READY 参数。调用方查询同一 setup 工作，检查 jobs 中的 recovery_phase：stopping → starting → serving；serving 后重新验证真实 READY。Runner 长期运行，工作可能仍为 running，不能把 succeeded 当成唯一恢复终点。启动失败或拒绝恢复返回具体原因及手动步骤，手机确认由用户完成。服务恢复作废旧 session 和观察，失败业务动作不会自动重放。
+0.1.4 起，READY 将预期的准备状态作为正常工具结果呈现：`ready=true, state="ready"` 才通过通道验收；`ready=false, state="recovering"` 带 recovery.job_id/status_arguments/下一次 READY 参数；关闭恢复后的持续通道故障返回 `ready=false, state="recovery_required", reason="recovery_disabled"`，附 cause 和允许恢复时的下一次调用。已有恢复工作优先返回 recovering，不把即将停止的旧服务验为 READY。两种未就绪结果没有 error，MCP isError=false 只表示状态探测正确完成。调用方必须继续按 ready/state 判断，不能据传输成功宣称通道或任务完成。工具的恢复建议不覆盖用户禁止重启或只读诊断的限制。
+
+调用方查询同一 setup 工作，检查 jobs 中的 recovery_phase：stopping → starting → serving；serving 后重新验证真实 READY。Runner 长期运行，工作可能仍为 running，不能把 succeeded 当成唯一恢复终点。启动失败、拒绝恢复、冷却、锁屏及其他实际故障仍返回错误和具体步骤，手机确认由用户完成。服务恢复作废旧 session 和观察，失败业务动作不会自动重放。启动前故障的实证与呈现改进见 [READY 启动审计](ready-startup-audit.md)。
 
 ## 安装与运行数据
 

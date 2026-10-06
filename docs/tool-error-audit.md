@@ -34,7 +34,9 @@ macOS 实际 Foundation NSPredicate 解析器可复现：将真实换行直接�
 
 自动恢复要求当前配置、endpoint、worker 身份、owner token、实际回环端口监听和进程组归属可核验，且仅有一个匹配的本插件运行服务和有效构建。工作去重，近期恢复有 120 秒冷却。外部 WDA、归属不明、端口所有者变化或缺少构建会拒绝自动重启，返回明确手动步骤，不能按端口杀进程。
 
-`wda_recovering` 返回 ready=false 和 recovery.job_id/status_arguments/下一次 READY 参数。沿同一 setup 工作查看 jobs 中的 recovery_phase：stopping → starting → serving，到 serving 后重新验证真实 READY；Runner 是长期服务，可以保持 running，无需等 succeeded。`recover=false` 不发起新重启，仍能报告已有恢复工作。恢复失败保留未就绪状态与原因，手机确认仍由用户完成。恢复通道后旧观察 / 元素 ID 作废，任务继续前重新核对当前页面。
+0.1.2 / 0.1.3 的历史返回为 `wda_recovering` 错误，携带 ready=false 和 recovery.job_id/status_arguments/下一次 READY 参数。0.1.4 将排队 / 已有恢复工作改为正常结果 `ready=false, state="recovering"`；因 recover=false 禁止恢复而仍有持续通道故障时，正常返回 `ready=false, state="recovery_required", reason="recovery_disabled"`。它们没有 error，MCP isError=false 仍不表示通道可用或整项任务完成。拒绝恢复、冷却、锁屏及其他真实故障仍按错误处理。
+
+沿同一 setup 工作查看 jobs 中的 recovery_phase：stopping → starting → serving，到 serving 后重新验证真实 READY；Runner 是长期服务，可以保持 running，无需等 succeeded。正常任务初次 READY 使用默认 recover=true；recover=false 仅用于用户明确禁止重启或明确要求只读诊断，不发起新重启，仍能报告已有恢复工作。恢复建议不能覆盖用户的限制。恢复失败保留未就绪状态与原因，手机确认仍由用户完成。恢复通道后旧观察 / 元素 ID 作废，任务继续前重新核对当前页面。后续自然故障的原始调用和恢复结果见 [READY 启动审计](ready-startup-audit.md)。
 
 ## 验证范围
 

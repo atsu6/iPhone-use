@@ -29,10 +29,13 @@ def main():
         rpc('ping',{})
         result={'server':init['serverInfo'],'tools':len(catalog['tools']),'protocol_ok':True}
         if args.ready:
-            ready=rpc('tools/call',{'name':'wda_ready','arguments':{}})
+            ready=rpc('tools/call',{'name':'wda_ready','arguments':{'recover':False}})
             if ready.get('isError'):
                 print(json.dumps({'ready':False,'error':ready['structuredContent'].get('error')},ensure_ascii=False));return 1
-            result['ready']=ready['structuredContent']['ready'];result['proof']=ready['structuredContent']['proof']
+            data=ready['structuredContent']
+            if data.get('ready') is not True:
+                print(json.dumps({'server':result['server'],'tools':result['tools'],'protocol_ok':True,**data},ensure_ascii=False));return 1
+            result['ready']=True;result['proof']=data['proof']
             result['image_content_returned']=any(c['type']=='image' for c in ready['content'])
         result['timings']=records;print(json.dumps(result,ensure_ascii=False));return 0
     finally:

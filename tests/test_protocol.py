@@ -1,14 +1,16 @@
+import contextlib
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime, result_content
+from iphone_wda import Runtime, result_content, serve
 from wda_client import WDAError
 from wda_controller import PhoneController
 from test_controller import FakeWDA
@@ -40,6 +42,87 @@ class ProtocolTests(unittest.TestCase):
         client.close = lambda: None
         runtime.phone = PhoneController(client, self.directory.name)
         return runtime, client
+
+    def serve_ready(self, runtime, arguments):
+        request = {"jsonrpc": "2.0", "id": "ready-state", "method": "tools/call", "params": {
+            "name": "wda_ready", "arguments": arguments}}
+        output = io.StringIO()
+        with patch.object(sys, "stdin", io.StringIO(json.dumps(request) + "\n")), contextlib.redirect_stdout(output):
+            serve(runtime)
+        response = json.loads(output.getvalue())
+        self.assertEqual(response["id"], "ready-state")
+        self.assertNotIn("error", response)
+        result = response["result"]
+        self.assertEqual(json.loads(result["content"][0]["text"]), result["structuredContent"])
+        return result
+
+    def test_ready_diagnostic_and_pending_states_are_normal_mcp_results(self):
+        for pending in (False, True):
+            with self.subTest(pending=pending):
+                runtime, client = self.runtime()
+                manager = Mock()
+                manager.mirroring_running.return_value = False
+                manager.pending_recovery.return_value = {"job_id": "existing-recovery", "state": "restarting"} if pending else None
+                runtime.setup_manager = manager
+                client.app = "local.pid.0"
+                result = self.serve_ready(runtime, {"screenshot": False, "recover": False})
+                self.assertFalse(result["isError"])
+                data = result["structuredContent"]
+                self.assertFalse(data["ready"])
+                self.assertEqual(data["state"], "recovering" if pending else "recovery_required")
+                self.assertNotIn("error", data)
+                self.assertNotIn("proof", data)
+                self.assertNotIn("observation", data)
+                self.assertEqual([item["type"] for item in result["content"]], ["text"])
+                manager.recover.assert_not_called()
+                self.assertEqual([path for _, path, _ in client.actions() if path != "/session"], [])
+
+    def test_queued_ready_recovery_is_normal_mcp_progress(self):
+        runtime, client = self.runtime()
+        manager = Mock()
+        manager.pending_recovery.return_value = None
+        manager.recover.return_value = {"ok": True, "job_id": "queued-recovery", "recovery": {"state": "queued"}}
+        runtime.setup_manager = manager
+        client.app = "local.pid.0"
+        result = self.serve_ready(runtime, {"screenshot": False, "recover": True})
+        self.assertFalse(result["isError"])
+        data = result["structuredContent"]
+        self.assertFalse(data["ready"])
+        self.assertEqual(data["state"], "recovering")
+        self.assertEqual(data["recovery"]["status_arguments"], {"action": "status", "job_id": "queued-recovery"})
+        self.assertEqual(data["recovery"]["next_arguments"], {"screenshot": False, "recover": True})
+        self.assertNotIn("proof", data)
+        self.assertEqual([item["type"] for item in result["content"]], ["text"])
+        manager.recover.assert_called_once_with()
+
+    def test_ready_refusal_lock_and_unknown_fault_remain_mcp_errors(self):
+        for case, expected in (("owner", "wda_recovery_required"), ("locked", "phone_locked"), ("unknown", "device-fault")):
+            with self.subTest(case=case):
+                runtime, client = self.runtime()
+                manager = Mock()
+                manager.pending_recovery.return_value = None
+                manager.recover.return_value = {"ok": False, "error": "Service ownership could not be proven"}
+                runtime.setup_manager = manager
+                if case == "owner":
+                    client.app = "local.pid.0"
+                elif case == "locked":
+                    client.locked = True
+                else:
+                    client.source = Mock(side_effect=WDAError("device-fault", "Unexpected channel fault"))
+                result = self.serve_ready(runtime, {"screenshot": False})
+                self.assertTrue(result["isError"])
+                self.assertEqual(result["structuredContent"]["error"]["code"], expected)
+                self.assertEqual([path for _, path, _ in client.actions() if path != "/session"], [])
+
+    def test_ready_success_keeps_mcp_observation_and_proof(self):
+        runtime, client = self.runtime()
+        with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
+            result = self.serve_ready(runtime, {"screenshot": False, "recover": False})
+        self.assertFalse(result["isError"])
+        self.assertTrue(result["structuredContent"]["ready"])
+        self.assertEqual(result["structuredContent"]["state"], "ready")
+        self.assertTrue(result["structuredContent"]["proof"]["foreground_resolved"])
+        self.assertGreater(result["structuredContent"]["observation"]["total_nodes"], 0)
 
     def test_stdio_initialization_notifications_ping_and_tool_catalog(self):
         responses = self.exchange([
@@ -292,6 +375,7 @@ class ProtocolTests(unittest.TestCase):
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
             result = runtime.call("wda_ready", {"screenshot": False})
         self.assertTrue(result["ready"])
+        self.assertEqual(result["state"], "ready")
         self.assertTrue(result["proof"]["phone_unlocked"])
         self.assertTrue(result["proof"]["session_usable"])
         self.assertGreater(result["observation"]["total_nodes"], 0)

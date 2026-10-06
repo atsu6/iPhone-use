@@ -21,6 +21,12 @@ def fail(code, message, **details):
     raise WDAError(code, message, details=details)
 
 
+def stale(message,reason,scope="page",**details):
+    fail("stale_observation",message,action_executed=False,reason=reason,freshness_scope=scope,
+         recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_observation_retry":False,"replay_action":False,
+                   "next_step":"Inspect the returned fresh tree if present, or observe both. For a custom scroll region use tree/both; if its content keeps refreshing, use the default region only when it actually covers the intended list."},**details)
+
+
 def finite(value, name, low=0, high=10000):
     if isinstance(value, bool) or not isinstance(value, (int,float)) or not math.isfinite(value) or not low <= value <= high:
         fail("invalid_argument", f"{name} must be a finite number in [{low}, {high}].")
@@ -196,9 +202,9 @@ class PhoneController:
     def snapshot(self,observation_id):
         old=self.snapshots.get(observation_id)
         if not old or time.monotonic()-old["time"]>30:
-            fail("stale_observation","Observe again; coordinate observations expire after 30 seconds.")
+            stale("Observe again; coordinate observations expire after 30 seconds.","expired_or_unknown")
         if self.active_app()!=old["app"]:
-            fail("stale_observation","The foreground app changed. Observe again.")
+            stale("The foreground app changed. Observe again.","foreground_changed")
         return old
 
     def guard(self,observation_id):
@@ -212,24 +218,28 @@ class PhoneController:
         else:
             nodes,viewport=self.tree();changed=self.signature(nodes)!=old["signature"]
         if viewport!=old["viewport"] or changed:
-            fail("stale_observation","Page or orientation changed. Observe again before a coordinate action.")
+            stale("Page or orientation changed. Observe again before a coordinate action.","viewport_changed" if viewport!=old["viewport"] else "page_changed")
         return viewport
 
     def guard_region(self,observation_id,region):
         old=self.snapshot(observation_id)
         if old.get("nodes") is None:
-            fail("stale_observation","A custom scroll region needs a tree/both observation. Observe both, or inspect the current screen and use the default region.")
+            stale("A custom scroll region needs a tree/both observation. Observe both, or inspect the current screen and use the default region.","tree_required","region")
         nodes,viewport=self.tree()
         area=self.region(region,viewport)
         if viewport!=old["viewport"]:
-            fail("stale_observation","Orientation or viewport changed. Observe again before scrolling.")
+            stale("Orientation or viewport changed. Observe again before scrolling.","viewport_changed","region")
         previous=self.region_nodes(old["nodes"],area)
         current=self.region_nodes(nodes,area)
         # Scrolling is guarded by its target region, so an unrelated carousel
         # cannot invalidate it. Global modal changes remain a read barrier.
-        modals=lambda items:[n for n in items if n["type"] in ("XCUIElementTypeAlert","XCUIElementTypeSheet")]
-        if not previous or not current or self.signature(previous)!=self.signature(current) or modals(old["nodes"])!=modals(nodes):
-            fail("stale_observation","Scroll target region or a modal changed. Observe tree/both again and choose a stable list region; a carousel outside the region is ignored.")
+        modal_changed=self.native_modals(old["nodes"])!=self.native_modals(nodes)
+        if not previous or not current or self.signature(previous)!=self.signature(current) or modal_changed:
+            shape=lambda ns:[{k:n.get(k) for k in ("type","rect")} for n in ns]
+            content=lambda ns:[{k:n.get(k) for k in ("type","name","label","value","enabled")} for n in ns]
+            diagnostics={"previous_nodes":len(previous),"current_nodes":len(current),"geometry_changed":shape(previous)!=shape(current),"content_changed":content(previous)!=content(current)}
+            observation={"observation_id":self.remember(nodes,viewport,old["app"]),"app":old["app"],"viewport":viewport,"nodes":nodes[:100],"total_nodes":len(nodes),"truncated":len(nodes)>100}
+            stale("Scroll target region or a modal changed. Inspect the returned fresh tree and choose a stable list region; a carousel outside the region is ignored.","modal_changed" if modal_changed else "missing_region_anchor" if not previous or not current else "region_changed","region",region_change_diagnostics=diagnostics,observation=observation)
         return nodes,viewport
 
     def find(self,selector,limit=10):
@@ -257,11 +267,11 @@ class PhoneController:
         rect,viewport=element["rect"],self.viewport()
         cx=rect["x"]+rect["width"]/2;cy=rect["y"]+rect["height"]/2
         if rect["width"]<=0 or rect["height"]<=0 or not (0<=cx<viewport["width"] and 0<=cy<viewport["height"]):
-            fail("offscreen_target","Target center is outside the viewport. Scroll into view first.")
+            fail("offscreen_target","Target center is outside the viewport. Scroll the actual list into view, observe again and re-find the target; a stopped batch has not completed its failed step.",action_executed=False,target_rect=rect,viewport=viewport,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False})
         path="/element/"+quote(element["element_id"],safe="")
         hittable=self.client.session("GET",path+"/attribute/hittable")
         if hittable not in (True,1,"true","1"):
-            fail("occluded_target","Target is not hittable. Inspect a screenshot or adjust scrolling; visible alone is insufficient.")
+            fail("occluded_target","Target was found but is not hittable; no tap was sent. Inspect the current overlay, picker, fixed header or disabled control before changing the target. Do not assume this failed tap opened a popup, or bypass the check with a coordinate tap.",action_executed=False,target_rect=rect,viewport=viewport,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_target_retry":False,"coordinate_bypass":False,"replay_action":False})
         if editable:
             kind=self.client.session("GET",path+"/attribute/type")
             if kind not in ("XCUIElementTypeTextField","XCUIElementTypeSearchField","XCUIElementTypeTextView"):
@@ -317,8 +327,15 @@ class PhoneController:
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         if expect:predicate(expect)
         self.post("/wda/apps/activate",{"bundleId":bundle_id},timeout=45)
-        if self.active_app()!=bundle_id:
-            fail("postcondition_failed","The requested app is not foreground. Check login or system prompts.")
+        deadline=time.monotonic()+5
+        app=None
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                fail("postcondition_failed","Activation was accepted, but the requested app did not become foreground within five seconds. Inspect loading, login or system prompts before continuing; do not replay activation automatically.",requested_app=bundle_id,foreground_app=app,foreground_verified=False,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False})
+            app=self.active_app(timeout=remaining)
+            if app==bundle_id:break
+            time.sleep(min(.1,max(0,deadline-time.monotonic())))
         result=self.after(expect,observe);result["foreground_verified"]=True
         return result
 
@@ -388,6 +405,9 @@ class PhoneController:
             fail("invalid_argument","Gesture region is outside viewport.")
         return region
 
+    def native_modals(self,nodes):
+        return [{k:n[k] for k in ("type","name","label","rect") if k in n} for n in nodes if n["type"] in ("XCUIElementTypeAlert","XCUIElementTypeSheet")]
+
     def scroll_observation(self,nodes,viewport,mode):
         if mode=="none":return None
         if mode in ("screenshot","both"):
@@ -409,6 +429,14 @@ class PhoneController:
         if expect:predicate(expect)
         before,viewport=self.guard_region(observation_id,region) if region is not None else self.tree()
         area=self.region(region,viewport)
+        modals=self.native_modals(before)
+        if modals:
+            contained=lambda m:area["x"]>=m["rect"]["x"] and area["y"]>=m["rect"]["y"] and area["x"]+area["width"]<=m["rect"]["x"]+m["rect"]["width"] and area["y"]+area["height"]<=m["rect"]["y"]+m["rect"]["height"]
+            if region is None or not all(contained(m) for m in modals):
+                details={"action_executed":False,"verified":False,"region":area,"native_modals":modals,"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False,"next_step":"Handle the existing modal first, or choose a fresh explicit scroll region wholly inside its intended list. Do not scroll the underlying page through a modal."}}
+                observed=self.scroll_observation(before,viewport,observe)
+                if observed:details["observation"]=observed
+                fail("modal_requires_region" if region is None else "blocked_scroll_region","Native modals are present. The intended scroll area must be explicit and inside every modal's bounds; otherwise handle the foreground modal first.",**details)
         x=area["x"]+area["width"]/2;y=area["y"]+area["height"]/2
         dx=area["width"]*.32;dy=area["height"]*.32
         points={"up":(x,y+dy,x,y-dy),"down":(x,y-dy,x,y+dy),"left":(x+dx,y,x-dx,y),"right":(x-dx,y,x+dx,y)}[direction]
@@ -419,11 +447,21 @@ class PhoneController:
                 self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
             else:
                 self.post("/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
+            after,v=self.tree()
+            reasons=[]
+            if v!=viewport:reasons.append("viewport_changed")
+            if self.native_modals(after)!=modals:reasons.append("modal_changed")
+            if reasons:
+                details={"action_executed":True,"verified":False,"changed":False,"attempts":attempt+1,"reasons":reasons,"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_gesture_retry":False,"replay_action":False,"next_step":"Inspect the changed viewport/modal and choose the current target; do not continue a fallback gesture against the old page."}}
+                observed=self.scroll_observation(after,v,observe)
+                if observed:details["observation"]=observed
+                fail("scroll_context_changed","A gesture was accepted, but the viewport or native modal context changed. This is not verified list progress; the fallback gesture was stopped.",**details)
             if not verify:
                 result={"action_executed":True,"verified":False,"strategy":strategy,"verification_required":"Read actual scroll content and direction; progress verification was explicitly disabled."}
-                if observe!="none":result["observation"]=self.observe(observe)
+                observed=self.scroll_observation(after,v,observe)
+                if observed:result["observation"]=observed
                 return result
-            after,v=self.tree();changed=self.signature(after,area)!=baseline
+            changed=self.signature(after,area)!=baseline
             if changed:
                 result={"action_executed":True,"verified":True,"changed":True,"verification_scope":"content/geometry changed within gesture region; inspect correct direction and coverage", "attempts":attempt+1,"strategy":strategy}
                 observed=self.scroll_observation(after,v,observe)
@@ -431,7 +469,7 @@ class PhoneController:
                 if expect:result["postcondition"]=self.wait(expect)
                 return result
         details={"action_executed":True,"verified":False,"changed":False,"attempts":max_attempts,"region":area,
-                 "recovery":{"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, modal or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
+                 "recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, including custom pickers/overlays that may not appear as native modals, or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
         observed=self.scroll_observation(after,v,observe)
         if observed:details["observation"]=observed
         fail("no_scroll_progress","Gestures executed but exposed content/geometry did not change. The page may be an overview, boundary, blocked region or custom-rendered list. No progress does not prove an empty or complete list; inspect returned state and change the actual target instead of repeating.",**details)

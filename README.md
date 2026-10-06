@@ -14,7 +14,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 16 个 tools。
 
-也可将 `dist/iphone-use-wda-0.1.3-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.4-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -26,7 +26,7 @@ sh scripts/install.sh
 4. `wda_setup(action="configure", udid="自己的设备标识", team_id="自己的10位TeamID", bundle_id="com.example.iphonewda.WebDriverAgentRunner")` 保存本机配置。已有相同版本且无跟踪修改的 WDA 可传 `source_dir` 复用。
 5. `build` 签名构建，成功后 `start` 运行 WDA 并建立 `127.0.0.1:18100 → iPhone:8100` USB 转发。两个操作都返回后台 job，不占住 MCP 等待整次编译。
 6. 若 iOS 要求，在“设置 → 通用 → VPN 与设备管理”信任自己的开发者证书，解锁并保持手机唤醒。
-7. `wda_ready` 同时核验 status.ready、可用 session、viewport、控件树与截图。检查手机解锁状态；镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务。
+7. 正常任务用 `wda_ready(recover=true)`（或省略 recover），同时核验 status.ready、可用 session、viewport、控件树与截图。检查手机解锁状态；镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务。
 
 安装遇到免费账户 App 名额、签名过期、证书未信任、手机锁定、USB 断开时，setup skill 给出与实际错误对应的步骤。需要用户本人完成的登录、Face ID 与信任不会由 WDA 代替。工具不自动卸载其他 App。
 
@@ -88,7 +88,7 @@ sh scripts/install.sh
 
 `WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 `device_busy`，不执行动作。断线或操作超时会标记 uncertain，先重新观察，不能盲目重放点击/输入。仅在明确 invalid session 的非元素读操作自动重建 session 后重试；旧元素 ID 不跨会话重用。
 
-`wda_ready` 默认对失效前台读状态重建 session 并只重试一次；持续 `local.pid.0` / XCTest 授权错误会异步恢复经过进程、配置和监听端口归属核验的插件服务。恢复中返回 `ready:false` 和 job 轮询参数，服务启动后再验 READY；`recover:false` 可只做诊断。120 秒冷却限制重复重启，外部服务由其所有者恢复。
+`wda_ready` 默认对失效前台读状态重建 session 并只重试一次；持续 `local.pid.0` / XCTest 授权错误会异步恢复经过进程、配置和监听端口归属核验的插件服务。恢复中正常返回 `ready:false, state="recovering"` 和 job 轮询参数，服务启动后再验 READY；`recover:false` 仅用于明确要求的只读 / 不重启诊断，持续通道故障返回 `state="recovery_required"`。未就绪仍禁止继续手机任务，CLI 返回非零退出码。120 秒冷却限制重复重启，外部服务由其所有者恢复。
 
 `wda_setup(action="stop")` 只停止本插件拥有并核验身份的后台进程组。已有健康 WDA 可复用，其外部进程不会被停止。
 
@@ -121,3 +121,9 @@ MCP 绑定不可用时，可按 [直接代码回退](skills/iphone-wda-use/refer
 ## 0.1.3 认证接管
 
 操作 skill 增加密码 / Face ID 接管规则：看到实际认证提示时请用户在 iPhone 上完成，暂停手机调用；用户通知完成后重新观察 App / 目标页并继续剩余任务。保留进度、作废旧定位、不重复接管期间已完成的提交。完整流程见 [认证接管与恢复](skills/iphone-wda-use/references/authentication.md)。
+
+## 0.1.4 READY 与后续报错
+
+READY 的后台恢复和禁止恢复诊断改为正常状态返回，保留原因及准确的下一步；只有 `ready=true` 才可继续。正在恢复时不再把旧监听服务短暂健康误判成 READY。实际恢复拒绝、锁屏、连接失败仍明确报错。
+
+App 激活只执行一次，随后最多 5 秒核对前台，匹配即继续；遮挡 / 屏外目标返回未执行证据。滚动前检查原生浮层，区域必须处于所有浮层范围内；每次手势后检查视口 / 浮层变化并停止备用手势。自选区域失效附新树及内容 / 几何变化诊断，不放宽坐标保护。自绘面板仍需查看截图处理；无进展不证明无数据或已读完整。完整会话归因见 [READY 与后续报错审计](docs/ready-startup-audit.md)。

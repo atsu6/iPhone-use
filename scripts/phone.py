@@ -30,7 +30,7 @@ def main():
         if runtime:
             runtime.close()
     print(json.dumps(result, ensure_ascii=False, allow_nan=False))
-    return 1 if "error" in result else 0
+    return 1 if "error" in result or (args.tool == "wda_ready" and result.get("ready") is not True) else 0
 
 
 if __name__ == "__main__":

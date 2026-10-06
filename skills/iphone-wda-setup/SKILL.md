@@ -11,7 +11,7 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 调用 `wda_doctor` 与 `wda_setup(action="discover")`，读取工具实际返回的 Xcode、已连接设备、签名、端口和进程状态。多台 iPhone 时按用户提供的设备选择；只有一台符合条件时可以直接使用。设备 UDID、Team ID、日志和签名配置保存在用户本机，不写进插件源码或 Git。
 
-调用 `wda_ready`。返回 `ready=true` 时核对 `proof` 和嵌套 `observation`；必须有 WDA 的 `status.ready`、可用会话、可解析的真实前台 App、有效设备视口和一次当前界面观察。默认同时验证截图；不需要截图时传 `screenshot=false`，此时截图能力尚未验证。默认 `recover=true` 允许对下面定义的通道故障做有界恢复；仅诊断且不允许发起服务重启时传 `recover=false`。READY 还检查手机实际解锁状态。若 iPhone 镜像在运行而控件树为空，工具返回 `mirroring_conflict`；退出镜像后重新观察并核验。实测中镜像占用可出现 WDA status.ready=true、locked=false，却只返回空树和锁屏图，因此不能只凭这些标志判断可操作。只看到 Runner 图标、`xcodebuild` 成功或端口开放不足以声明 READY。READY 只证明控制通道可用，目标 App 的登录和操作仍要单独验收。
+正常任务调用 `wda_ready(recover=true)` 或省略 recover 使用默认 true，不要仅因预检或谨慎主动关闭恢复。仅在用户明确禁止重启或明确要求只读诊断时传 `recover=false`，并保留该限制。返回 `ready=true, state="ready"` 时核对 `proof` 和嵌套 `observation`；必须有 WDA 的 `status.ready`、可用会话、可解析的真实前台 App、有效设备视口和一次当前界面观察。默认同时验证截图；不需要截图时传 `screenshot=false`，此时截图能力尚未验证。READY 还检查手机实际解锁状态。若 iPhone 镜像在运行而控件树为空，工具返回 `mirroring_conflict`；退出镜像后重新观察并核验。实测中镜像占用可出现 WDA status.ready=true、locked=false，却只返回空树和锁屏图，因此不能只凭这些标志判断可操作。只看到 Runner 图标、`xcodebuild` 成功或端口开放不足以声明 READY。READY 只证明控制通道可用，目标 App 的登录和操作仍要单独验收。
 
 ## 首次安装
 
@@ -34,7 +34,9 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 若导航报 `XCTDaemonErrorDomain Code=41` / `Not authorized for performing UI testing actions`，或当前应用变成 `local.pid.0` / `wda_foreground_unavailable` 而无法观察，不把 `status.ready=true` 当作可操作证明。这是 WDA / XCTest 通道故障，不能靠改 selector 解决。`wda_observe` 保持只读并给出 READY 指引；先调用 `wda_ready(screenshot=false)`。失效前台会清理旧会话和观察，重新读取一次；成功时返回 `recovery.state="read_recovered"`。持续失效前台或 XCTest 授权错误才进入服务恢复，且不会重放失败的导航、输入或提交。
 
-自动恢复只重启配置、endpoint、worker 身份与实际端口监听归属均已核验的本插件服务，复用匹配的有效构建。返回 `wda_recovering` 时仍为 `ready=false`；记录 recovery 内的 job_id，按给定 `status_tool` / `status_arguments` 查询已有后台工作，检查 jobs 中该工作的 recovery_phase：stopping → starting → serving。到 serving 后重新验 READY 并核对真实界面，不重复 start；长期运行的 Runner 工作可以保持 running，不能等待 succeeded 才继续。`recover=false` 不发起自动重启，但可以告诉你已有恢复工作正在运行。
+自动恢复只重启配置、endpoint、worker 身份与实际端口监听归属均已核验的本插件服务，复用匹配的有效构建。返回 `ready=false, state="recovering"` 时记录 recovery 内的 job_id，按给定 `status_tool` / `status_arguments` 查询已有后台工作，检查 jobs 中该工作的 recovery_phase：stopping → starting → serving。到 serving 后重新验 READY 并核对真实界面，不重复 start；长期运行的 Runner 工作可以保持 running，不能等待 succeeded 才继续。`recover=false` 不发起自动重启，但可以报告已有恢复工作。此状态正常返回，没有 error 且 MCP isError=false，仍不表示 READY 或整项任务完成。
+
+`ready=false, state="recovery_required", reason="recovery_disabled"` 表示本次关闭了自动恢复。当前用户指令允许恢复时，按 recovery 的 next_tool / next_arguments 再调用一次；用户明确禁止重启或要求只读诊断时报告通道阻塞并保留限制，不自动改成 true。该状态也是正常诊断结果；实际恢复拒绝、冷却、锁屏及未分类故障仍返回错误。
 
 返回 `wda_recovery_required` 时按 recovery 中的原因处理：冷却期为 120 秒，遵守返回的 retry_after_seconds 并检查最近恢复日志；外部 WDA、归属不明、端口已被其他服务占用或构建缺失时保留现有服务，执行准确的手动步骤。确需手动重启时用 status 找到核验归属的本插件工作，stop 并确认停止后再 start；外部服务交由其所有者重启，不能按端口杀进程或改运行目录绕过检查。重启后仍报授权错误时，按当前提示检查已解锁 iPhone 的开发者模式及“开发者 → 启用 UI 自动化”，信任或认证确认由用户完成。
 

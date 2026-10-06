@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
@@ -28,6 +28,7 @@ class FallbackTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.client = FakeWDA()
         self.closed = False
+        self.setup_manager = None
 
     def make_runtime(self, state_dir, base_url):
         runtime = Runtime(state_dir, base_url)
@@ -35,6 +36,8 @@ class FallbackTests(unittest.TestCase):
         self.client.close = lambda: setattr(self, "closed", True)
         runtime.client = self.client
         runtime.phone = PhoneController(self.client, state_dir)
+        if self.setup_manager is not None:
+            runtime.setup_manager = self.setup_manager
         return runtime
 
     def invoke(self, arguments="{}", tool="wda_press_button"):
@@ -112,6 +115,54 @@ class FallbackTests(unittest.TestCase):
                 self.assertEqual(status, 1)
                 self.assertEqual(result["error"]["code"], "invalid_argument")
                 self.assertEqual(creates, 0)
+                self.assertEqual(self.client.calls, [])
+
+    def test_fallback_ready_diagnostic_state_is_nonzero_without_error_wrapper(self):
+        self.client.app = "local.pid.0"
+        self.setup_manager = Mock()
+        self.setup_manager.pending_recovery.return_value = None
+        status, result, _ = self.invoke('{"screenshot":false,"recover":false}', tool="wda_ready")
+        self.assertEqual(status, 1)
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["state"], "recovery_required")
+        self.assertEqual(result["reason"], "recovery_disabled")
+        self.assertNotIn("error", result)
+        self.assertNotIn("proof", result)
+        self.setup_manager.recover.assert_not_called()
+        self.assertTrue(self.closed)
+        self.assertEqual([path for _, path, _ in self.client.actions() if path != "/session"], [])
+
+    def test_fallback_ready_pending_recovery_is_nonzero_without_error_wrapper(self):
+        self.client.app = "local.pid.0"
+        self.setup_manager = Mock()
+        self.setup_manager.pending_recovery.return_value = {"job_id": "existing", "state": "restarting"}
+        status, result, _ = self.invoke('{"screenshot":false,"recover":false}', tool="wda_ready")
+        self.assertEqual(status, 1)
+        self.assertEqual(result["state"], "recovering")
+        self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": False, "recover": False})
+        self.assertNotIn("error", result)
+        self.setup_manager.recover.assert_not_called()
+        self.assertTrue(self.closed)
+
+    def test_fallback_healthy_ready_returns_zero_and_proof(self):
+        self.setup_manager = Mock()
+        self.setup_manager.mirroring_running.return_value = False
+        self.setup_manager.pending_recovery.return_value = None
+        status, result, _ = self.invoke('{"screenshot":false,"recover":false}', tool="wda_ready")
+        self.assertEqual(status, 0)
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["state"], "ready")
+        self.assertTrue(result["proof"]["foreground_resolved"])
+        self.setup_manager.recover.assert_not_called()
+        self.assertTrue(self.closed)
+
+    def test_fallback_ready_requires_explicit_true(self):
+        for data in ({}, {"ready": 1}, {"ready": "true"}):
+            with self.subTest(data=data), patch.object(Runtime, "call", return_value=data):
+                status, result, _ = self.invoke('{}', tool="wda_ready")
+                self.assertEqual(status, 1)
+                self.assertEqual(result, data)
+                self.assertTrue(self.closed)
                 self.assertEqual(self.client.calls, [])
 
 

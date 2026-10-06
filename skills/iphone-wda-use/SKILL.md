@@ -5,9 +5,21 @@ description: 通过 WebDriverAgent MCP 工具操作已就绪的真实 iPhone，�
 
 # 用 WDA 完成 iPhone 任务
 
-先确定用户要交付的结果和完成条件；多 App 任务列清各 App 的读取范围、核对条件和最终文件 / 外部记录。复用已有 READY 通道；不确定时调用 `wda_ready`，需要安装或恢复时使用 `iphone-wda-setup`。目标 App 的登录、读到全部数据、草稿保真和写入成功都要单独验证。HTTP 成功只表示请求得到响应。
+先确定用户要交付的结果和完成条件；多 App 任务列清各 App 的读取范围、核对条件和最终文件 / 外部记录。复用已有 READY 通道；正常任务首次核验用 `wda_ready(recover=true)`，也可以省略 recover 使用默认 true。需要安装或恢复时使用 `iphone-wda-setup`。目标 App 的登录、读到全部数据、草稿保真和写入成功都要单独验证。HTTP 成功只表示请求得到响应。
 
 每完成一个 App 或一段采集，更新进度并继续剩余步骤。工具的 `ok`、`verified`、`complete` 和宿主显示的 completed 只描述对应调用或阶段，不能触发整项任务的最终回答。只有全部完成条件已验证、最终交付已写入并回读后才结束；确有阻塞时说明已完成范围、未完成项和具体阻塞，不能用“接下来读取……”作为任务结束语。需要较长操作时持续给出简短进度。
+
+## 正常任务的 READY 入口
+
+不要仅因“先检查一下”或谨慎而主动设置 `recover=false`。它用于用户明确禁止重启，或明确要求只读诊断的场景；这时保留限制，不自动改成 true。常规操作任务中的默认恢复只针对持续通道故障，且只重启归属已核验的本插件服务，不重放手机业务动作。
+
+按 READY 的实际 `ready` 和 `state` 继续：
+
+- `ready=true, state="ready"`：核对 proof 和当前观察后操作目标 App。
+- `ready=false, state="recovering"`：正常后台恢复状态，记录 recovery 的 job_id，按 status_tool / status_arguments 查询同一工作。到 recovery_phase=serving 后重新调用 READY；Runner 工作可以保持 running，不等 succeeded，也不重复 start。
+- `ready=false, state="recovery_required", reason="recovery_disabled"`：本次调用禁止发起恢复。若当前用户指令允许恢复，按返回的 next_tool / next_arguments 再调用一次；若用户明确禁止重启或只要诊断，保持限制并报告具体通道阻塞，不能把工具的建议当成新授权。
+
+后两种状态正常返回、没有 error 且 MCP isError=false，只表示工具正确报告了未就绪；它们不表示手机可操作或任务完成。拒绝恢复、冷却期、手机锁定及其他实际错误仍按对应原因处理。恢复后重新观察、定位并核验原任务进度，不能重放先前可能已经生效的动作。
 
 ## 应用认证与用户接管
 
@@ -25,7 +37,7 @@ description: 通过 WebDriverAgent MCP 工具操作已就绪的真实 iPhone，�
 
 自绘内容、图像、遮挡、固定表头、位置冲突或缺失标签需要截图时用 `mode="screenshot"` / `"both"`。screenshot 模式跳过 XML，返回 `image.path` 并直接附图；both 同时提供树。树截断、没有 label 或 `visible=true` 都不能证明页面内容完整或元素没有被遮挡。截图读取来自 WDA 的 `/screenshot`；仍须留意目标 App 是否产生分享浮层，不能宣称任何 App 都不会检测截图。
 
-独立读取用 `wda_observe(mode=...)`，动作后的返回内容用对应工具的 `observe=...`，不要混用参数名。`wda_swipe` 支持 `observe="none" / "tree" / "screenshot" / "both"`，默认 tree；none 只省去返回观察，仍执行默认滚动验证。`verify=false` 才关闭滚动进展验证，返回 `verified=false`，不能据此认定滚动成功。调试无进展时用 tree 或 both，使错误携带可检查的新状态。
+独立读取用 `wda_observe(mode=...)`，动作后的返回内容用对应工具的 `observe=...`，不要混用参数名。`wda_swipe` 支持 `observe="none" / "tree" / "screenshot" / "both"`，默认 tree；none 只省去返回观察，仍执行默认滚动验证。`verify=false` 才关闭滚动进展验证，返回 `verified=false`，不能据此认定滚动成功；视口和原生浮层安全检查仍执行。调试无进展时用 tree 或 both，使错误携带可检查的新状态。
 
 ## 查找 App bundle ID
 
@@ -43,6 +55,12 @@ description: 通过 WebDriverAgent MCP 工具操作已就绪的真实 iPhone，�
 - `wda_scroll_find`：需要向下查找时用有界 `max_swipes`，找到目标后核对所在页面；到边界仍未找到就报告未找到，避免盲目滚动。
 
 tap 和 launch_app 可传 `expect` 验后置条件，并选择足够的 `observe` 返回；动作后的新状态在嵌套 `observation` 中。没有 expect 的 tap 会返回 `verified=false`，launch_app 的 `foreground_verified=true` 只验前台 App。对读取、展开详情、切换页签应验目标标题和关键字段；对提交应验结果页或写回内容。结果为 failed / uncertain 时先新观察，不重放可能已经生效的写入。控件存在或树指纹改变不能代替整个业务任务的完成条件。
+
+遇 `occluded_target` 先检查截图和当前浮层。目标控件可能仍在背景页的树中，enabled / 视口交集也不能证明可点；自定义半屏面板可能没有原生 Alert / Sheet 节点或可读标题。定位检查在 click 前失败时，该点击没有执行，不能推断“刚才的点击打开了浮层”。先找当前可用的关闭 / 返回入口，或依据新观察确认可安全关闭的面板外区域；关闭后重新观察再定位原目标，不用裸坐标强点被遮挡的背景按钮，也不靠重复滚动碰运气。
+
+遇自选 region 的 `stale_observation`，先看失效原因，再用新 tree / both 观察重新核对区域；不要复用旧 ID。新 ID 也持续失败时，区域内数字等异步更新可能触发严格指纹校验，但当前证据不充分时不能断言是误报。先核对 App / 视口、浮层和真实列表位置；确认默认区域覆盖目标后可以省略 region / ID 滚动，再核验新增内容。原生浮层存在时，`modal_requires_region` / `blocked_scroll_region` 表示尚未执行手势：先处理浮层，或从新观察选完全位于所有当前原生浮层范围内的目标列表区域。`scroll_context_changed` 则表示手势已经执行后检测到视口或原生浮层变化，先重新观察处理上下文，不能当作滚动成功或继续同一手势。以上原生检查不能识别所有自定义面板，仍需按截图处理遮挡。
+
+`offscreen_target` 表示当前目标中心不在视口内；树里出现或部分露出的卡片仍可能不可点。先滚动至可点范围再重新定位。batch 已完成的前序步骤仍可能生效，按 completed_steps / stopped_at 和每步结果继续剩余步骤，不重放完整批次。launch 的前台验证有界轮询真实 App，不重复 activate；仍失败时先只读观察，检查目标 App 是否已经打开或有系统提示，再决定剩余步骤。
 
 错误携带 `action_executed=true`、`action_complete=false` 时，至少一个手机动作已被 WDA 接收，但完整操作或后续读取没有完成；即使 `uncertain=false`，也不能重放整项点击、输入或批次。先读当前页面 / 字段，再按证据决定剩余步骤。`local.pid.0`、`wda_foreground_unavailable` 或 XCTest Code 41 属于通道故障：调用 `wda_ready(screenshot=false)` 按返回的 recovery 恢复；`wda_observe` 本身只读，不会自动重启服务。后台恢复期间沿给定 job_id 查看 setup status，待 jobs 中该工作的 recovery_phase 为 serving 后重新验 READY；恢复通道不会替你重放失败的业务动作。具体边界见 [工具故障与代码调用](references/tool-fallback.md)。
 
