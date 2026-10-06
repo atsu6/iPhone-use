@@ -48,8 +48,18 @@ class FallbackTests(unittest.TestCase):
             status = fallback.main()
         return status, json.loads(output.getvalue()), create.call_count
 
-    def test_fallback_home_uses_same_verified_controller(self):
-        status, result, _ = self.invoke('{"name":"home","observe":"none"}')
+    def test_fallback_home_defaults_to_one_action_without_foreground_readback(self):
+        status, result, _ = self.invoke('{"name":"home"}')
+        self.assertEqual(status, 0)
+        self.assertTrue(result["action_executed"])
+        self.assertFalse(result["foreground_verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertFalse(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
+        self.assertTrue(self.closed)
+
+    def test_fallback_home_explicit_check_uses_same_verified_controller(self):
+        status, result, _ = self.invoke('{"name":"home","verify":true}')
         self.assertEqual(status, 0)
         self.assertTrue(result["foreground_verified"])
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])

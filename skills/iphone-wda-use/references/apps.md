@@ -1,12 +1,12 @@
 # 查找真实 app bundle ID
 
-优先调用 `wda_apps`，先查询用户选定 iPhone 的已安装应用，再查本地已核验目录，缺少候选时才查询 Apple。不要凭品牌名拼写 bundle ID，也不要连续试多个猜测值来启动。
+已经知道且核验过的 bundle ID 可直接启动，不为每次 launch 重查安装清单。查常用 App 可先用 `wda_apps(source="catalog")` 离线检索本地目录；未知应用或需要区分用户实际安装的版本时用 source=auto，先查选定 iPhone 的已安装应用，再查本地目录，仍无候选才查 Apple。不要凭品牌名拼写 bundle ID，也不要连续试多个猜测值。
 
 ```json
 {"query":"招商银行","source":"auto"}
 ```
 
-本例应返回 `com.cmbchina.MPBBank`。检查名称、发布者和候选来源后，再把 `bundle_id` 传给 `wda_launch_app` 并验证前台应用。招商银行主应用与掌上生活信用卡应用是两个应用。
+本例应返回 `com.cmbchina.MPBBank`。检查名称、发布者和候选来源后，把 bundle_id 传给 `wda_launch_app`。正常启动乐观继续；下一步需要未知页面信息时在该次 launch 设置 observe，顺带查看实际前台和目标页，不另加默认启动验收。招商银行主应用与掌上生活信用卡应用是两个应用。
 
 - `source=auto`：先读取已选设备的安装列表（本地缓存 300 秒），合并本地目录。精确名称/别名优先；精确匹配存在时不混入子串候选。无本地候选才调用 Apple。
 - `source=installed`：只查已选 iPhone，缺少选定设备或读取失败时返回可执行的诊断。英文品牌别名可用本地目录映射到安装列表的 bundle ID。
@@ -39,7 +39,7 @@ Apple 商店搜索存在同名、地区和下架限制，企业内部、开发�
 
 本次实测 `富途牛牛` 在 CN 搜索没有目标应用，在 HK 查询才取得 `cn.futu.FutuTraderPhone`。遇到空结果先查 `source=installed`，或按用户实际商店地区查询；不要把地区搜索不到解释为没有安装。飞书与国际版 Lark、微信与企业微信、普通版与极速版/开发版也应分别核对。
 
-若 MCP 查询本身不可用，可用固定的 Xcode 命令直接读取本地安装列表（`--include-all-apps` 必须保留：devicectl 默认仅显示开发应用），在本地过滤目标名称/bundle ID，然后验证前台。文件应写到仓库外私有目录，不保存完整安装清单到项目：
+若 MCP 查询本身不可用，可用固定的 Xcode 命令直接读取本地安装列表（`--include-all-apps` 必须保留：devicectl 默认仅显示开发应用），在本地过滤目标名称/bundle ID 后启动。下一步所需观察也可顺带判断启动状态。文件写到仓库外私有目录，不保存完整安装清单到项目：
 
 ```sh
 xcrun devicectl device info apps --device "<已选设备 UDID>" --include-all-apps --json-output "<私有目录>/apps.json" --timeout 8

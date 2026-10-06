@@ -1,6 +1,6 @@
 # iPhone Use WDA
 
-给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App、核验输入与滚动，把常见连续动作合成一次 MCP 调用。
+给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。
 
 另有独立的[截图视觉版插件](plugins/iphone-use-wda-vision/README.md)，基于 v0.1.4 复制，默认用截图确定并核验每次操作；XML 仅作为页面数据读取的可选工具。两版可共享已有 WDA 配置和运行通道。
 
@@ -16,7 +16,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace 和安装，然后重新连接聊天即可加载 2 个 skills 与 16 个 tools。
 
-也可将 `dist/iphone-use-wda-0.1.4-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.5-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -40,39 +40,38 @@ sh scripts/install.sh
 | `wda_observe` | 精简树/原生截图，观察 ID 和 iPhone 点坐标 viewport |
 | `wda_apps` | 优先查本机安装清单和 36 个已核验别名，必要时查 Apple API；区分商店元数据与安装证据 |
 | `wda_find` | 查询标签、name、value、type 或 predicate，避免为一个按钮读取全树 |
-| `wda_tap` | 唯一目标、viewport 与 hittable 检查，点击后等待 expect 并观察 |
-| `wda_swipe` | 短拖动，比较区域内容，再最多切换一次原生 swipe |
-| `wda_type_text` | Unicode 原文输入、精确回读、换行保护、默认不提交 |
-| `wda_launch_app`, `wda_press_button` | bundle ID 激活、前台验证、Home/音量键 |
+| `wda_tap` | 唯一目标、viewport 与 hittable 检查，点击一次；expect / observe 按需开启 |
+| `wda_swipe` | 默认一次短拖动；verify=true 才检查进展及尝试备用手势 |
+| `wda_type_text` | 完整 Unicode 原文一次输入；可选精确回读，换行保护、默认不提交 |
+| `wda_launch_app`, `wda_press_button` | bundle ID 激活、Home/音量键；前台验证按需开启 |
 | `wda_wait` | 有界目标等待 |
-| `wda_batch` | 一轮执行已知步骤，预先校验所有参数；失败或无法验证即停 |
+| `wda_batch` | 一轮执行已知步骤，预先校验所有参数；错误、不确定或提交时停止 |
 | `wda_scroll_find`, `wda_collect_list` | 有界搜索、去重采集与明确覆盖边界 |
 | `wda_metrics` | HTTP/工具耗时汇总，不记录文本、账户数据或图像 |
 
-例如已观察到目标后，**定位 → 点击 → 等待新页面 → 读取结果**可在一次调用完成：
+例如已观察到目标后，点击并直接取得供下一步决策的页面：
 
 ```json
 {
   "selector": {"type": "Button", "label": "详情"},
-  "expect": {"type": "StaticText", "label": "产品详情"},
   "observe": "tree"
 }
 ```
 
-将上述参数交给 `wda_tap`。`expect` 应选择能证明当前步骤结果的实际标记，不能随意写一个页面上早已存在的通用文字。
+将上述参数交给 `wda_tap`，用返回的页面准备下一步，同时判断前一步是否到达目标。默认 observe=none，适合已知连续步骤；下一步需要新页面时在动作里加 tree/both，避免再调用一次工具。最终关键检查可加 `expect` 或显式 `verify:true`；expect 应是能证明结果的实际标记。
 
-已知、安全且可验证的连续流程可以交给 `wda_batch`：
+已知连续流程可以交给 `wda_batch`，中间步骤无需单独验收：
 
 ```json
 {
   "steps": [
-    {"op": "tap", "args": {"selector": {"type": "Button", "label": "搜索"}, "expect": {"type": "SearchField"}, "observe": "none"}},
+    {"op": "tap", "args": {"selector": {"type": "Button", "label": "搜索"}}},
     {"op": "type_text", "args": {"selector": {"type": "SearchField"}, "text": "中文 VOO +12.34 / -5.67", "observe": "tree"}}
   ]
 }
 ```
 
-整个 MCP 服务常驻，复用 HTTP 连接和 session。XML 默认跳过昂贵 `visible` 属性；区域几何只是快速筛选，点击前仍单独查询 hittable。`mode:"screenshot"` 不生成 XML，直接返回 MCP 图像。坐标来自截图时按截图像素/viewport 比例转换，携带新鲜 observation_id；页面或前台变化即拒绝过期坐标。
+整个 MCP 服务常驻，复用 HTTP 连接和 session。XML 默认跳过昂贵 `visible` 属性；点击前仍检查 hittable。`mode:"screenshot"` 不生成 XML，直接返回 MCP 图像。坐标按截图像素/viewport 比例转换，observation_id 可选；提供时检查本 Runtime 的 App / viewport 上下文，不再比较整张截图或强制 30 秒过期。会话首次创建或接管时将 WDA idle / animation 等待预算设置为 0，暖操作不重复配置；同一 WDA 服务的其他客户端可能共享这些设置。
 
 ## 遇到过的问题怎么处理
 
@@ -80,7 +79,7 @@ sh scripts/install.sh
 
 滚动返回成功、控件 `visible=true`、点击 HTTP 200 都不能证明任务完成。固定表头可能遮挡元素，树可能缺少名称，截图也可能受 App 行为影响。采集工具只返回证据和覆盖边界，不推断个人持仓或账户任务已经完整；最终须核对数量、页尾、币种、日期与总额。
 
-输入会按原文回读，包括中文、首字母、正负号和分隔符。无法读取或与原文不一致时停止，不继续提交；安全输入框不提供可核验回读。换行需明确多行编辑意图，提交需明确 `submit:true`。微信等发送任务另核对目标与实际发送结果。
+输入默认一次写入完整原文，不先试短文本、不逐次回读。需要关键输入验收时用 verify=true；不一致时停止提交。安全输入框、密码或 Face ID 由用户接管。换行需明确多行编辑意图，提交需明确 submit=true；最终仍核对目标与实际发送结果。输入 / 提交响应不确定时先看状态，不自动重放。
 
 历史实测中 83.6% 的业务墙钟时间在 WDA HTTP 请求之外，后续复核指向模型响应链路；一次 5 分钟等待没有依据全部归因模型思考。本插件通过组合工具、精简结果、后台构建减少交互次数；模型服务延迟仍由宿主决定。当前验证结果见 [validation.md](docs/validation.md)，没有重新测量前不承诺整项业务任务的提速百分比。
 
@@ -88,7 +87,7 @@ sh scripts/install.sh
 
 默认状态在 `~/.local/share/iphone-use-wda/`，目录权限 700、配置与截图文件 600；私有设备配置、Xcode 日志、签名构建与证据不进入仓库/源代码包。截图文件名唯一，最多保留最近 100 张；工具计时保留最近 2,000 次请求与 500 次调用。原始 XML/文本不写运行账本。
 
-`WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 `device_busy`，不执行动作。断线或操作超时会标记 uncertain，先重新观察，不能盲目重放点击/输入。仅在明确 invalid session 的非元素读操作自动重建 session 后重试；旧元素 ID 不跨会话重用。
+`WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 device_busy，不执行动作。实际写操作断线或超时标记 uncertain，不能盲目重放点击/输入。GET 与已知 POST 元素查询最多重试一次，共用原截止时间；非元素查询遇到 invalid session 可重建会话，旧元素 ID 不跨会话重用。
 
 `wda_ready` 默认对失效前台读状态重建 session 并只重试一次；持续 `local.pid.0` / XCTest 授权错误会异步恢复经过进程、配置和监听端口归属核验的插件服务。恢复中正常返回 `ready:false, state="recovering"` 和 job 轮询参数，服务启动后再验 READY；`recover:false` 仅用于明确要求的只读 / 不重启诊断，持续通道故障返回 `state="recovery_required"`。未就绪仍禁止继续手机任务，CLI 返回非零退出码。120 秒冷却限制重复重启，外部服务由其所有者恢复。
 
@@ -108,23 +107,29 @@ Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊�
 
 技术依据：[Appium WebDriverAgent](https://github.com/appium/WebDriverAgent)、[固定版本源代码](https://github.com/appium/WebDriverAgent/tree/d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6)、[Apple 开发账户说明](https://developer.apple.com/help/account/basics/about-your-developer-account)。
 
-## 0.1.1 修复与查询
+## 0.1.5 乐观执行
+
+动作默认 observe=none，输入 / Home / 启动 / 滚动默认 verify=false；普通未核验步骤不阻断 batch。需要下一步页面时动作顺带返回观察，最终关键结果才用 expect / verify 或一次终态读取验收。坐标与 region 不强制 ID、全页内容一致或 30 秒期限；完整文本直接输入。8 项改造与请求数对照见 [乐观执行说明](docs/optimistic-execution.md)。
+
+## 历史行为（0.1.1–0.1.4；当前默认以 0.1.5 为准）
+
+### 0.1.1 修复与查询
 
 Home 改走 WDA `/wda/homescreen`，只有 SpringBoard 前台才返回 verified。自定义滚动只核对目标区域及浮层，区域外轮播不再使其过期；坐标点击继续保持严格页面检查。`wda_apps(query="招商银行")` 可直接查到 `com.cmbchina.MPBBank`，来源和安装状态随结果返回。常用 App 与刷新办法见 [bundle ID 参考](skills/iphone-wda-use/references/apps.md)。
 
 MCP 绑定不可用时，可按 [直接代码回退](skills/iphone-wda-use/references/tool-fallback.md) 使用 `scripts/phone.py` 或 `Runtime`；复用相同会话、操作锁和权限检查。已不确定是否执行的写入不能重放。T01 三次提前 final 的日志调查见 [model-termination-audit.md](docs/model-termination-audit.md)：没有发现 MCP 进程崩溃或协议错误，具体模型 / provider 阶段归因仍需原始响应流。Skill 增加全部交付项核验与同回合继续执行规则。
 
-## 0.1.2 工具报错修复
+### 0.1.2 工具报错修复
 
 `wda_swipe` 支持与其他动作一致的 `observe`，包括 `none`；省略输出仍保留默认进展验证。selector 支持 `enabled` 布尔值及树中的 `"true"` / `"false"`，精确多行 label 自动安全编码。其他未知字段继续在操作前拒绝，并返回允许字段和准确参数路径，batch 也保留该诊断。
 
 无滚动进展时返回已执行的手势数、当前观察及下一步，`observe="both"` 可直接附 MCP 图像；这不能证明列表为空或已读全。操作成功后读取失败也保留 `action_executed:true` / `action_complete:false`，避免重复执行写入。具体归因、接口与模型责任边界见 [工具报错审计](docs/tool-error-audit.md)。
 
-## 0.1.3 认证接管
+### 0.1.3 认证接管
 
 操作 skill 增加密码 / Face ID 接管规则：看到实际认证提示时请用户在 iPhone 上完成，暂停手机调用；用户通知完成后重新观察 App / 目标页并继续剩余任务。保留进度、作废旧定位、不重复接管期间已完成的提交。完整流程见 [认证接管与恢复](skills/iphone-wda-use/references/authentication.md)。
 
-## 0.1.4 READY 与后续报错
+### 0.1.4 READY 与后续报错
 
 READY 的后台恢复和禁止恢复诊断改为正常状态返回，保留原因及准确的下一步；只有 `ready=true` 才可继续。正在恢复时不再把旧监听服务短暂健康误判成 READY。实际恢复拒绝、锁屏、连接失败仍明确报错。
 

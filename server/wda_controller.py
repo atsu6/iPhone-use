@@ -1,4 +1,4 @@
-"""Bounded iPhone operations with fresh state, semantic targeting and postconditions."""
+"""Optimistic iPhone operations with optional observations and explicit verification."""
 import base64
 import collections
 import datetime as dt
@@ -24,7 +24,7 @@ def fail(code, message, **details):
 def stale(message,reason,scope="page",**details):
     fail("stale_observation",message,action_executed=False,reason=reason,freshness_scope=scope,
          recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_observation_retry":False,"replay_action":False,
-                   "next_step":"Inspect the returned fresh tree if present, or observe both. For a custom scroll region use tree/both; if its content keeps refreshing, use the default region only when it actually covers the intended list."},**details)
+                   "next_step":"Inspect the current app and viewport before reusing coordinates. An observation ID is optional; changing text, numbers or screenshot pixels does not invalidate its app/viewport context."},**details)
 
 
 def finite(value, name, low=0, high=10000):
@@ -176,6 +176,9 @@ class PhoneController:
             nodes,viewport=[],self.viewport()
         else:
             nodes,viewport=self.tree(include_invisible,expensive_visibility)
+        return self.observation_from_state(nodes,viewport,app,mode,max_nodes,expensive_visibility)
+
+    def observation_from_state(self,nodes,viewport,app,mode,max_nodes=100,expensive_visibility=False):
         result={"observation_id":self.remember(nodes,viewport,app,has_tree=mode!="screenshot"),"observed_at":dt.datetime.now(dt.timezone.utc).isoformat(),"app":app,"viewport":viewport,
                 "warnings":["Viewport intersection does not prove hittability; fixed headers can occlude controls."]}
         if mode in ("tree","both"):
@@ -201,46 +204,23 @@ class PhoneController:
 
     def snapshot(self,observation_id):
         old=self.snapshots.get(observation_id)
-        if not old or time.monotonic()-old["time"]>30:
-            stale("Observe again; coordinate observations expire after 30 seconds.","expired_or_unknown")
+        if not old:
+            stale("This observation is unknown to the current Runtime. Observe again or use current viewport coordinates.","unknown_observation")
         if self.active_app()!=old["app"]:
             stale("The foreground app changed. Observe again.","foreground_changed")
         return old
 
-    def guard(self,observation_id):
-        old=self.snapshot(observation_id)
-        if old.get("image_signature"):
-            viewport=self.viewport()
-            encoded=self.client.request("GET","/screenshot").get("value")
-            try:signature=hashlib.sha256(base64.b64decode(encoded,validate=True)).hexdigest()
-            except (ValueError,TypeError):fail("invalid_response","Invalid screenshot while checking freshness.")
-            changed=signature!=old["image_signature"]
-        else:
-            nodes,viewport=self.tree();changed=self.signature(nodes)!=old["signature"]
-        if viewport!=old["viewport"] or changed:
-            stale("Page or orientation changed. Observe again before a coordinate action.","viewport_changed" if viewport!=old["viewport"] else "page_changed")
+    def guard(self,observation_id=None):
+        old=self.snapshot(observation_id) if observation_id is not None else None
+        viewport=self.viewport()
+        if old and viewport!=old["viewport"]:
+            stale("Orientation or viewport changed. Observe again before using the earlier coordinates.","viewport_changed")
         return viewport
 
     def guard_region(self,observation_id,region):
-        old=self.snapshot(observation_id)
-        if old.get("nodes") is None:
-            stale("A custom scroll region needs a tree/both observation. Observe both, or inspect the current screen and use the default region.","tree_required","region")
-        nodes,viewport=self.tree()
-        area=self.region(region,viewport)
-        if viewport!=old["viewport"]:
-            stale("Orientation or viewport changed. Observe again before scrolling.","viewport_changed","region")
-        previous=self.region_nodes(old["nodes"],area)
-        current=self.region_nodes(nodes,area)
-        # Scrolling is guarded by its target region, so an unrelated carousel
-        # cannot invalidate it. Global modal changes remain a read barrier.
-        modal_changed=self.native_modals(old["nodes"])!=self.native_modals(nodes)
-        if not previous or not current or self.signature(previous)!=self.signature(current) or modal_changed:
-            shape=lambda ns:[{k:n.get(k) for k in ("type","rect")} for n in ns]
-            content=lambda ns:[{k:n.get(k) for k in ("type","name","label","value","enabled")} for n in ns]
-            diagnostics={"previous_nodes":len(previous),"current_nodes":len(current),"geometry_changed":shape(previous)!=shape(current),"content_changed":content(previous)!=content(current)}
-            observation={"observation_id":self.remember(nodes,viewport,old["app"]),"app":old["app"],"viewport":viewport,"nodes":nodes[:100],"total_nodes":len(nodes),"truncated":len(nodes)>100}
-            stale("Scroll target region or a modal changed. Inspect the returned fresh tree and choose a stable list region; a carousel outside the region is ignored.","modal_changed" if modal_changed else "missing_region_anchor" if not previous or not current else "region_changed","region",region_change_diagnostics=diagnostics,observation=observation)
-        return nodes,viewport
+        viewport=self.guard(observation_id)
+        self.region(region,viewport)
+        return viewport
 
     def find(self,selector,limit=10):
         integer(limit,"limit",1,30)
@@ -257,8 +237,8 @@ class PhoneController:
             elements.append({"element_id":ident,"rect":rect})
         return {"elements":elements,"matches":len(found),"truncated":len(found)>limit}
 
-    def target(self,selector,editable=False):
-        result=self.find(selector,limit=2)
+    def target(self,selector,editable=False,found=None,with_kind=False):
+        result=found if found is not None else self.find(selector,limit=2)
         if result["matches"]==0:
             fail("no_such_element","Target not found. Read fresh state or use wda_scroll_find.")
         if result["matches"]!=1:
@@ -275,8 +255,8 @@ class PhoneController:
         if editable:
             kind=self.client.session("GET",path+"/attribute/type")
             if kind not in ("XCUIElementTypeTextField","XCUIElementTypeSearchField","XCUIElementTypeTextView"):
-                fail("not_editable","Select a readable text/search field or text view. Secure fields cannot be verified.")
-        return path
+                fail("not_editable","Select a readable text/search field or text view. Ask the user to handle secure fields.")
+        return (path,kind) if editable and with_kind else path
 
     def wait(self,selector,timeout_seconds=6):
         finite(timeout_seconds,"timeout_seconds",0,20)
@@ -292,18 +272,16 @@ class PhoneController:
                 fail("postcondition_failed","Expected target did not appear within the wait budget.",polls=attempts)
             time.sleep(min(0.25,max(0,deadline-time.monotonic())))
 
-    def after(self,expect=None,observe="tree"):
-        result={"action_executed":True,"verified":False}
+    def after(self,expect=None,observe="none",max_nodes=100):
+        result={"action_executed":True,"action_complete":True,"verified":False,"verification_deferred":True}
         if expect:
-            result["postcondition"]=self.wait(expect);result["verified"]=True
+            result["postcondition"]=self.wait(expect);result.update(verified=True,verification_deferred=False)
         if observe!="none":
-            result["observation"]=self.observe(observe)
-        if not expect:
-            result["verification_required"]="Read the result and check the intended page or business state. HTTP success alone is insufficient."
+            result["observation"]=self.observe(observe,max_nodes=max_nodes)
         return result
 
     @action_result
-    def tap(self,selector=None,x=None,y=None,observation_id=None,expect=None,observe="tree"):
+    def tap(self,selector=None,x=None,y=None,observation_id=None,expect=None,observe="none"):
         if observe not in ("none","tree","screenshot","both"):
             fail("invalid_argument","Invalid observation mode.")
         if expect:predicate(expect)
@@ -321,12 +299,16 @@ class PhoneController:
         return self.after(expect,observe)
 
     @action_result
-    def launch_app(self,bundle_id,expect=None,observe="tree"):
+    def launch_app(self,bundle_id,expect=None,observe="none",verify=False):
         if not isinstance(bundle_id,str) or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+",bundle_id):
             fail("invalid_argument","Use the app's verified bundle ID.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
+        if not isinstance(verify,bool):fail("invalid_argument","verify must be boolean.")
         if expect:predicate(expect)
         self.post("/wda/apps/activate",{"bundleId":bundle_id},timeout=45)
+        if not verify:
+            result=self.after(expect,observe);result["foreground_verified"]=False
+            return result
         deadline=time.monotonic()+5
         app=None
         while True:
@@ -336,20 +318,26 @@ class PhoneController:
             app=self.active_app(timeout=remaining)
             if app==bundle_id:break
             time.sleep(min(.1,max(0,deadline-time.monotonic())))
-        result=self.after(expect,observe);result["foreground_verified"]=True
+        result=self.after(expect,observe)
+        result.update(verified=True,verification_deferred=False,foreground_verified=True,verification_scope="Requested app is foreground; user task completion is separate.")
         return result
 
     @action_result
-    def press_button(self,name,observe="tree"):
+    def press_button(self,name,observe="none",verify=False,expect=None):
         if name not in ("home","volumeup","volumedown"):
             fail("invalid_argument","Supported buttons: home, volumeup, volumedown.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
+        if not isinstance(verify,bool):fail("invalid_argument","verify must be boolean.")
+        if expect:predicate(expect)
         if name!="home":
             self.post("/wda/pressButton",{"name":name})
-            return self.after(observe=observe)
+            return self.after(expect,observe)
         # XCTest pressButton can acknowledge Home without changing foreground.
         # WDA's dedicated endpoint activates the system application instead.
         self.post("/wda/homescreen",{},session=False)
+        if not verify:
+            result=self.after(expect,observe);result["foreground_verified"]=False
+            return result
         deadline=time.monotonic()+2
         app=None
         try:
@@ -359,39 +347,43 @@ class PhoneController:
                 if time.monotonic()>=deadline:
                     fail("postcondition_failed","Home request returned, but SpringBoard did not become foreground. Inspect fresh state; do not loop on the same button.",foreground_app=app)
                 time.sleep(min(.1,max(0,deadline-time.monotonic())))
-            result={"action_executed":True,"verified":True,"foreground_verified":True,"foreground_app":app,"verification_scope":"Home navigation: SpringBoard is foreground; user task completion is separate."}
-            if observe!="none":result["observation"]=self.observe(observe)
+            result=self.after(expect,observe)
+            result.update(verified=True,verification_deferred=False,foreground_verified=True,foreground_app=app,verification_scope="Home navigation: SpringBoard is foreground; user task completion is separate.")
             return result
         except WDAError as exc:
             exc.details.update({"action_executed":True,"home_foreground_verified":app=="com.apple.springboard","verification_required":"Home was requested. Inspect fresh state before another action; do not automatically replay."})
             raise
 
     @action_result
-    def type_text(self,selector,text,allow_newlines=False,submit=False,replace=True,observe="tree"):
+    def type_text(self,selector,text,allow_newlines=False,submit=False,replace=True,observe="none",verify=False,expect=None):
         if not isinstance(text,str) or not 1<=len(text)<=10000 or "\x00" in text:
             fail("invalid_argument","text must have 1..10000 characters without NUL.")
         if ("\n" in text or "\r" in text) and not allow_newlines:
             fail("newline_requires_intent","This text contains line breaks, which can send a message. Use allow_newlines only for an observed multiline editor.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
-        path=self.target(selector,editable=True)
-        kind=self.client.session("GET",path+"/attribute/type")
+        if not isinstance(verify,bool):fail("invalid_argument","verify must be boolean.")
+        if expect:predicate(expect)
+        path,kind=self.target(selector,editable=True,with_kind=True)
         if ("\n" in text or "\r" in text) and kind!="XCUIElementTypeTextView":
             fail("newline_unsafe","Line breaks are allowed only for a verified TextView.")
-        before=self.client.session("GET",path+"/attribute/value") or ""
+        before=(self.client.session("GET",path+"/attribute/value") or "") if verify and not replace else ""
         self.post(path+"/click",{})
         if replace:
             self.post(path+"/clear",{})
-            cleared=self.client.session("GET",path+"/attribute/value")
-            # Empty fields may report their placeholder; only use replace expected text for final readback.
         expected=text if replace else str(before)+text
         self.post(path+"/value",{"text":text,"frequency":30})
-        actual=self.client.session("GET",path+"/attribute/value")
-        if actual!=expected:
-            fail("input_mismatch","Typed text did not round-trip exactly. Do not submit or blindly type it again.",expected_length=len(expected),actual_length=len(str(actual or "")))
-        result={"action_executed":True,"verified":True,"exact_readback":True,"characters":len(text),"submitted":False}
+        if verify:
+            actual=self.client.session("GET",path+"/attribute/value")
+            if actual!=expected:
+                fail("input_mismatch","Typed text did not round-trip exactly. Do not submit or blindly type it again.",expected_length=len(expected),actual_length=len(str(actual or "")))
+        result={"action_executed":True,"action_complete":True,"verified":verify,"verification_deferred":not verify,"exact_readback":verify,"characters":len(text),"submitted":False}
         if submit:
             self.post("/wda/keys",{"value":["\n"]})
-            result.update({"submitted":True,"submission_verified":False,"verification_required":"Inspect the submission result; exact field text only verified input before submission."})
+            result.update({"submitted":True,"verified":False,"verification_deferred":True,"submission_verified":False,"verification_required":"Check the final submission result before claiming task completion; do not automatically repeat submission."})
+        if expect:
+            result["postcondition"]=self.wait(expect)
+            result.update(verified=True,verification_deferred=False)
+            if submit:result.update(submission_verified=True,verification_scope="Expected selector is present; verify the final business outcome before claiming task completion.")
         if observe!="none":result["observation"]=self.observe(observe)
         return result
 
@@ -408,110 +400,142 @@ class PhoneController:
     def native_modals(self,nodes):
         return [{k:n[k] for k in ("type","name","label","rect") if k in n} for n in nodes if n["type"] in ("XCUIElementTypeAlert","XCUIElementTypeSheet")]
 
-    def scroll_observation(self,nodes,viewport,mode):
+    def scroll_observation(self,nodes,viewport,mode,max_nodes=100):
         if mode=="none":return None
-        if mode in ("screenshot","both"):
-            observed=self.observe("screenshot")
-            if mode=="screenshot":return observed
-            # Reuse the verification tree. Do not take a second XML snapshot.
-            self.snapshots[observed["observation_id"]].update(nodes=nodes,signature=self.signature(nodes))
-        else:
-            app=self.active_app()
-            observed={"observation_id":self.remember(nodes,viewport,app),"viewport":viewport,"app":app}
-        observed.update(nodes=nodes[:100],total_nodes=len(nodes),truncated=len(nodes)>100)
-        return observed
+        # The caller already read the complete tree and viewport. Reuse both;
+        # adding a screenshot does not require another viewport/XML request.
+        return self.observation_from_state(nodes,viewport,self.active_app(),mode,max_nodes)
+
+    def scroll_progress(self,before,after,region,direction):
+        # Numeric/value refreshes and animation metadata are not movement.
+        # Match unique stable row/text anchors and require a displacement along
+        # the requested axis, with substantially unchanged row dimensions.
+        def anchors(nodes):
+            found=collections.defaultdict(list)
+            for node in self.region_nodes(nodes,region):
+                if node["type"] not in ("XCUIElementTypeCell","XCUIElementTypeStaticText","XCUIElementTypeOther","XCUIElementTypeImage"):
+                    continue
+                for field in ("name","label"):
+                    value=node.get(field)
+                    if isinstance(value,str) and value:
+                        found[(node["type"],field,value)].append(node["rect"])
+            return {key:rects[0] for key,rects in found.items() if len(rects)==1}
+        old,new=anchors(before),anchors(after)
+        axis,cross=("y","x") if direction in ("up","down") else ("x","y")
+        sign=-1 if direction in ("up","left") else 1
+        for key in old.keys()&new.keys():
+            a,b=old[key],new[key]
+            if (b[axis]-a[axis])*sign>2 and abs(b[cross]-a[cross])<=3 and all(abs(b[k]-a[k])<=2 for k in ("width","height")):
+                return True
+        return False
 
     @action_result
-    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=True,max_attempts=2,observe="tree"):
+    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=False,max_attempts=2,observe="none",_baseline=None,_max_nodes=100):
         if direction not in ("up","down","left","right"):fail("invalid_argument","Invalid direction.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         integer(max_attempts,"max_attempts",1,2)
+        if not isinstance(verify,bool):fail("invalid_argument","verify must be boolean.")
         if expect:predicate(expect)
-        before,viewport=self.guard_region(observation_id,region) if region is not None else self.tree()
+        viewport=self.guard_region(observation_id,region) if observation_id is not None else None
+        if verify:
+            before,current_viewport=_baseline if _baseline is not None else self.tree()
+            if viewport is not None and current_viewport!=viewport:
+                stale("Viewport changed while preparing this scroll.","viewport_changed","region")
+            viewport=current_viewport
+        else:
+            before=[]
+            if viewport is None:viewport=_baseline[1] if _baseline is not None else self.viewport()
         area=self.region(region,viewport)
-        modals=self.native_modals(before)
+        modals=self.native_modals(before) if verify else []
         if modals:
             contained=lambda m:area["x"]>=m["rect"]["x"] and area["y"]>=m["rect"]["y"] and area["x"]+area["width"]<=m["rect"]["x"]+m["rect"]["width"] and area["y"]+area["height"]<=m["rect"]["y"]+m["rect"]["height"]
             if region is None or not all(contained(m) for m in modals):
                 details={"action_executed":False,"verified":False,"region":area,"native_modals":modals,"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False,"next_step":"Handle the existing modal first, or choose a fresh explicit scroll region wholly inside its intended list. Do not scroll the underlying page through a modal."}}
-                observed=self.scroll_observation(before,viewport,observe)
+                observed=self.scroll_observation(before,viewport,observe,_max_nodes)
                 if observed:details["observation"]=observed
                 fail("modal_requires_region" if region is None else "blocked_scroll_region","Native modals are present. The intended scroll area must be explicit and inside every modal's bounds; otherwise handle the foreground modal first.",**details)
         x=area["x"]+area["width"]/2;y=area["y"]+area["height"]/2
         dx=area["width"]*.32;dy=area["height"]*.32
         points={"up":(x,y+dy,x,y-dy),"down":(x,y-dy,x,y+dy),"left":(x+dx,y,x-dx,y),"right":(x-dx,y,x+dx,y)}[direction]
-        baseline=self.signature(before,area)
         for attempt in range(max_attempts if verify else 1):
             strategy="short_drag" if attempt==0 else "native_swipe"
             if attempt==0:
                 self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
             else:
                 self.post("/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
+            if not verify:
+                result=self.after(expect,observe,max_nodes=_max_nodes)
+                result.update(strategy=strategy,attempts=1,progress_verified=False)
+                return result
             after,v=self.tree()
             reasons=[]
             if v!=viewport:reasons.append("viewport_changed")
             if self.native_modals(after)!=modals:reasons.append("modal_changed")
             if reasons:
                 details={"action_executed":True,"verified":False,"changed":False,"attempts":attempt+1,"reasons":reasons,"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_gesture_retry":False,"replay_action":False,"next_step":"Inspect the changed viewport/modal and choose the current target; do not continue a fallback gesture against the old page."}}
-                observed=self.scroll_observation(after,v,observe)
+                observed=self.scroll_observation(after,v,observe,_max_nodes)
                 if observed:details["observation"]=observed
                 fail("scroll_context_changed","A gesture was accepted, but the viewport or native modal context changed. This is not verified list progress; the fallback gesture was stopped.",**details)
-            if not verify:
-                result={"action_executed":True,"verified":False,"strategy":strategy,"verification_required":"Read actual scroll content and direction; progress verification was explicitly disabled."}
-                observed=self.scroll_observation(after,v,observe)
-                if observed:result["observation"]=observed
-                return result
-            changed=self.signature(after,area)!=baseline
+            changed=self.scroll_progress(before,after,area,direction)
             if changed:
-                result={"action_executed":True,"verified":True,"changed":True,"verification_scope":"content/geometry changed within gesture region; inspect correct direction and coverage", "attempts":attempt+1,"strategy":strategy}
-                observed=self.scroll_observation(after,v,observe)
+                result={"action_executed":True,"action_complete":True,"verified":True,"verification_deferred":False,"changed":True,"progress_verified":True,"verification_scope":"Stable accessibility anchors moved in the requested direction; business coverage is separate.", "attempts":attempt+1,"strategy":strategy}
+                observed=self.scroll_observation(after,v,observe,_max_nodes)
                 if observed:result["observation"]=observed
                 if expect:result["postcondition"]=self.wait(expect)
                 return result
         details={"action_executed":True,"verified":False,"changed":False,"attempts":max_attempts,"region":area,
                  "recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, including custom pickers/overlays that may not appear as native modals, or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
-        observed=self.scroll_observation(after,v,observe)
+        observed=self.scroll_observation(after,v,observe,_max_nodes)
         if observed:details["observation"]=observed
-        fail("no_scroll_progress","Gestures executed but exposed content/geometry did not change. The page may be an overview, boundary, blocked region or custom-rendered list. No progress does not prove an empty or complete list; inspect returned state and change the actual target instead of repeating.",**details)
+        fail("no_scroll_progress","Gestures executed but stable accessibility anchors did not show movement in the requested direction. The page may be an overview, boundary, blocked region or custom-rendered list. Changing numbers alone are not scroll progress. This does not prove an empty or complete list; inspect returned state before choosing the next action.",**details)
 
+    @action_result
     def scroll_find(self,selector,direction="up",max_swipes=6):
         predicate(selector);integer(max_swipes,"max_swipes",0,10)
         for count in range(max_swipes+1):
             found=self.find(selector,limit=2)
             if found["matches"]==1:
                 try:
-                    self.target(selector)
+                    self.target(selector,found=found)
                     return {"verified":True,"swipes":count,**found}
                 except WDAError as exc:
                     if exc.code not in ("offscreen_target","occluded_target"):raise
             elif found["matches"]>1:
                 fail("ambiguous_target","Several targets match while scrolling. Refine selector.")
             if count==max_swipes:break
-            self.swipe(direction,max_attempts=2)
+            self.swipe(direction,verify=False,observe="none")
         fail("search_exhausted","Target did not become hittable within max_swipes.",swipes=max_swipes)
 
+    @action_result
     def collect_list(self,row_type="Cell",max_pages=6,end_selector=None):
         integer(max_pages,"max_pages",1,10)
         if end_selector:predicate(end_selector)
         if not isinstance(row_type,str) or not re.fullmatch(r"(?:XCUIElementType)?[A-Za-z]+",row_type):fail("invalid_argument","Invalid row_type.")
         kind=row_type if row_type.startswith("XCUIElementType") else "XCUIElementType"+row_type
-        rows={};pages=[];reason="page_budget";end=False
+        rows={};pages=[];seen_pages=set();reason="page_budget";end=False
+        observed=self.observe(max_nodes=500)
         for index in range(max_pages):
-            observed=self.observe(max_nodes=500)
-            current=[n for n in observed["nodes"] if n["type"]==kind]
+            nodes=self.snapshots[observed["observation_id"]]["nodes"]
+            current=[n for n in nodes if n["type"]==kind]
             for n in current:
                 key=json.dumps({k:n[k] for k in ("type","name","label","value") if k in n},ensure_ascii=False,sort_keys=True)
                 rows.setdefault(key,n)
             pages.append({"page":index+1,"rows_seen":len(current),"truncated":observed["truncated"]})
-            if end_selector and self.find(end_selector,limit=1)["matches"]:
-                try:self.target(end_selector);end=True;reason="explicit_end_marker";break
+            found=self.find(end_selector,limit=2) if end_selector else None
+            if found and found["matches"]:
+                try:self.target(end_selector,found=found);end=True;reason="explicit_end_marker";break
                 except WDAError as exc:
                     if exc.code not in ("offscreen_target","occluded_target","ambiguous_target"):raise
-            if index==max_pages-1:break
-            try:self.swipe("up")
-            except WDAError as exc:
-                if exc.code!="no_scroll_progress":raise
+            # Collection already needs the next page, so consume it directly.
+            # Virtualized lists may replace every label in fixed row slots;
+            # requiring a shared moving anchor would discard that new page.
+            # Ignore value refreshes and unrelated controls for repeat detection.
+            page_key=json.dumps([{k:n[k] for k in ("type","name","label","rect") if k in n} for n in current],ensure_ascii=False,sort_keys=True)
+            if page_key in seen_pages:
                 reason="no_progress";break
+            seen_pages.add(page_key)
+            if index==max_pages-1:break
+            observed=self.swipe("up",verify=False,observe="tree",_baseline=(nodes,observed["viewport"]),_max_nodes=500)["observation"]
         return {"rows":list(rows.values()),"pages":pages,"stop_reason":reason,"end_marker_seen":end,"complete":False,
                 "coverage_verified":end and not any(p["truncated"] for p in pages),
                 "limitations":["Rows deduplicate by identical type/name/label/value; identical rows may collapse.","Only exposed accessibility labels are collected. Reconcile expected counts, screenshot-only fields, totals, currencies and dates before claiming business completeness."]}
@@ -528,10 +552,7 @@ class PhoneController:
         for index,step in enumerate(steps):
             try:
                 result=allowed[step["op"]](**step.get("args",{}));results.append(result)
-                # Observation is explicitly a read barrier; only mutation steps need verification before continuing.
-                if step["op"] not in ("observe",) and not result.get("verified"):
-                    return {"completed_steps":len(results),"stopped_at":index,"stop_reason":"verification_required","results":results,"complete":False}
-                if result.get("submitted"):
+                if result.get("submitted") and not result.get("submission_verified"):
                     return {"completed_steps":len(results),"stopped_at":index,"stop_reason":"submission_requires_verification","results":results,"complete":False}
             except WDAError as exc:
                 return {"completed_steps":len(results),"stopped_at":index,"stop_reason":exc.code,"error":exc.as_dict(),"results":results,"complete":False}

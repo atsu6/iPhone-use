@@ -150,6 +150,23 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(apps["annotations"]["idempotentHint"])
         self.assertEqual(apps["inputSchema"]["required"], ["query"])
 
+    def test_action_schema_exposes_optimistic_defaults_and_explicit_checkpoints(self):
+        response = self.exchange([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])[0]
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        for name in ("wda_tap", "wda_swipe", "wda_type_text", "wda_press_button", "wda_launch_app"):
+            with self.subTest(name=name):
+                properties = tools[name]["inputSchema"]["properties"]
+                self.assertEqual(properties["observe"]["default"], "none")
+                self.assertIn("expect", properties)
+                if name != "wda_tap":
+                    self.assertFalse(properties["verify"]["default"])
+        for name in ("wda_tap", "wda_swipe"):
+            self.assertNotIn("observation_id", tools[name]["inputSchema"].get("required", []))
+        batch_steps = tools["wda_batch"]["inputSchema"]["properties"]["steps"]["items"]["oneOf"]
+        for step in batch_steps:
+            op = step["properties"]["op"]["const"]
+            self.assertEqual(step["properties"]["args"], tools["wda_" + op]["inputSchema"])
+
     def test_stdio_apps_catalog_returns_public_evidence_without_wda_access(self):
         responses = self.exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
@@ -197,10 +214,21 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(responses[0]["error"]["code"], -32700)
         self.assertEqual(responses[1]["result"], {})
 
-    def test_swipe_schema_accepts_observe_none_and_preserves_verification(self):
+    def test_default_swipe_executes_once_without_progress_or_output_reads(self):
+        runtime, client = self.runtime()
+        result = runtime.call("wda_swipe", {"direction": "up"})
+        self.assertTrue(result["action_executed"])
+        self.assertFalse(result["verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(result["attempts"], 1)
+        self.assertNotIn("observation", result)
+        self.assertEqual(client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") or path == "/screenshot" for _, path, _ in client.calls))
+
+    def test_swipe_schema_accepts_explicit_progress_verification_without_output(self):
         runtime, client = self.runtime()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_swipe", {"direction": "up", "observe": "none"})
+            runtime.call("wda_swipe", {"direction": "up", "observe": "none", "verify": True})
         self.assertEqual(caught.exception.code, "no_scroll_progress")
         self.assertEqual(caught.exception.details["attempts"], 2)
         self.assertTrue(caught.exception.details["action_executed"])
@@ -222,7 +250,7 @@ class ProtocolTests(unittest.TestCase):
     def test_no_progress_error_image_is_mcp_image_content_and_retains_details(self):
         runtime, client = self.runtime()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_swipe", {"observe": "screenshot", "max_attempts": 1})
+            runtime.call("wda_swipe", {"observe": "screenshot", "max_attempts": 1, "verify": True})
         result = result_content({"error": caught.exception.as_dict()})
         self.assertTrue(result["isError"])
         self.assertEqual(result["structuredContent"]["error"]["code"], "no_scroll_progress")
@@ -232,10 +260,30 @@ class ProtocolTests(unittest.TestCase):
         import base64
         self.assertEqual(base64.b64decode(result["content"][1]["data"]), client.screenshot)
 
-    def test_batch_accepts_swipe_observe_none_and_stops_on_no_progress(self):
+    def test_batch_continues_optimistic_navigation_and_input_without_readback(self):
+        runtime, client = self.runtime()
+        text = "直接输入完整的长文本，不做试输入。" * 20
+        result = runtime.call("wda_batch", {"steps": [
+            {"op": "press_button", "args": {"name": "home"}},
+            {"op": "launch_app", "args": {"bundle_id": "com.example.phone"}},
+            {"op": "tap", "args": {"selector": {"label": "Target"}}},
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": text}},
+            {"op": "swipe", "args": {}},
+        ]})
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["completed_steps"], 5)
+        self.assertTrue(all(item["action_executed"] for item in result["results"]))
+        self.assertTrue(all(item["verification_deferred"] for item in result["results"]))
+        self.assertTrue(all(not item["verified"] for item in result["results"]))
+        self.assertEqual(client.elements[0]["value"], text)
+        self.assertEqual(client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") or path in ("/screenshot", "/wda/activeAppInfo")
+                             or path.endswith("/attribute/value") for _, path, _ in client.calls))
+
+    def test_batch_explicit_progress_check_stops_after_no_progress(self):
         runtime, client = self.runtime()
         result = runtime.call("wda_batch", {"steps": [
-            {"op": "swipe", "args": {"observe": "none"}},
+            {"op": "swipe", "args": {"observe": "none", "verify": True}},
             {"op": "press_button", "args": {"name": "home", "observe": "none"}},
         ]})
         self.assertFalse(result["complete"])
@@ -243,6 +291,44 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(result["error"]["action_executed"])
         self.assertEqual(client.swipe_count, 2)
         self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in client.actions()))
+
+    def test_batch_stops_after_uncertain_action_and_never_replays_it(self):
+        runtime, client = self.runtime()
+        client.home_error = WDAError("action_uncertain", "Home response was lost", uncertain=True)
+        result = runtime.call("wda_batch", {"steps": [
+            {"op": "press_button", "args": {"name": "home"}},
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Do not enter"}},
+        ]})
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["completed_steps"], 0)
+        self.assertEqual(result["error"]["code"], "action_uncertain")
+        self.assertTrue(result["error"]["uncertain"])
+        self.assertEqual([path for _, path, _ in client.actions()], ["/wda/homescreen"])
+
+    def test_batch_stops_after_submission_until_a_deliberate_checkpoint(self):
+        runtime, client = self.runtime()
+        result = runtime.call("wda_batch", {"steps": [
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Submit once", "submit": True}},
+            {"op": "press_button", "args": {"name": "home"}},
+        ]})
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["completed_steps"], 1)
+        self.assertEqual(result["stop_reason"], "submission_requires_verification")
+        self.assertTrue(result["results"][0]["submitted"])
+        self.assertEqual(sum(path == "/wda/keys" for _, path, _ in client.actions()), 1)
+        self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in client.actions()))
+
+    def test_home_and_text_accept_explicit_expected_next_state(self):
+        for name, arguments in (
+            ("wda_press_button", {"name": "home", "expect": {"label": "Target"}}),
+            ("wda_type_text", {"selector": {"label": "Target"}, "text": "Complete text", "expect": {"label": "Target"}}),
+        ):
+            with self.subTest(name=name):
+                runtime, _ = self.runtime()
+                result = runtime.call(name, arguments)
+                self.assertTrue(result["verified"])
+                self.assertFalse(result["verification_deferred"])
+                self.assertIn("postcondition", result)
 
     def test_exact_enabled_tree_string_survives_protocol_schema(self):
         runtime, client = self.runtime()
@@ -297,18 +383,44 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "invalid_argument")
         self.assertEqual(client.calls, [])
 
-    def test_coordinate_and_custom_region_require_observation_before_phone_access(self):
+    def test_coordinates_and_custom_region_accept_no_observation_id(self):
+        for name, arguments, expected_path in (
+            ("wda_tap", {"x": 10, "y": 200}, "/wda/tap"),
+            ("wda_swipe", {"region": {"x": 50, "y": 200, "width": 200, "height": 200}}, "/wda/dragfromtoforduration"),
+        ):
+            with self.subTest(name=name):
+                runtime, client = self.runtime()
+                result = runtime.call(name, arguments)
+                self.assertTrue(result["action_executed"])
+                self.assertTrue(result["verification_deferred"])
+                self.assertEqual(client.actions()[-1][1], expected_path)
+                self.assertFalse(any(path.startswith("/source") or path == "/screenshot" for _, path, _ in client.calls))
+
+    def test_incomplete_or_mixed_coordinates_fail_before_phone_access(self):
         runtime, client = self.runtime()
         invalid = [
-            ("wda_tap", {"x": 10, "y": 200}),
+            ("wda_tap", {"x": 10}),
+            ("wda_tap", {"y": 200}),
             ("wda_tap", {"selector": {"label": "Target"}, "x": 10}),
-            ("wda_swipe", {"region": {"x": 50, "y": 200, "width": 200, "height": 200}}),
         ]
         for name, arguments in invalid:
             with self.subTest(name=name, arguments=arguments), self.assertRaises(WDAError) as caught:
                 runtime.call(name, arguments)
             self.assertEqual(caught.exception.code, "invalid_argument")
         self.assertEqual(client.calls, [])
+
+    def test_unbound_coordinates_and_region_still_check_viewport_before_mutation(self):
+        for name, arguments in (
+            ("wda_tap", {"x": 390, "y": 200}),
+            ("wda_swipe", {"region": {"x": 300, "y": 200, "width": 200, "height": 200}}),
+        ):
+            with self.subTest(name=name):
+                runtime, client = self.runtime()
+                with self.assertRaises(WDAError) as caught:
+                    runtime.call(name, arguments)
+                self.assertEqual(caught.exception.code, "invalid_argument")
+                self.assertFalse(caught.exception.as_dict().get("action_executed", False))
+                self.assertEqual(client.actions(), [])
 
     def test_other_process_holding_operation_lock_refuses_all_phone_requests(self):
         runtime, client = self.runtime()

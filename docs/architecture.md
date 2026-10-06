@@ -25,10 +25,10 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 | `wda_observe` | tree / screenshot / both，当前设备视口与观察 ID | 默认最多 100 个节点、过滤视口外节点、跳过昂贵 visible 属性；截断和无标签需截图。 |
 | `wda_apps` | 已选设备安装列表、本地核验别名、Apple Search 元数据 | 返回来源 / 发布者 / 核验时间；商店存在不表示本机已安装，失败是明确工具错误。 |
 | `wda_find` / `wda_wait` | 精确查询与有界等待目标 selector | 唯一目标与当前页面语义；通用标签不代表正确页面。 |
-| `wda_tap` | selector 点击或引用新观察的设备点点击 | 视口与观察约束、可选 expect 与后续观察；HTTP 成功不是业务成功。 |
-| `wda_swipe` | 当前区域短拖动，必要时原生 swipe | 默认验证、最多 2 次尝试；observe 只控制输出；无进展也返回已执行状态和所选新观察，不证明空列表 / 到底。 |
-| `wda_type_text` | 对明确文本框输入并回读 | 默认无换行、无 submit；不一致 / 不可核验不能继续提交。 |
-| `wda_press_button` / `wda_launch_app` | 支持的系统按钮与 App 启动 | Home 用专用 homescreen 并核验 SpringBoard；音量只表示执行；启动核对实际前台。 |
+| `wda_tap` | selector 点击或设备点点击 | 唯一性 / hittable / bounds 保留；ID 可选，仅检查 App / viewport。expect 按需。 |
+| `wda_swipe` | 默认一次短拖动 | 默认不读取 XML 验证，verify=true 才检查位移并允许最多 2 次尝试。无进展不证明空列表 / 到底。 |
+| `wda_type_text` | 一次输入完整文本 | 默认不回读、无换行、无 submit；verify=true 精确回读，不一致时不提交。安全字段由用户接管。 |
+| `wda_press_button` / `wda_launch_app` | 支持的系统按钮与 App 启动 | Home 用专用 homescreen；默认不轮询前台，verify=true 才核验。 |
 | `wda_batch` | 最多 20 步的已知短路径 | 顺序执行，failed / uncertain 停止；不能预测未知页面或盲批发送。 |
 | `wda_scroll_find` | 最多 10 次 swipe 查找目标 | 返回找到 / 未找到及边界，不无限滚动。 |
 | `wda_collect_list` | 默认 Cell / 6 页、最多 10 页的列表采集与去重 | complete 始终 false；end_selector 的可点击终点证据不代替条数 / 金额对账。 |
@@ -40,13 +40,17 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 
 ## 观察与动作约束
 
-观察由 WDA 的 source / screenshot 和设备 window size 形成；screenshot 模式跳过 source。返回坐标单位为设备点，截图像素可能具有不同缩放。坐标点击必须使用对应当前视口的 `observation_id`，30 秒过期，动作前再检查 App、页面 / 图像签名与视口变化。自选滚动区域使用 tree/both 的完整内部节点（不受返回截断影响），只比较中心位于区域内的控件及全页原生 Alert/Sheet，包括无标签浮层；区域外轮播不影响滚动。区域内异步刷新仍需新观察；截图单独模式不能提供区域语义锚点。切换 App、用户接管、重新连接或设备旋转后重新观察。
+观察由 WDA 的 source / screenshot 和设备 window size 形成；screenshot 模式跳过 source。返回坐标单位为设备点，截图像素可能具有不同缩放。坐标和自选滚动区域的 observation_id 可选；提供时检查同 Runtime、真实前台 App 与 viewport，不再强制 30 秒过期或全页像素 / 内容指纹一致。时间、数字、输入光标或轮播刷新不会阻断动作。App 切换、接管和旋转后根据下一步需要获取当前状态；同一 App 的页面变化不由 ID 保证，调用方根据已知路径与下一步观察决定。
 
-独立 `wda_observe` 使用 mode=tree/screenshot/both；动作输出使用 observe=none/tree/screenshot/both。swipe 默认 observe=tree，复用进展验证的树；none 省去返回观察，仍执行 verify=true 的内部检查。只有显式 verify=false 才省去滚动进展验证。`no_scroll_progress` 表示已接收有界手势、暴露的内容 / 几何未确认变化，携带执行和验证状态、所选新观察、尚未证明终点的恢复建议。实际页面可能仍是总览入口、边界、浮层或自绘列表，应据观察改变目标而非重复同一手势。
+独立 wda_observe 使用 mode=tree/screenshot/both；动作输出使用 observe=none/tree/screenshot/both，默认 none。普通动作只执行一次并返回 verified=false、verification_deferred=true，不触发独立核验或 batch 停止；action_complete=true 只表示命令处理完成。已知连续步骤直接 batch；下一步需要新页面时，在动作里要求 tree/both，用同一份结果同时计划下一步并判断前一步效果。最终关键动作用 expect / verify=true 或一次终态读取验收。
 
-0.1.4 在手势前检查原生 Alert / Sheet：默认区域被拒绝，有意滚动浮层列表需新观察及完全处于所有当前浮层边界内的区域。每次手势后先核对视口及原生浮层变化，再判断内容进展；上下文变化时停止备用手势。verify=false 仍执行上下文检查，仅省去进展比较。自绘面板未必有原生模态节点，不能据此证明无浮层。自选区域失效返回原因、新 tree 观察，以及节点数 / 内容 / 几何变化诊断；坐标 tap 仍保持全页保护。
+默认 swipe 只读取 viewport 并执行一次短手势；显式 observe 会增加所请求的页面读取。verify=true 才读取前后树、检查原生 Alert / Sheet 与 viewport、比较目标区域的稳定 name / label 锚点位移，并允许一个备用手势；原位数字 / value 刷新不算进展。上下文改变时停止备用手势，自绘列表无稳定锚点时可能无法验证。no_scroll_progress 附已执行证据和所选观察，但不证明无持仓 / 无数据 / 已完整采集。collect_list 每次只滑一次，直接采集新页面，再按目标行 type / name / label / rect 判断重复页；忽略 value 和其他控件刷新，标签全换的虚拟化页也纳入，不用备用手势跳页。复用完整树与已知 viewport；scroll_find 复用已找到的元素结果。
 
-App 激活仅执行一次，之后最多 5 秒读取前台，匹配即继续。超时或读取失败保留已接受动作证据；等待不重放 activate，前台通过也不能代替目标页 / 登录 / 业务验收。
+App 激活与 Home 默认执行一次，不读取前台验收。verify=true 时，激活最多 5 秒等待目标 App，Home 最多 2 秒等待 SpringBoard；匹配即继续。失败保留已接受动作证据，不重放 activate / Home。输入默认复用 editable 类型检查并一次写完整文本，精确回读按需开启；不要求短中文 / ASCII 试输入。
+
+WDA 16.14.0 支持 session 的 POST /appium/settings。客户端第一次创建或接管某 session 后设置 waitForIdleTimeout=0、animationCoolOffTimeout=0；同一客户端后续复用时不重复配置。后者原默认 2 秒是等待预算，并非每次固定休眠；XML 与短拖动会使用该预算。设置失败保留真实 session 身份与明确失败证据，不自动重复设置或手机写动作。共享同一 WDA 服务的客户端可能共享配置；页面仍在转场时，根据下一步结果等待或重定位。
+
+GET 及 POST /element(s) 等已知元素查询属于读取，连接失败最多重试一次并共用原截止时间。invalid session 的非元素查询可重建 session；旧元素 ID 不跨会话。点击、输入、激活、Home、手势及 settings 等写请求不自动重试，避免重复副作用。
 
 默认轻量树避免为每个节点计算昂贵属性，但无法保证元素真实可点击。固定表头、浮层、自绘和无标签控件需要截图验证。树中元素、`visible=true`、HTTP 200 和页面指纹变化分别只证明一个层次的事实，不能扩展为完整任务成功。
 

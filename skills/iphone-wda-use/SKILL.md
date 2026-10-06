@@ -1,83 +1,62 @@
 ---
 name: iphone-wda-use
-description: 通过 WebDriverAgent MCP 工具操作已就绪的真实 iPhone，使用控件定位、验证后的点击滚动、中文输入和有界列表采集完成任务；适用于 App 导航、读取及已授权写入，也指导密码或 Face ID 认证时的用户接管与继续。
+description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集及密码或 Face ID 认证接管。
 ---
 
 # 用 WDA 完成 iPhone 任务
 
-先确定用户要交付的结果和完成条件；多 App 任务列清各 App 的读取范围、核对条件和最终文件 / 外部记录。复用已有 READY 通道；正常任务首次核验用 `wda_ready(recover=true)`，也可以省略 recover 使用默认 true。需要安装或恢复时使用 `iphone-wda-setup`。目标 App 的登录、读到全部数据、草稿保真和写入成功都要单独验证。HTTP 成功只表示请求得到响应。
+先确定用户要交付的结果和完成条件。默认把一次正常返回的动作当作已按计划执行，继续准备下一步；不要为每次点击、切页、Home、启动或输入专门调用观察来证明成功。下一步需要页面信息时，读取一次并顺带判断上一步是否生效；明确未生效再调整或重做。最终关键操作、发送或提交结果、关键文本以及交付文件需要有实际结果证据。
 
-每完成一个 App 或一段采集，更新进度并继续剩余步骤。工具的 `ok`、`verified`、`complete` 和宿主显示的 completed 只描述对应调用或阶段，不能触发整项任务的最终回答。只有全部完成条件已验证、最终交付已写入并回读后才结束；确有阻塞时说明已完成范围、未完成项和具体阻塞，不能用“接下来读取……”作为任务结束语。需要较长操作时持续给出简短进度。
+工具的 `ok`、`verified`、`complete` 及宿主的 completed 只描述对应调用，不代表整个任务完成。`action_complete` 表示该命令处理完毕，不是业务结果已验收。正常返回的 `verified=false` 表示没有单独验收，不是失败，也不要求停下。按已知路径继续，直到全部完成条件满足、关键结果已核对并完成交付；不能用“接下来读取……”提前结束。较长任务持续给出简短进度。
 
-## 正常任务的 READY 入口
+## READY 与认证
 
-不要仅因“先检查一下”或谨慎而主动设置 `recover=false`。它用于用户明确禁止重启，或明确要求只读诊断的场景；这时保留限制，不自动改成 true。常规操作任务中的默认恢复只针对持续通道故障，且只重启归属已核验的本插件服务，不重放手机业务动作。
+复用已有 READY 通道，不为每步重验。正常任务首次调用 `wda_ready(recover=true)`，也可省略 recover 使用默认 true；需要安装或恢复时使用 `iphone-wda-setup`。`recover=false` 仅用于用户明确禁止重启或明确要求只读诊断，不能因谨慎主动设置或自动覆盖用户限制。
 
-按 READY 的实际 `ready` 和 `state` 继续：
+- `ready=true, state="ready"`：通道已可用。直接复用 READY 中的 `observation` 准备下一步，不立即重复 observe。
+- `ready=false, state="recovering"`：按 recovery 的 job_id 和 status 参数查询同一工作。从返回的 `jobs` 数组找到该工作，recovery_phase=serving 后重验 READY；长期 Runner 可以保持 running，不等 succeeded，不重复 start。
+- `ready=false, state="recovery_required", reason="recovery_disabled"`：仅在用户指令允许恢复时按 next_tool / next_arguments 调用 recover=true；明确禁止重启则保留限制并报告阻塞。
 
-- `ready=true, state="ready"`：核对 proof 和当前观察后操作目标 App。
-- `ready=false, state="recovering"`：正常后台恢复状态，记录 recovery 的 job_id，按 status_tool / status_arguments 查询同一工作。到 recovery_phase=serving 后重新调用 READY；Runner 工作可以保持 running，不等 succeeded，也不重复 start。
-- `ready=false, state="recovery_required", reason="recovery_disabled"`：本次调用禁止发起恢复。若当前用户指令允许恢复，按返回的 next_tool / next_arguments 再调用一次；若用户明确禁止重启或只要诊断，保持限制并报告具体通道阻塞，不能把工具的建议当成新授权。
+后两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
-后两种状态正常返回、没有 error 且 MCP isError=false，只表示工具正确报告了未就绪；它们不表示手机可操作或任务完成。拒绝恢复、冷却期、手机锁定及其他实际错误仍按对应原因处理。恢复后重新观察、定位并核验原任务进度，不能重放先前可能已经生效的动作。
+App 实际要求密码、PIN、验证码或 Face ID / Touch ID 时，按 [认证接管与恢复](references/authentication.md) 请用户在 iPhone 上完成并回复“继续”。保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到完成通知后获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
 
-## 应用认证与用户接管
+## 按下一步需要选择观察
 
-当前 App 实际要求密码、PIN、验证码或 Face ID / Touch ID 时，按 [认证接管与恢复](references/authentication.md) 提示用户在自己的 iPhone 上完成认证；不要把它当作 schema 错误或 WDA 故障重试。若新观察已显示认证完成，直接核验目标页并继续。
+已知唯一语义目标和已知导航路径使用默认 `observe="none"`，可以连续执行或合并为 batch。下一步需要辨认未知页面、选区域或读取内容时，在本次动作直接设置 `observe="tree" / "screenshot" / "both"`，用返回的嵌套 `observation` 同时规划下一步和顺带判断上一动作。不要先用 none，再专门 observe 作验证而增加一个模型回合。独立读取用 `wda_observe(mode=...)`，不要混用 mode 与 observe。
 
-1. 保留已验证进度、当前 App / 页面、未完成项和待继续步骤；已执行但未核验的动作单独标明。
-2. 用宿主的用户输入方式请求接管，说明具体 App、需要完成的认证，以及完成后回复“已解锁，继续”。例如：“当前 App 需要 Face ID 或密码验证。请在 iPhone 上完成认证并停留在目标页面，完成后回复‘继续’；我会接着读取剩余明细。”密码、手机解锁码和验证码由用户在手机输入，不索取或放入工具参数。
-3. 等待接管完成时暂停该 iPhone 的动作、读取和截图，避免打断认证或记录凭据；不循环点击认证按钮、Home、launch 或重启 WDA。没有等待输入能力时明确标记“等待用户认证”，保持任务未完成；不能把超时或没有回复当作已完成。
-4. 用户明确通知完成后重新 `wda_observe`，核对当前 App、认证提示已消失和目标页；旧 observation_id、坐标和元素 ID 作废，重新定位。手机锁定、连接断开或通道异常时才先恢复并重验 READY，App 密码 / Face ID 本身不需要重启服务。
-5. 按新状态从最后已验证的步骤继续原任务。用户接管时可能已完成后续点击或提交，先核验实际结果再执行剩余步骤，不能重放整个批次。认证通过只是解除阻塞，全部交付条件仍须完成。
+树提供 `nodes`、iPhone 点坐标的 `viewport` 和 `observation_id`。保持 `include_invisible=false`、`max_nodes=100`、`expensive_visibility=false`；只查一个目标用 `wda_find` / `wda_wait`，不重复获取整树。自绘内容、遮挡或缺失标签需要视觉判断时才取截图。screenshot 跳过 XML；both 同时提供树和图。树截断或 `in_viewport=true` 不能证明内容全量或目标未被遮挡。截图来自 WDA `/screenshot`；若 App 出现分享浮层，处理当前状态，不循环重复同一路径截图。
 
-## 选择最少且足够的观察
+## App 与常规动作
 
-用 `wda_observe(mode="tree")` 获取紧凑的 `nodes`、`viewport` 和 `observation_id`，默认保持 `include_invisible=false`、`max_nodes=100`、`expensive_visibility=false`。快速树过滤视口外节点，跳过昂贵的 `visible` 计算；`in_viewport` 只是几何交集。只查某个按钮时用 `wda_find` 或 `wda_wait`；已有唯一定位的导航不必反复获取完整 XML 和截图。
+已知并核验过的 bundle ID 可直接 launch；需要离线查常用 App 时用 `wda_apps(source="catalog", query=...)` 或 [常用 App 目录](references/apps.md)。未知或同名 App 用 `source="auto"` 查本机候选，仍无结果才查 Apple。不要连续猜 ID；招商银行主应用为 `com.cmbchina.MPBBank`。商店或目录记录不证明本机安装，`installed_verified=true` 才是安装证据。启动后准备下一步的观察会同时显示实际前台，不额外增加默认前台验收。
 
-自绘内容、图像、遮挡、固定表头、位置冲突或缺失标签需要截图时用 `mode="screenshot"` / `"both"`。screenshot 模式跳过 XML，返回 `image.path` 并直接附图；both 同时提供树。树截断、没有 label 或 `visible=true` 都不能证明页面内容完整或元素没有被遮挡。截图读取来自 WDA 的 `/screenshot`；仍须留意目标 App 是否产生分享浮层，不能宣称任何 App 都不会检测截图。
+- `wda_launch_app`：激活一次后继续；默认 `verify=false, observe="none"`。下一步需要新页面信息时设置 observe；关键入口确需证明目标 App / 页面时显式 `verify=true` 或传 `expect`。
+- `wda_tap`：优先使用唯一 `selector`，可组合 label/name/value/type/enabled；enabled 接受布尔值或精确字符串 `"true" / "false"`。predicate 单独使用，保留实际标签里的换行、引号和反斜线；rect、visible、in_viewport 不是 selector 字段。目标不唯一时用当前信息区分，不随意选第一项。语义不足时用 iPhone 点坐标 x/y；observation_id 可选，提供时必须来自同一 Runtime，并仅核对 App / 视口上下文，不比较整图或因经过 30 秒而拒绝。已有页面信息足以定位时不额外读树或截图；切页、用户接管或旋转后按当前信息重新定位。
+- `wda_press_button`：仅用 schema 中支持的按钮。Home 使用专用 homescreen 路径，默认 `verify=false`，正常返回即可准备下一步；明确需要主屏状态时显式 `verify=true`。MCP 绑定不可用时按 [工具故障与代码调用](references/tool-fallback.md) 继续同一已授权动作。
+- `wda_swipe`：方向为手指移动方向，up 通常浏览后续内容。默认 `verify=false, observe="none"`，只执行一次手势，不读取 XML 验进展或自动尝试另一手势。可按已知列表传 region，不强制 observation_id 或 tree；提供 ID 时仅核对同一 Runtime 的 App / 视口。下一步读取列表内容时顺带判断是否移动，明确没动再看入口、边界、浮层或区域。确需单独判断滚动进展时显式 `verify=true`；它有界检查列表几何变化，至多 max_attempts 次尝试。调试需要状态时在同次调用指定 tree / both。
+- `wda_wait`：确实依赖控件出现时使用有界 timeout；无需固定长 sleep，也不为所有导航补一个 wait。`wda_scroll_find`：有界查找未知位置的目标；找到后继续下一步，不再次重复查找同一结果。
 
-独立读取用 `wda_observe(mode=...)`，动作后的返回内容用对应工具的 `observe=...`，不要混用参数名。`wda_swipe` 支持 `observe="none" / "tree" / "screenshot" / "both"`，默认 tree；none 只省去返回观察，仍执行默认滚动验证。`verify=false` 才关闭滚动进展验证，返回 `verified=false`，不能据此认定滚动成功；视口和原生浮层安全检查仍执行。调试无进展时用 tree 或 both，使错误携带可检查的新状态。
+`expect` 和 `verify=true` 是显式验收选项，用于最终关键状态或实际依赖，不是每步必填。HTTP accepted 与业务成功是不同事实；常规任务乐观继续，最终结论只依据关键结果。明确 error、输入 / 提交 uncertain 或动作部分完成时先查看实际状态，再决定剩余步骤。
 
-## 查找 App bundle ID
+## 输入与发送
 
-未知 bundle ID 时先调用 `wda_apps(query="招商银行")`，不要用多个猜测 ID 反复 launch。默认 `source="auto"` 优先使用本机已安装 App 的可验证信息，再查插件的常用 App 目录；没有匹配时查 Apple 软件元数据。查看候选名称、开发者 / 商店信息和来源，区分同名 App、地区版本与企业版。`installed_verified=true` 才是本机安装证据；Apple 商店或静态目录中的 ID 仅证明对应商店条目，启动后仍须验前台 App。
+直接用 `wda_type_text(selector, text)` 输入用户需要的完整内容，不先写测试短文本或 ASCII。默认 `replace=true, allow_newlines=false, submit=false, verify=false, observe="none"`；普通搜索、筛选等输入后可接着做下一步，未知下一页面时在本次动作返回观察并顺带判断。需要保留已有草稿时按当前内容决定替换或追加；关键最终文本可显式 `verify=true` 核对完整字段。密码、手机解锁码和验证码由用户输入。
 
-需要限定来源时用 `source="installed" / "catalog" / "apple"`，商店地区默认 `country="cn"`。Apple 搜索结果不唯一时，先按明确的商店条目确认，不自动取第一项。已核验目录可直接查 [常用 App 与来源](references/apps.md) 或 [结构化目录](references/apps.json)，其中招商银行为 `com.cmbchina.MPBBank`。目录缺少目标时按参考里的 Apple Search / Lookup 方法查询；只发送公开 App 名称或商店 ID，不把手机安装清单、账户字段或用户页面内容发给商店接口。
+多行内容可能在聊天控件里触发 Return 发送。只有确知当前 TextView 是合适的多行编辑器时才设置 `allow_newlines=true`；不能暗中把用户要求的格式改成单行。允许换行不等于授权发送。用户已授权发送时，在发送前的一次观察或显式输入验收中核对目标会话和完整草稿，再发送一次；发送后核对最终内容和发送次数。`submit=true` 不证明提交结果，提交后以真实结果页 / 记录验收。明确未发送才补做，不根据 timeout、未单独验证或普通 `verified=false` 自动重发。
 
-## 操作与后置条件
+## 连贯执行与列表采集
 
-- `wda_launch_app`：使用已核验的 bundle ID 打开目标 App，给出可识别目标页的 `expect`；未知 ID 先用 `wda_apps` 查找。
-- `wda_tap`：优先传当前页面唯一的 `selector`，可组合 `label/name/value/type/enabled`；enabled 接受布尔值或观察树中的精确字符串 `"true" / "false"`，例如 `{"label":"下一步","enabled":true}`。`predicate` 单独使用，不与精确字段混写。label/name/value 保留实际内容，包括换行、引号和反斜线；插件负责 NSPredicate 字符串编码，不删改真实标签。rect、visible、in_viewport 等观察元数据不是 selector 参数。工具检查唯一目标、视口和 hittable；找到多项时用当前观察区分，不随意选第一个。按钮没有可用语义时，传设备点 `x/y` 和同一当前观察的 `observation_id`；坐标观察 30 秒过期，并检查 App、页面和视口是否变化。不要使用截图像素、Mac 屏幕坐标或页面变化前的 ID。
-- `wda_wait`：等待实际目标控件出现，使用有界 timeout，避免固定长 sleep。等待结束仍要核对目标页，单个通用“返回”按钮不适合作为页面唯一证据。
-- `wda_press_button`：只使用 schema 支持的系统按钮。`name="home"` 使用 WDA 的专用 homescreen 路径，并等待前台变成 SpringBoard；只有该状态核验成功才能视为已回主屏。音量键没有业务后置验证。Home 返回 `postcondition_failed` 或前台未变时重新观察，不因 HTTP 200 宣称成功，不重复同一按钮循环；MCP 层不可用或出现可复现的确定性工具问题时，按 [工具故障与代码调用](references/tool-fallback.md) 执行同一已授权动作。
-- `wda_swipe`：方向表示手指移动方向，`up` 通常向列表后续内容浏览。选择当前列表内容 `region` 时必须传当前 tree / both 观察的 `observation_id`；screenshot-only 观察不用于自选滚动区域。工具检查观察时效、App、视口、中心点落在区域内的节点，以及全局 Alert / Sheet 浮层；没有区域锚点时拒绝执行。区域外轮播变化不再使该滚动观察失效；坐标 tap 仍严格检查整个观察。默认区域可省略 region 和 ID。保持 `verify=true` 与 `max_attempts=2`。工具先尝试 0.1 秒短拖动，必要时使用原生 swipe；返回验证仅表示区域内内容 / 几何变化，还要检查新增内容、方向或期望控件。遇 `stale_observation` 时先重新观察并核对列表区域；区域内也持续异步变化且默认区域确实覆盖目标列表时，可用默认区域滚动，再核对新增行，不连续重试同一过期 ID。`no_scroll_progress` 表示手势已执行、暴露的内容 / 几何没有确认变化，错误中的 observation 是动作后的状态（observe 为 none 时省略）；它不证明空列表或已读到底。先检查是否停在账户总览等入口页，必要时点实际列表入口；否则核对边界、浮层、自绘内容或另选稳定区域，不连续重复同一手势。某页成功的区域和手势不自动适用于另一页。
-- `wda_scroll_find`：需要向下查找时用有界 `max_swipes`，找到目标后核对所在页面；到边界仍未找到就报告未找到，避免盲目滚动。
+用 `wda_batch` 合并已知短路径，最多 20 步；常规 tap、launch、Home、输入和滚动无需 expect，普通 `verified=false` 不阻断后续步骤。可以在计划末尾放一次 observe，或只在下一步需要信息的位置观察。明确错误、不确定动作或未验收的 submit 会停止；按 completed_steps / stopped_at 和每步结果继续剩余步骤，不重放整个批次。未知页面、认证及动态弹窗需要新信息时再分段，不把未授权发送混入导航。
 
-tap 和 launch_app 可传 `expect` 验后置条件，并选择足够的 `observe` 返回；动作后的新状态在嵌套 `observation` 中。没有 expect 的 tap 会返回 `verified=false`，launch_app 的 `foreground_verified=true` 只验前台 App。对读取、展开详情、切换页签应验目标标题和关键字段；对提交应验结果页或写回内容。结果为 failed / uncertain 时先新观察，不重放可能已经生效的写入。控件存在或树指纹改变不能代替整个业务任务的完成条件。
+`wda_collect_list(row_type="Cell", max_pages=6)` 有界采集最多 10 页，每次只滑一次并直接采集新页，复用完整树和 viewport；按目标行判断重复页，不因虚拟化列表标签全换而丢弃新页，也不额外尝试备用手势。返回 rows、pages、stop_reason，complete 始终为 false；相同 type/name/label/value 会去重，实际相同显示的记录可能被折叠。可传 end_selector 作为覆盖证据，最终按用户要求核对范围、条数、总额、日期和缺失字段；达到上限或无进展不能认定已全量。详情字段不足时进入详情读取，不要求每次进入详情都另验一次。具体关键验收见 [采集与输入验收](references/verification.md)。
 
-遇 `occluded_target` 先检查截图和当前浮层。目标控件可能仍在背景页的树中，enabled / 视口交集也不能证明可点；自定义半屏面板可能没有原生 Alert / Sheet 节点或可读标题。定位检查在 click 前失败时，该点击没有执行，不能推断“刚才的点击打开了浮层”。先找当前可用的关闭 / 返回入口，或依据新观察确认可安全关闭的面板外区域；关闭后重新观察再定位原目标，不用裸坐标强点被遮挡的背景按钮，也不靠重复滚动碰运气。
+## 明确异常时调整
 
-遇自选 region 的 `stale_observation`，先看失效原因，再用新 tree / both 观察重新核对区域；不要复用旧 ID。新 ID 也持续失败时，区域内数字等异步更新可能触发严格指纹校验，但当前证据不充分时不能断言是误报。先核对 App / 视口、浮层和真实列表位置；确认默认区域覆盖目标后可以省略 region / ID 滚动，再核验新增内容。原生浮层存在时，`modal_requires_region` / `blocked_scroll_region` 表示尚未执行手势：先处理浮层，或从新观察选完全位于所有当前原生浮层范围内的目标列表区域。`scroll_context_changed` 则表示手势已经执行后检测到视口或原生浮层变化，先重新观察处理上下文，不能当作滚动成功或继续同一手势。以上原生检查不能识别所有自定义面板，仍需按截图处理遮挡。
+`occluded_target` 在 click 前失败时没有发出点击；不能推断失败点击打开了浮层。准备下一步时检查当前截图 / 树，处理真实关闭入口或面板外可安全关闭的位置，再继续。`offscreen_target` 先把目标移入可点范围。自定义半屏面板可能没有原生 Alert / Sheet 节点，不根据背景树仍有按钮就认为无遮挡。
 
-`offscreen_target` 表示当前目标中心不在视口内；树里出现或部分露出的卡片仍可能不可点。先滚动至可点范围再重新定位。batch 已完成的前序步骤仍可能生效，按 completed_steps / stopped_at 和每步结果继续剩余步骤，不重放完整批次。launch 的前台验证有界轮询真实 App，不重复 activate；仍失败时先只读观察，检查目标 App 是否已经打开或有系统提示，再决定剩余步骤。
+显式滚动验证返回 `no_scroll_progress` 只表示已执行手势但没有证明列表移动，不证明空列表或到底。结合该调用返回的 observation 判断列表入口、边界、浮层或自绘内容，不盲目增加尝试次数。`scroll_context_changed` 表示已执行手势后上下文发生变化，先处理新状态；这些检查按显式验证使用，普通手势不为验证而额外读树。
 
-错误携带 `action_executed=true`、`action_complete=false` 时，至少一个手机动作已被 WDA 接收，但完整操作或后续读取没有完成；即使 `uncertain=false`，也不能重放整项点击、输入或批次。先读当前页面 / 字段，再按证据决定剩余步骤。`local.pid.0`、`wda_foreground_unavailable` 或 XCTest Code 41 属于通道故障：调用 `wda_ready(screenshot=false)` 按返回的 recovery 恢复；`wda_observe` 本身只读，不会自动重启服务。后台恢复期间沿给定 job_id 查看 setup status，待 jobs 中该工作的 recovery_phase 为 serving 后重新验 READY；恢复通道不会替你重放失败的业务动作。具体边界见 [工具故障与代码调用](references/tool-fallback.md)。
+`action_executed=true, action_complete=false` 或 `uncertain=true` 表示动作或部分步骤可能已生效；输入、发送、支付、下单等先读实际内容 / 记录，不能重放整项操作。纯查询的短暂失效可由工具有界重读，它不等同于执行了手机动作。`local.pid.0`、`wda_foreground_unavailable` 或 XCTest Code 41 是通道故障，按 READY 指引恢复，复用新观察继续剩余任务；服务恢复不重放业务动作。
 
-## 中文与聊天输入
-
-用 `wda_type_text(selector, text)` 在明确的文本框输入，先用无发送行为的短中文 / ASCII 混合文本验证，再输入长内容。读取返回的字段内容严格核对首字符、汉字、正负号、标点、空格和换行；工具无法回读或不一致时保留未核验状态，不能继续发送。安全输入框不可回读时让用户自行输入。
-
-默认 `replace=true`、`allow_newlines=false`、`submit=false`。保留已有草稿时先读取，按任务选择是否替换；`replace=false` 追加并核对完整字段。多行文本可能在聊天控件中按 Return 发送；收到拒绝后，仅在仍满足用户目标时改用单行草稿，或先确认观察到的 TextView 能安全保留换行再显式设置 `allow_newlines=true`，其他字段类型仍拒绝换行。用户明确需要多行且当前控件不支持时报告具体限制，不能暗中改变交付格式。允许换行并不保证没有副作用，也不等于允许发送。发送在草稿完整核验且用户任务已包含发送意图时单独执行，并回读收件位置、发送次数和最终内容。`submit=true` 只验证提交前文本，返回 `submission_verified=false`，仍须核对提交结果。不要因“操作微信”或“准备汇总”自动发送消息，也不要为已明确授权的发送增加重复许可。
-
-## 减少往返并记录边界
-
-用 `wda_batch(steps=[{"op":"tap","args":{...}}, ...])` 合并已知短路径，最多 20 步，每步采用对应单工具参数；所有参数在动作前验证，失败、不确定或未核验 mutation 会停下。tap 和 launch_app 需显式 expect 才能继续后续步骤；Home 在前台核验成功后可继续，音量键会停在该步；输入 submit 后也停下等待核验。适合“带 expect 的已知入口 → 带 expect 的展开 → observe”，或带页面后置条件的返回点击。不要批量预测未知页面、认证、动态弹窗或将未审核的输入和发送合成一步。
-
-长列表使用 `wda_collect_list(row_type="Cell", max_pages=6)`，最多 10 页：返回 `rows`、`pages`、`stop_reason` 和始终为 false 的 `complete`。去重按相同 type/name/label/value，两个实际相同显示的记录可能被折叠。可传明确 `end_selector`；只有它在视口内、可点击且各页未截断时 `coverage_verified=true`，仍需对账条数、总额、日期和截图字段才能称业务全量。核对分页范围、展开状态及用户指定过滤条件；达到上限、无进展或缺少页面内容不能称全量。详情字段缺失时单独进入详情核验。处理日期、币种、订单状态和账户分区时读取 [采集与输入验收](references/verification.md)。
-
-`wda_metrics` 用来分别查看工具 / HTTP 耗时、调用次数、观察与动作成本。复用会话、按需观察和 compound tools 可减少客户端启动和模型往返；不承诺消除模型响应延迟。已有历史长间隔不等于全部时间用于模型思考，不把未做的业务验证算进工具成功率。
-
-优先用已封装的工具；工具不可用时允许为明确的已授权动作调用随插件提供的代码入口。代码调用也必须复用同一会话、操作锁和校验，遵守失败 / uncertain 的处理规则。不要把 MCP 可用性当成无法继续任务的唯一理由，也不要用裸 HTTP 或另建 WDA 会话绕过保护。
-
-用户接管、页面异步刷新、切换 App、重连或旋转后重新观察；坐标必须重新定位。用户取消后停止后续动作，保留已验证进度和未完成范围。
+工具绑定故障时可用插件的代码入口，复用同一配置、会话和操作锁；不因 MCP 不可用就放弃，也不另建并行控制会话。`wda_metrics` 可比较请求、工具耗时及调用数；优化结果以实际任务耗时和交付完整度衡量，不把省略每步验收说成业务已被证明。

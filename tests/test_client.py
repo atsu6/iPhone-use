@@ -37,7 +37,16 @@ def fake_server(responder):
             status, value, delay, close = responder(self.command, self.path, payload, requests)
             if delay:
                 time.sleep(delay)
-            raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+            if status is None:
+                # Drop the connection before sending a response, like a stale keep-alive.
+                self.close_connection = True
+                try:
+                    self.connection.shutdown(2)
+                except OSError:
+                    pass
+                self.connection.close()
+                return
+            raw = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False).encode("utf-8")
             try:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -66,6 +75,11 @@ def fake_server(responder):
 
 
 class ClientTests(unittest.TestCase):
+    @staticmethod
+    def warm_session(client, sid):
+        # Model an already configured client so these tests isolate command transport.
+        client.session_id = client._settings_session_id = sid
+
     def test_reuses_http_connection_and_obeys_server_close(self):
         def respond(method, path, body, requests):
             return 200, {"value": {"ready": True}}, 0, path == "/close"
@@ -91,11 +105,12 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url)
-            client.session_id = "expired"
+            self.warm_session(client, "expired")
             try:
                 self.assertEqual(client.session("GET", "/window/size"), {"width": 390, "height": 844})
                 self.assertEqual([(r[0], r[1]) for r in requests], [
                     ("GET", "/session/expired/window/size"), ("POST", "/session"),
+                    ("POST", "/session/fresh/appium/settings"),
                     ("GET", "/session/fresh/window/size")])
                 self.assertEqual(client.session_id, "fresh")
             finally:
@@ -107,7 +122,7 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url)
-            client.session_id = "expired"
+            self.warm_session(client, "expired")
             try:
                 with self.assertRaises(WDAError) as caught:
                     client.session("POST", "/wda/tap", {"x": 100, "y": 200})
@@ -124,7 +139,7 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url)
-            client.session_id = "expired"
+            self.warm_session(client, "expired")
             try:
                 with self.assertRaises(WDAError) as caught:
                     client.session("GET", "/element/expired-element/attribute/value")
@@ -141,7 +156,7 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url, timeout=0.025)
-            client.session_id = "existing"
+            self.warm_session(client, "existing")
             try:
                 with self.assertRaises(WDAError) as caught:
                     client.session("POST", "/wda/tap", {"x": 100, "y": 200})
@@ -159,13 +174,266 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url)
-            client.session_id = "existing"
+            self.warm_session(client, "existing")
             try:
                 with self.assertRaises(WDAError) as caught:
                     client.session("GET", "/source")
                 self.assertEqual(caught.exception.code, "unknown error")
                 self.assertEqual(client.session_id, "existing")
                 self.assertEqual(len(requests), 1)
+            finally:
+                client.close()
+
+    def test_element_lookup_reconnects_once_after_disconnect(self):
+        def respond(method, path, body, requests):
+            if len(requests) == 1:
+                return None, None, 0, True
+            return 200, {"value": [{"ELEMENT": "found"}]}, 0, False
+
+        with fake_server(respond) as (url, requests, ports):
+            client = WDAClient(url)
+            self.warm_session(client, "existing")
+            try:
+                query = {"using": "accessibility id", "value": "按钮"}
+                self.assertEqual(client.session("POST", "/elements", query), [{"ELEMENT": "found"}])
+                self.assertEqual(requests, [("POST", "/session/existing/elements", query)] * 2)
+                self.assertNotEqual(ports[0], ports[1])
+                self.assertEqual(client.records[0]["error"], "wda_unreachable")
+            finally:
+                client.close()
+
+    def test_get_reconnects_once_after_disconnect(self):
+        def respond(method, path, body, requests):
+            return (None, None, 0, True) if len(requests) == 1 else (200, {"value": "xml"}, 0, False)
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            try:
+                self.assertEqual(client.request("GET", "/source")["value"], "xml")
+                self.assertEqual(len(requests), 2)
+            finally:
+                client.close()
+
+    def test_element_lookup_invalid_session_recreates_and_retries_query_once(self):
+        def respond(method, path, body, requests):
+            if path == "/session/expired/elements":
+                return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
+            if path == "/session":
+                return 200, {"value": {"sessionId": "fresh"}}, 0, False
+            return 200, {"value": [{"ELEMENT": "fresh-element"}]}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            self.warm_session(client, "expired")
+            try:
+                self.assertEqual(client.session("POST", "/elements", {"using": "name", "value": "A"}),
+                                 [{"ELEMENT": "fresh-element"}])
+                self.assertEqual([path for _, path, _ in requests], [
+                    "/session/expired/elements", "/session", "/session/fresh/appium/settings", "/session/fresh/elements"])
+            finally:
+                client.close()
+
+    def test_invalid_session_lookup_is_retried_only_once(self):
+        def respond(method, path, body, requests):
+            if path == "/session":
+                return 200, {"value": {"sessionId": "fresh"}}, 0, False
+            if path.endswith("/appium/settings"):
+                return 200, {"value": {}}, 0, False
+            return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            self.warm_session(client, "expired")
+            try:
+                with self.assertRaises(WDAError) as caught:
+                    client.session("POST", "/elements", {})
+                self.assertFalse(caught.exception.uncertain)
+                self.assertEqual(len(requests), 4)
+                self.assertEqual(sum(path == "/session" for _, path, _ in requests), 1)
+                self.assertIsNone(client.session_id)
+            finally:
+                client.close()
+
+    def test_descendant_lookup_does_not_carry_old_element_across_sessions(self):
+        def respond(method, path, body, requests):
+            return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            self.warm_session(client, "expired")
+            try:
+                with self.assertRaises(WDAError) as caught:
+                    client.session("POST", "/element/old/elements", {})
+                self.assertFalse(caught.exception.uncertain)
+                self.assertIsNone(client.session_id)
+                self.assertEqual(len(requests), 1)
+            finally:
+                client.close()
+
+    def test_read_reconnect_does_not_reset_total_deadline(self):
+        def respond(method, path, body, requests):
+            return (None, None, 0.025, True) if len(requests) == 1 else (200, {"value": []}, 0.2, False)
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url, timeout=0.08)
+            self.warm_session(client, "existing")
+            try:
+                started = time.monotonic()
+                with self.assertRaises(WDAError) as caught:
+                    client.session("POST", "/elements", {})
+                self.assertLess(time.monotonic() - started, 0.15)
+                self.assertEqual(caught.exception.code, "wda_unreachable")
+                self.assertFalse(caught.exception.uncertain)
+                self.assertEqual(len(requests), 2)
+            finally:
+                client.close()
+
+    def test_backend_and_invalid_json_query_failures_are_not_retried_or_uncertain(self):
+        for response, code in (({"value": {"error": "unknown error", "message": "Failed"}}, "unknown error"),
+                               (b"not json", "invalid_response"), ({}, "http_error")):
+            with self.subTest(code=code):
+                def respond(method, path, body, requests):
+                    return 500, response, 0, False
+                with fake_server(respond) as (url, requests, _):
+                    client = WDAClient(url)
+                    self.warm_session(client, "existing")
+                    try:
+                        with self.assertRaises(WDAError) as caught:
+                            client.session("POST", "/elements", {})
+                        self.assertEqual(caught.exception.code, code)
+                        self.assertFalse(caught.exception.uncertain)
+                        self.assertEqual(len(requests), 1)
+                    finally:
+                        client.close()
+
+    def test_phone_mutations_never_reconnect_and_replay_after_disconnect(self):
+        for path in ("/element/button/click", "/element/input/value", "/wda/keys",
+                     "/wda/homescreen", "/wda/apps/activate", "/wda/dragfromtoforduration"):
+            with self.subTest(path=path):
+                def respond(method, path, body, requests):
+                    return None, None, 0, True
+                with fake_server(respond) as (url, requests, _):
+                    client = WDAClient(url)
+                    self.warm_session(client, "existing")
+                    try:
+                        with self.assertRaises(WDAError) as caught:
+                            client.session("POST", path, {})
+                        self.assertTrue(caught.exception.uncertain)
+                        self.assertEqual(caught.exception.code, "action_uncertain")
+                        self.assertEqual(len(requests), 1)
+                    finally:
+                        client.close()
+
+    def test_upstream_state_changing_healthcheck_is_not_replayed(self):
+        def respond(method, path, body, requests):
+            return None, None, 0, True
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            try:
+                with self.assertRaises(WDAError) as caught:
+                    client.request("GET", "/wda/healthcheck")
+                self.assertTrue(caught.exception.uncertain)
+                self.assertEqual(len(requests), 1)
+            finally:
+                client.close()
+
+    def test_new_session_sets_fast_timeouts_once(self):
+        def respond(method, path, body, requests):
+            if path == "/session":
+                return 200, {"value": {"sessionId": "fresh"}}, 0, False
+            return 200, {"value": {}}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            try:
+                self.assertEqual(client.ensure_session(), "fresh")
+                self.assertEqual(client.ensure_session(), "fresh")
+                client.session("GET", "/source")
+                self.assertEqual([path for _, path, _ in requests], [
+                    "/session", "/session/fresh/appium/settings", "/session/fresh/source"])
+                self.assertEqual(requests[0][2]["capabilities"]["alwaysMatch"]["waitForIdleTimeout"], 0)
+                self.assertEqual(requests[1][2], {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}})
+            finally:
+                client.close()
+
+    def test_persisted_session_sets_fast_timeouts_once_without_session_creation(self):
+        def respond(method, path, body, requests):
+            return 200, {"value": {}}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            client.session_id = "persisted"
+            try:
+                self.assertEqual(client.ensure_session(), "persisted")
+                client.session("GET", "/source")
+                client.session("GET", "/source")
+                self.assertEqual([path for _, path, _ in requests], [
+                    "/session/persisted/appium/settings", "/session/persisted/source", "/session/persisted/source"])
+                self.assertEqual(requests[0][2], {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}})
+            finally:
+                client.close()
+
+    def test_persisted_expired_session_settings_recovery_retries_only_queries(self):
+        for method, path in (("POST", "/elements"), ("POST", "/wda/tap")):
+            with self.subTest(method=method, path=path):
+                def respond(method, path, body, requests):
+                    if path == "/session/persisted/appium/settings":
+                        return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
+                    if path == "/session":
+                        return 200, {"value": {"sessionId": "fresh"}}, 0, False
+                    return 200, {"value": []}, 0, False
+                with fake_server(respond) as (url, requests, _):
+                    client = WDAClient(url)
+                    client.session_id = "persisted"
+                    try:
+                        if path == "/elements":
+                            self.assertEqual(client.session(method, path, {}), [])
+                            self.assertEqual([route for _, route, _ in requests], [
+                                "/session/persisted/appium/settings", "/session", "/session/fresh/appium/settings", "/session/fresh/elements"])
+                        else:
+                            with self.assertRaises(WDAError):
+                                client.session(method, path, {})
+                            self.assertIsNone(client.session_id)
+                            self.assertEqual(len(requests), 1)
+                    finally:
+                        client.close()
+
+    def test_settings_failure_keeps_session_and_is_not_replayed(self):
+        def respond(method, path, body, requests):
+            if path == "/session":
+                return 200, {"value": {"sessionId": "created"}}, 0, False
+            return None, None, 0, True
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            try:
+                for _ in range(2):
+                    with self.assertRaises(WDAError) as caught:
+                        client.ensure_session()
+                    self.assertEqual(caught.exception.details["operation"], "session_settings")
+                    self.assertTrue(caught.exception.details["session_created"])
+                    self.assertFalse(caught.exception.details["settings_applied"])
+                    self.assertFalse(caught.exception.details["settings_replayed"])
+                self.assertEqual(client.session_id, "created")
+                self.assertEqual(len(requests), 2)
+            finally:
+                client.close()
+
+    def test_settings_explicit_invalid_session_clears_real_session_state(self):
+        def respond(method, path, body, requests):
+            if path == "/session":
+                return 200, {"value": {"sessionId": "created"}}, 0, False
+            return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
+
+        with fake_server(respond) as (url, requests, _):
+            client = WDAClient(url)
+            try:
+                with self.assertRaises(WDAError) as caught:
+                    client.ensure_session()
+                self.assertEqual(caught.exception.code, "invalid session id")
+                self.assertIsNone(client.session_id)
+                self.assertEqual(len(requests), 2)
             finally:
                 client.close()
 
@@ -177,7 +445,7 @@ class ClientTests(unittest.TestCase):
 
         with fake_server(respond) as (url, requests, _):
             client = WDAClient(url)
-            client.session_id = "private-device-session"
+            self.warm_session(client, "private-device-session")
             try:
                 value = client.session("POST", "/element/private-element/value", {"text": phrase})
                 self.assertEqual(value, phrase)

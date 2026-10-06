@@ -17,7 +17,7 @@ from wda_controller import PhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.4"
+VERSION="0.1.5"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -47,19 +47,20 @@ SEL=obj({
 SEL["description"]="Choose exact label/name/value/type/enabled fields, or a standalone predicate. Do not copy rect, visible, in_viewport or other observation fields into selector. Target must match uniquely."
 SEL["examples"]=[{"label":"返回","type":"Button","enabled":True}]
 SEL["minProperties"]=1
-OBS=string("Post-action output: none omits observation, tree returns compact controls, screenshot returns image, both returns both. Default tree. It never disables required action/progress verification.",enum=["none","tree","screenshot","both"])
-OBS["default"]="tree"
+OBS=string("Post-action output, default none. Use tree/both when the next decision needs the resulting page; this is shared next-step context, not mandatory proof of this action. screenshot returns an image. Explicit expect/verify controls verification separately.",enum=["none","tree","screenshot","both"])
+OBS["default"]="none"
 EXPECT={"expect":SEL,"observe":OBS}
+VERIFY={"type":"boolean","default":False,"description":"Opt in to this operation's result check. Default false executes once and defers checking to the next required observation or final key checkpoint. Never blindly replay an uncertain mutation."}
 REGION=obj({k:num(0 if k in ("x","y") else 1,10000) for k in ("x","y","width","height")},("x","y","width","height"))
-REGION["description"]="Current scrollable list rectangle in iPhone points (not screenshot pixels). Requires fresh tree/both observation_id. Omit region for default central area only when it covers the actual list. With native modals, an explicit region must be wholly inside every modal's bounds; otherwise handle the foreground modal first."
+REGION["description"]="Scroll rectangle in iPhone points, not screenshot pixels. observation_id is optional. Omit region for the central area, or use the actual list bounds. With verify=true, the region must fit current viewport and native modal bounds."
 SCHEMAS={
  "observe":obj({"mode":string("Standalone observation output, default tree. Use mode here; observe is a post-action option on mutation tools. none is not a standalone observation mode.",enum=["tree","screenshot","both"]),"include_invisible":BOOL,"max_nodes":num(1,500,"integer"),"expensive_visibility":BOOL}),
  "find":obj({"selector":SEL,"limit":num(1,30,"integer")},("selector",)),
- "tap":obj({"selector":SEL,"x":num(0,10000),"y":num(0,10000),"observation_id":string(),**EXPECT}),
- "swipe":obj({"direction":string("Finger movement; up usually reveals later rows. Default up.",enum=["up","down","left","right"]),"region":REGION,"observation_id":string("Fresh observation ID from this MCP process's tree/both output; required only for custom region. Expires after 30 seconds."),"expect":SEL,"verify":{"type":"boolean","default":True,"description":"Verify content/geometry progress internally, default true. Keep true even with observe=none. False executes one unverified gesture; viewport/native-modal checks still run."},"max_attempts":num(1,2,"integer"),"observe":OBS}),
- "type_text":obj({"selector":SEL,"text":string(max_length=10000),"allow_newlines":BOOL,"submit":BOOL,"replace":BOOL,"observe":OBS},("selector","text")),
- "press_button":obj({"name":string(enum=["home","volumeup","volumedown"]),"observe":OBS},("name",)),
- "launch_app":obj({"bundle_id":string(),**EXPECT},("bundle_id",)),
+ "tap":obj({"selector":SEL,"x":num(0,10000),"y":num(0,10000),"observation_id":string("Optional ID from this Runtime. Checks app/viewport context, not whole-page pixel equality or age."),**EXPECT}),
+ "swipe":obj({"direction":string("Finger movement; up usually reveals later rows. Default up.",enum=["up","down","left","right"]),"region":REGION,"observation_id":string("Optional ID from this Runtime; checks app/viewport context, not numeric/carousel text changes or age."),"expect":SEL,"verify":{**VERIFY,"description":"Default false performs one gesture without XML progress reads or fallback. True checks stable row/anchor geometry progress and permits bounded alternatives. Numeric refresh alone is not progress."},"max_attempts":num(1,2,"integer"),"observe":OBS}),
+ "type_text":obj({"selector":SEL,"text":string(max_length=10000),"allow_newlines":BOOL,"submit":BOOL,"replace":BOOL,"verify":{**VERIFY,"description":"Default false enters the full intended text once without value readback. True checks exact value and stops before submit on mismatch. Secure fields require user takeover."},**EXPECT},("selector","text")),
+ "press_button":obj({"name":string(enum=["home","volumeup","volumedown"]),"verify":VERIFY,**EXPECT},("name",)),
+ "launch_app":obj({"bundle_id":string(),"verify":VERIFY,**EXPECT},("bundle_id",)),
  "wait":obj({"selector":SEL,"timeout_seconds":num(0,20)},("selector",)),
  "scroll_find":obj({"selector":SEL,"direction":string(enum=["up","down","left","right"]),"max_swipes":num(0,10,"integer")},("selector",)),
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
@@ -77,13 +78,13 @@ DESCRIPTIONS={
  "ready":"Prepare the channel before phone tasks. Normally omit recover or set true; do not disable it for a routine precheck. Healthy output has ready=true. ready=false with state=recovering/recovery_required is a normal status result, not task success: follow recovery guidance and check READY again. Actual recovery refusal/failure remains an error. No phone action is replayed.",
  "observe":"Fresh compact phone controls or native WDA screenshot with iPhone point viewport and observation_id. Fast tree skips expensive visibility; geometry does not prove hittability.",
  "find":"Query exact semantic fields or a WDA predicate directly without a whole tree. Returns matches and rectangles; duplicates are explicit.",
- "tap":"Resolve unique, on-screen, hittable target and tap; optionally wait for an expected selector and observe in one call. Coordinate taps require fresh matching observation_id.",
- "swipe":"Scroll an actual list with at most two gesture strategies. Custom region needs a fresh tree/both ID. Native modals constrain the region; every gesture checks viewport/modal changes before any fallback, even with verify=false. Custom overlays still need visual inspection. No-progress error includes execution evidence and selected observation; inspect list entrance/boundary/overlay, not empty data or task completion. Do not loop the same gesture.",
- "type_text":"Enter Unicode into a verified editable field and require exact value readback. Stops before submit on mismatch. Newlines need explicit multiline intent; submit defaults false.",
- "press_button":"Home uses dedicated WDA homescreen activation and verifies SpringBoard foreground; fails on no effect. Volume buttons execute without result verification. Navigation verification is separate from task completion.",
- "launch_app":"Activate once by a verified bundle ID, poll foreground for up to five seconds, and optionally verify the expected page. Failed verification preserves execution evidence; observe actual state before continuing, never blindly replay activation.",
+ "tap":"Resolve a unique on-screen hittable selector, or tap point coordinates with optional contextual observation_id. Execute once optimistically; expect opts into a postcondition. Request tree/both if the next decision needs the new page.",
+ "swipe":"Default: one fast gesture, no XML progress checks, observe=none. Optional region/observation_id. Use observe=tree/both to plan the next step; verify=true opts into bounded geometry progress checks/fallback. A verified no-progress result does not prove an empty or complete list; inspect the actual list or boundary instead of repeating.",
+ "type_text":"Enter the full intended Unicode text once into a unique editable nonsecure field; no short-text trial or mandatory readback. verify=true opts into exact readback before submit; expect opts into a page postcondition. Newlines need explicit intent; submit defaults false. Never replay uncertain input/submission.",
+ "press_button":"Home uses the dedicated WDA homescreen endpoint once; default skips foreground polling. verify=true checks SpringBoard for Home, expect can check a page. Volume effects cannot be semantically verified.",
+ "launch_app":"Activate once using a resolved bundle ID, optimistically by default. verify=true polls foreground up to five seconds; expect checks the intended page. Request observation for the next decision. Never blindly replay uncertain activation.",
  "wait":"Bounded semantic presence polling for expected target. Presence is a UI postcondition, not proof of business correctness.",
- "batch":"Up to 20 known steps in one model round trip. Validate all arguments before actions; stop on failed postcondition, uncertainty or unverified mutation.",
+ "batch":"Up to 20 known steps in one model round trip. Routine unverified actions continue optimistically with intermediate observe=none. Stop on actual error, failed explicit check, uncertainty or submission without an explicit result expectation. Observe the last step when the next decision needs page context.",
  "scroll_find":"Bounded scroll until one semantic target is on screen and hittable; stop on ambiguity or no progress.",
  "collect_list":"Collect/deduplicate accessibility rows over bounded pages. Returns evidence and explicit coverage limits; always requires reconciliation before declaring business completeness.",
  "metrics":"In-process HTTP and tool timing summary without text, app data or images. Model response latency is not measured here."
@@ -132,10 +133,9 @@ def validate_semantics(name,args):
         if k in args:predicate(args[k])
     if name=="tap":
         semantic="selector" in args
-        coords=all(k in args for k in ("x","y","observation_id"))
+        coords=all(k in args for k in ("x","y"))
         if semantic==coords or (semantic and any(k in args for k in ("x","y"))):
-            raise WDAError("invalid_argument","tap requires either selector or x/y/observation_id.")
-    if name=="swipe" and "region" in args and "observation_id" not in args:raise WDAError("invalid_argument","Custom swipe region requires observation_id.")
+            raise WDAError("invalid_argument","tap requires either selector or x/y; observation_id is optional.")
     if name=="type_text":
         if any(ord(c)<32 and c not in ("\n","\r") or ord(c)==127 for c in args["text"]):raise WDAError("invalid_argument","Control characters are not allowed in text.")
         if any(c in args["text"] for c in ("\n","\r")) and not args.get("allow_newlines",False):raise WDAError("newline_requires_intent","Line breaks require explicit multiline intent.")
@@ -327,7 +327,7 @@ def serve(runtime):
             method=request["method"]
             if method=="initialize":
                 offered=params.get("protocolVersion")
-                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup, iphone-wda-use for tasks. For normal task startup use wda_ready with recover=true or omit recover; false is only for an explicit diagnostic/no-restart requirement. READY requires ready=true with status, session and observation. A normal ready=false result is not success; follow its state and recovery steps. Resolve bundle IDs with wda_apps. If an app requires password or Face ID, follow the use skill authentication handoff: ask the user to authenticate on iPhone, pause iPhone tool calls, and resume remaining work from fresh state after confirmation. Swipe supports observe separately from verification; standalone observe uses mode. If no_scroll_progress, inspect returned state and actual list entrance; no progress does not prove an empty or complete list. On state=recovering poll its setup job then run READY again; state=recovery_required with reason=recovery_disabled respects recover=false, so restart only when current user instructions allow. If action_executed=true with action_complete=false, inspect state before continuing; do not replay the whole operation. Use compound tools with expected postconditions; never replay uncertain mutations. Tool verified/complete fields describe only that operation, not the user's entire task. Track every deliverable, give progress in commentary and continue tools in the same turn while work remains; final only after all deliverables are checked or a concrete blocker prevents safe progress. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
+                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup and iphone-wda-use for tasks. Normal startup uses wda_ready with recover=true or omitted; only ready=true permits tasks. Reuse READY's observation. For recovering follow its setup job until service is ready, then READY again; respect explicit no-restart instructions. Resolve unknown bundle IDs with wda_apps. Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. Chain known steps in batch; explicit expect/verify opts into checking key outcomes. Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. Standalone observation uses mode, mutation output uses observe. For passwords or Face ID ask the user to authenticate on iPhone, pause phone calls, then resume remaining work from fresh state after confirmation. Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
             elif method=="ping":result={}
             elif method=="tools/list":result={"tools":TOOLS}
             elif method=="tools/call":

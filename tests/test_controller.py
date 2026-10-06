@@ -150,31 +150,40 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, code)
         return caught.exception
 
-    def test_coordinate_tap_requires_fresh_observation(self):
-        observed = self.phone.observe()
-        result = self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none")
+    def test_coordinate_tap_accepts_optional_observation_without_age_limit(self):
+        result = self.phone.tap(x=100, y=220)
         self.assertTrue(result["action_executed"])
         self.assertFalse(result["verified"])
-        self.assertEqual(self.client.actions()[-1][1], "/wda/tap")
-        self.phone.snapshots[observed["observation_id"]]["time"] -= 31
+        self.assertTrue(result["verification_deferred"])
+        self.assertFalse(any(path.startswith("/source") or path == "/screenshot" or path == "/wda/activeAppInfo"
+                             for _, path, _ in self.client.calls))
+        observed = self.phone.observe()
+        self.phone.snapshots[observed["observation_id"]]["time"] -= 3600
         self.client.calls.clear()
-        self.assert_code("stale_observation", lambda: self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none"))
-        self.assertEqual(self.client.actions(), [])
+        result = self.phone.tap(x=100, y=220, observation_id=observed["observation_id"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.actions()[-1][1], "/wda/tap")
 
-    def test_changed_page_app_or_orientation_rejects_coordinate_action(self):
-        for change in ("page", "app", "orientation"):
+    def test_changed_app_or_orientation_rejects_supplied_coordinate_context(self):
+        for change in ("app", "orientation"):
             with self.subTest(change=change):
                 self.setUp()
                 observed = self.phone.observe()
-                if change == "page":
-                    self.client.nodes = [node("Different page")]
-                elif change == "app":
+                if change == "app":
                     self.client.app = "com.example.other"
                 else:
                     self.client.size = {"width": 844, "height": 390}
                 self.client.calls.clear()
                 self.assert_code("stale_observation", lambda: self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none"))
                 self.assertEqual(self.client.actions(), [])
+
+    def test_observation_from_another_runtime_does_not_authorize_coordinates(self):
+        observed = self.phone.observe()
+        other = PhoneController(self.client, self.directory.name)
+        self.client.calls.clear()
+        error = self.assert_code("stale_observation", lambda: other.tap(x=100, y=220, observation_id=observed["observation_id"]))
+        self.assertEqual(error.details["reason"], "unknown_observation")
+        self.assertEqual(self.client.calls, [])
 
     def test_screenshot_observation_skips_source_and_stores_private_artifact(self):
         result = self.phone.observe("screenshot")
@@ -185,24 +194,26 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), self.client.screenshot)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
-    def test_screenshot_coordinate_guard_allows_same_image_and_rejects_change(self):
+    def test_screenshot_coordinate_context_tolerates_changing_pixels(self):
         observed = self.phone.observe("screenshot")
         self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none")
         self.assertEqual(self.client.actions()[-1][1], "/wda/tap")
         self.client.screenshot += b"changed picture"
         self.client.calls.clear()
-        self.assert_code("stale_observation", lambda: self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none"))
-        self.assertEqual(self.client.actions(), [])
+        result = self.phone.tap(x=100, y=220, observation_id=observed["observation_id"])
+        self.assertTrue(result["action_executed"])
+        self.assertEqual(self.client.actions()[-1][1], "/wda/tap")
+        self.assertFalse(any(path == "/screenshot" for _, path, _ in self.client.calls))
         self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
 
-    def test_both_observation_rejects_changed_image_even_when_tree_is_identical(self):
+    def test_coordinate_context_tolerates_changing_tree_and_image(self):
         observed = self.phone.observe("both")
-        original_nodes = copy.deepcopy(observed["nodes"])
+        self.client.nodes = [node("New content on same page")]
         self.client.screenshot += b"custom-rendered content changed"
         self.client.calls.clear()
-        self.assertEqual(self.phone.tree()[0], original_nodes)
-        self.assert_code("stale_observation", lambda: self.phone.tap(x=100, y=220, observation_id=observed["observation_id"], observe="none"))
-        self.assertEqual(self.client.actions(), [])
+        self.phone.tap(x=100, y=220, observation_id=observed["observation_id"])
+        self.assertEqual(self.client.actions()[-1][1], "/wda/tap")
+        self.assertFalse(any(path.startswith("/source") or path == "/screenshot" for _, path, _ in self.client.calls))
 
     def test_custom_scroll_ignores_carousel_changes_outside_region(self):
         area = {"x": 30, "y": 300, "width": 300, "height": 400}
@@ -213,111 +224,79 @@ class ControllerTests(unittest.TestCase):
                 observed = self.phone.observe(mode)
                 self.client.source_pages = [
                     [node("Banner B", y=100), node("Row 1", y=400)],
-                    [node("Banner C", y=100), node("Row 2", y=400)],
+                    [node("Banner C", y=100), node("Row 1", y=350), node("Row 2", y=400)],
                 ]
                 self.client.screenshot += b"changed carousel outside gesture area"
                 self.client.calls.clear()
-                result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+                result = self.phone.swipe(region=area, observation_id=observed["observation_id"], verify=True)
                 self.assertTrue(result["verified"])
                 self.assertEqual(self.client.swipe_count, 1)
                 self.assertEqual(self.client.actions()[0][1], "/wda/dragfromtoforduration")
                 self.assertFalse(any(path == "/screenshot" for _, path, _ in self.client.calls))
 
-    def test_custom_scroll_rejects_changed_target_region_before_gesture(self):
+    def test_default_custom_scroll_tolerates_target_region_content_refresh(self):
         area = {"x": 30, "y": 300, "width": 300, "height": 400}
         self.client.nodes = [node("Banner A", y=100), node("Row 1", y=400)]
         observed = self.phone.observe()
-        self.client.nodes = [node("Banner A", y=100), node("Different list", y=400)]
+        self.client.nodes = [node("Banner A", y=100), node("Different list content", y=400)]
         self.client.calls.clear()
-        self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
-        self.assertEqual(self.client.actions(), [])
+        result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") or path == "/screenshot" for _, path, _ in self.client.calls))
 
-    def test_stale_region_distinguishes_numeric_content_from_geometry_changes(self):
+    def test_default_custom_scroll_needs_no_tree_or_observation_id(self):
         area = {"x": 30, "y": 300, "width": 300, "height": 400}
-        for change in ("content", "geometry"):
-            with self.subTest(change=change):
-                self.setUp()
-                self.client.nodes = [node("Synthetic counter", y=350, value="100.00")]
-                observed = self.phone.observe("tree")
-                if change == "content":
-                    self.client.nodes[0]["value"] = "100.25"
-                else:
-                    self.client.nodes[0]["y"] = 360
-                self.client.calls.clear()
-                error = self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
-                diagnostics = error.details["region_change_diagnostics"]
-                self.assertEqual(diagnostics["previous_nodes"], 1)
-                self.assertEqual(diagnostics["current_nodes"], 1)
-                self.assertIsInstance(diagnostics["previous_nodes"], int)
-                self.assertIsInstance(diagnostics["current_nodes"], int)
-                self.assertIs(diagnostics["geometry_changed"], change == "geometry")
-                self.assertIs(diagnostics["content_changed"], change == "content")
-                self.assertFalse(error.details["action_executed"])
-                self.assertEqual(self.client.actions(), [])
+        result = self.phone.swipe(region=area)
+        self.assertTrue(result["action_executed"])
+        self.assertFalse(result["verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(result["attempts"], 1)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") or path in ("/screenshot", "/wda/activeAppInfo")
+                             for _, path, _ in self.client.calls))
 
-    def test_stale_region_returns_new_bounded_current_observation(self):
-        area = {"x": 30, "y": 300, "width": 300, "height": 400}
-        self.client.nodes = [node(f"Synthetic row {index}", y=350, value=str(index)) for index in range(120)]
-        previous = self.phone.observe("tree", max_nodes=5)
-        self.client.nodes[0]["value"] = "200"
+    def test_default_swipe_observe_tree_reads_once_for_next_decision(self):
+        self.client.source_pages = [[node("Before")], [node("Next page")]]
+        result = self.phone.swipe(observe="tree")
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(result["observation"]["nodes"][0]["label"], "Next page")
+        self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 1)
+        self.assertEqual(self.client.swipe_count, 1)
+
+    def test_default_scroll_does_not_add_modal_verification_reads(self):
+        self.client.nodes = [node("Row 1"), node("Blocking alert", y=100, kind="Alert")]
+        result = self.phone.swipe()
+        self.assertTrue(result["action_complete"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
+
+    def test_supplied_scroll_context_from_another_runtime_is_rejected(self):
+        observed = self.phone.observe("both")
+        other = PhoneController(self.client, self.directory.name)
         self.client.calls.clear()
-        error = self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=previous["observation_id"]))
-        current = error.details["observation"]
-        self.assertNotEqual(current["observation_id"], previous["observation_id"])
-        self.assertIn(current["observation_id"], self.phone.snapshots)
-        self.assertEqual(len(current["nodes"]), 100)
-        self.assertEqual(current["total_nodes"], 120)
-        self.assertTrue(current["truncated"])
-        self.assertEqual(current["nodes"][0]["value"], "200")
-        self.assertEqual(error.details["region_change_diagnostics"]["previous_nodes"], 120)
-        self.assertEqual(error.details["region_change_diagnostics"]["current_nodes"], 120)
-        self.assertEqual(self.client.actions(), [])
-
-    def test_custom_scroll_rejects_new_modal_even_outside_gesture_region(self):
-        area = {"x": 30, "y": 300, "width": 300, "height": 400}
-        self.client.nodes = [node("Row 1", y=400)]
-        observed = self.phone.observe()
-        self.client.nodes.append(node("Blocking alert", y=100, kind="Alert"))
-        self.client.calls.clear()
-        self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
-        self.assertEqual(self.client.actions(), [])
-
-    def test_custom_scroll_rejects_unlabeled_modal_appearing_or_disappearing(self):
-        area = {"x": 30, "y": 300, "width": 300, "height": 400}
-        for kind in ("Alert", "Sheet"):
-            for appearing in (True, False):
-                with self.subTest(kind=kind, appearing=appearing):
-                    self.setUp()
-                    modal = node("", y=100, kind=kind)
-                    self.client.nodes = [node("Row 1", y=400)] + ([] if appearing else [modal])
-                    observed = self.phone.observe("both")
-                    self.client.nodes = [node("Row 1", y=400)] + ([modal] if appearing else [])
-                    self.client.calls.clear()
-                    self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
-                    self.assertEqual(self.client.actions(), [])
+        error = self.assert_code("stale_observation", lambda: other.swipe(observation_id=observed["observation_id"]))
+        self.assertEqual(error.details["reason"], "unknown_observation")
+        self.assertEqual(self.client.calls, [])
 
     def test_custom_scroll_guard_keeps_anchors_beyond_response_truncation(self):
         area = {"x": 30, "y": 300, "width": 300, "height": 400}
         self.client.nodes = [node("Banner", y=100), node("Row 1", y=400)]
         observed = self.phone.observe(max_nodes=1)
         self.assertTrue(observed["truncated"])
-        self.client.source_pages = [self.client.nodes, [node("Banner", y=100), node("Row 2", y=400)]]
-        result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+        self.client.source_pages = [self.client.nodes, [node("Banner", y=100), node("Row 1", y=350), node("Row 2", y=400)]]
+        result = self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"])
         self.assertTrue(result["verified"])
         self.assertEqual(self.client.swipe_count, 1)
 
-    def test_custom_scroll_rejects_expired_app_or_orientation_observation(self):
-        # Keep the rectangle valid in both viewports so this exercises freshness,
-        # rather than rejecting a region that falls outside the rotated screen.
+    def test_custom_scroll_rejects_changed_app_or_orientation_context(self):
         area = {"x": 30, "y": 100, "width": 300, "height": 250}
-        for change in ("expired", "app", "orientation"):
+        for change in ("app", "orientation"):
             with self.subTest(change=change):
                 self.setUp()
-                self.client.nodes = [node("Row 1", y=200)]
                 observed = self.phone.observe()
-                if change == "expired":
-                    self.phone.snapshots[observed["observation_id"]]["time"] -= 31
-                elif change == "app":
+                if change == "app":
                     self.client.app = "com.example.other"
                 else:
                     self.client.size = {"width": 844, "height": 390}
@@ -325,27 +304,29 @@ class ControllerTests(unittest.TestCase):
                 self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
                 self.assertEqual(self.client.actions(), [])
 
-    def test_custom_scroll_refuses_screenshot_only_or_empty_region_anchors(self):
+    def test_custom_scroll_accepts_screenshot_context_or_empty_tree(self):
         area = {"x": 30, "y": 300, "width": 300, "height": 400}
-        for condition in ("screenshot_only", "no_anchor"):
-            with self.subTest(condition=condition):
+        for mode in ("screenshot", "tree"):
+            with self.subTest(mode=mode):
                 self.setUp()
-                self.client.nodes = [node("Banner outside target", y=100)]
-                observed = self.phone.observe("screenshot" if condition == "screenshot_only" else "tree")
+                self.client.nodes = []
+                observed = self.phone.observe(mode)
+                self.phone.snapshots[observed["observation_id"]]["time"] -= 3600
                 self.client.calls.clear()
-                self.assert_code("stale_observation", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
-                self.assertEqual(self.client.actions(), [])
+                result = self.phone.swipe(region=area, observation_id=observed["observation_id"])
+                self.assertTrue(result["action_executed"])
+                self.assertEqual(self.client.swipe_count, 1)
+                self.assertFalse(any(path.startswith("/source") or path == "/screenshot" for _, path, _ in self.client.calls))
 
-    def test_default_scroll_requires_explicit_region_when_native_modal_is_present(self):
+    def test_verified_scroll_requires_explicit_region_when_native_modal_is_present(self):
         for kind in ("Alert", "Sheet"):
-            for verify in (True, False):
-                with self.subTest(kind=kind, verify=verify):
-                    self.setUp()
-                    self.client.nodes = [node("Row 1"), node("", kind=kind, x=40, y=100, width=310, height=600)]
-                    error = self.assert_code("modal_requires_region", lambda: self.phone.swipe(verify=verify))
-                    self.assertFalse(error.details["action_executed"])
-                    self.assertEqual(self.client.actions(), [])
-                    self.assertEqual(self.client.swipe_count, 0)
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.client.nodes = [node("Row 1"), node("", kind=kind, x=40, y=100, width=310, height=600)]
+                error = self.assert_code("modal_requires_region", lambda: self.phone.swipe(verify=True))
+                self.assertFalse(error.details["action_executed"])
+                self.assertEqual(self.client.actions(), [])
+                self.assertEqual(self.client.swipe_count, 0)
 
     def test_fresh_explicit_region_inside_native_modal_can_scroll(self):
         area = {"x": 70, "y": 250, "width": 200, "height": 250}
@@ -355,9 +336,9 @@ class ControllerTests(unittest.TestCase):
                 modal = node("", kind=kind, x=40, y=100, width=310, height=600)
                 self.client.nodes = [modal, node("Row 1", y=300)]
                 observed = self.phone.observe("both")
-                self.client.source_pages = [self.client.nodes, [modal, node("Row 2", y=300)]]
+                self.client.source_pages = [self.client.nodes, [modal, node("Row 1", y=270), node("Row 2", y=300)]]
                 self.client.calls.clear()
-                result = self.phone.swipe(region=area, observation_id=observed["observation_id"], observe="tree")
+                result = self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"], observe="tree")
                 self.assertTrue(result["verified"])
                 self.assertTrue(result["changed"])
                 self.assertEqual(result["attempts"], 1)
@@ -372,7 +353,7 @@ class ControllerTests(unittest.TestCase):
                                      node("", kind="Sheet", x=40, y=500, width=310, height=200)]
                 observed = self.phone.observe("tree")
                 self.client.calls.clear()
-                error = self.assert_code("blocked_scroll_region", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+                error = self.assert_code("blocked_scroll_region", lambda: self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"]))
                 self.assertFalse(error.details["action_executed"])
                 self.assertEqual(self.client.actions(), [])
 
@@ -383,7 +364,7 @@ class ControllerTests(unittest.TestCase):
         self.client.nodes = [sheet, alert, node("Synthetic row", y=350)]
         observed = self.phone.observe("tree")
         self.client.calls.clear()
-        error = self.assert_code("blocked_scroll_region", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+        error = self.assert_code("blocked_scroll_region", lambda: self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"]))
         self.assertFalse(error.details["action_executed"])
         self.assertEqual(len(error.details["native_modals"]), 2)
         self.assertEqual(self.client.actions(), [])
@@ -394,20 +375,21 @@ class ControllerTests(unittest.TestCase):
         alert = node("", kind="Alert", x=90, y=250, width=170, height=200)
         self.client.nodes = [sheet, alert, node("Synthetic row 1", x=100, y=325, width=150)]
         observed = self.phone.observe("tree")
-        self.client.source_pages = [self.client.nodes, [sheet, alert, node("Synthetic row 2", x=100, y=325, width=150)]]
+        self.client.source_pages = [self.client.nodes, [sheet, alert, node("Synthetic row 1", x=100, y=315, width=150), node("Synthetic row 2", x=100, y=350, width=150)]]
         self.client.calls.clear()
-        result = self.phone.swipe(region=area, observation_id=observed["observation_id"], observe="none")
+        result = self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"], observe="none")
         self.assertTrue(result["verified"])
         self.assertTrue(result["changed"])
         self.assertEqual(result["attempts"], 1)
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
 
-    def test_native_modal_region_without_fresh_observation_is_not_guessed(self):
+    def test_verified_region_inside_native_modal_needs_no_prior_observation(self):
         area = {"x": 70, "y": 250, "width": 200, "height": 250}
-        self.client.nodes = [node("", kind="Sheet", x=40, y=100, width=310, height=600), node("Row 1", y=300)]
-        error = self.assert_code("stale_observation", lambda: self.phone.swipe(region=area))
-        self.assertFalse(error.details.get("action_executed", False))
-        self.assertEqual(self.client.actions(), [])
+        modal = node("", kind="Sheet", x=40, y=100, width=310, height=600)
+        self.client.source_pages = [[modal, node("First row", y=350)], [modal, node("First row", y=300)]]
+        result = self.phone.swipe(region=area, verify=True)
+        self.assertTrue(result["progress_verified"])
+        self.assertEqual(self.client.swipe_count, 1)
 
     def test_modal_appearing_after_gesture_is_not_counted_as_scroll_progress(self):
         for placement in ("inside", "outside"):
@@ -417,7 +399,7 @@ class ControllerTests(unittest.TestCase):
                     modal = node("", kind="Alert", x=80,
                                  y=300 if placement == "inside" else 60, width=230, height=80)
                     self.client.source_pages = [[node("Row 1")], [node("Row 2"), modal]]
-                    error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(observe=mode))
+                    error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, observe=mode))
                     self.assertTrue(error.details["action_executed"])
                     self.assertFalse(error.details["verified"])
                     self.assertFalse(error.details["changed"])
@@ -451,7 +433,7 @@ class ControllerTests(unittest.TestCase):
                     current.append({**modal, "y": 120})
                 self.client.source_pages = [self.client.nodes, current]
                 self.client.calls.clear()
-                error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(region=area, observation_id=observed["observation_id"]))
+                error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, region=area, observation_id=observed["observation_id"]))
                 self.assertEqual(error.details["attempts"], 1)
                 self.assertFalse(error.details["verified"])
                 self.assertEqual(error.details["reasons"], ["modal_changed"])
@@ -459,9 +441,9 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
 
     def test_orientation_change_after_gesture_stops_before_progress_or_fallback(self):
-        self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
+        self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
         self.client.gesture_effects = [lambda: setattr(self.client, "size", {"width": 844, "height": 390})]
-        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(observe="tree"))
+        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, observe="tree"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["verified"])
         self.assertFalse(error.details["changed"])
@@ -473,7 +455,7 @@ class ControllerTests(unittest.TestCase):
     def test_modal_during_fallback_reports_two_executed_gestures_and_stops(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 1")],
                                     [node("Row 1"), node("", kind="Alert", y=80)]]
-        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(observe="none"))
+        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, observe="none"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["verified"])
         self.assertEqual(error.details["attempts"], 2)
@@ -481,18 +463,18 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.client.swipe_count, 2)
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
 
-    def test_disabled_progress_verification_still_stops_on_new_native_modal(self):
+    def test_default_swipe_does_not_probe_modal_after_accepted_gesture(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 1"), node("", kind="Alert", y=80)]]
-        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=False, observe="none"))
-        self.assertTrue(error.details["action_executed"])
-        self.assertFalse(error.details["verified"])
-        self.assertEqual(error.details["attempts"], 1)
-        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
+        result = self.phone.swipe()
+        self.assertFalse(result["verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
 
     def test_modal_and_orientation_changes_are_both_reported_after_one_gesture(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 2"), node("", kind="Sheet", y=80)]]
         self.client.gesture_effects = [lambda: setattr(self.client, "size", {"width": 844, "height": 390})]
-        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(observe="none"))
+        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, observe="none"))
         self.assertEqual(set(error.details["reasons"]), {"viewport_changed", "modal_changed"})
         self.assertFalse(error.details["changed"])
         self.assertEqual(error.details["attempts"], 1)
@@ -500,13 +482,13 @@ class ControllerTests(unittest.TestCase):
 
     def test_arbitrary_other_nodes_are_not_treated_as_native_modals(self):
         overlay = node("Custom overlay", kind="Other", x=40, y=100, width=310, height=600)
-        self.client.source_pages = [[node("Row 1"), overlay], [node("Row 2"), overlay]]
-        result = self.phone.swipe(observe="none")
+        self.client.source_pages = [[node("Row 1", y=350), overlay], [node("Row 1", y=300), node("Row 2", y=350), overlay]]
+        result = self.phone.swipe(verify=True, observe="none")
         self.assertTrue(result["verified"])
         self.assertEqual(self.client.swipe_count, 1)
 
     def test_home_navigation_requires_foreground_evidence(self):
-        result = self.phone.press_button("home", observe="none")
+        result = self.phone.press_button("home", verify=True, observe="none")
         self.assertTrue(result["action_executed"])
         self.assertTrue(result["verified"])
         self.assertTrue(result["foreground_verified"])
@@ -514,9 +496,32 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
         self.assertTrue(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
 
+    def test_default_home_accepts_navigation_without_a_foreground_probe(self):
+        self.client.home_effective = False
+        result = self.phone.press_button("home")
+        self.assertTrue(result["action_complete"])
+        self.assertFalse(result["foreground_verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.calls, [("POST", "/wda/homescreen", {})])
+
+    def test_default_launch_accepts_navigation_without_polling_transition(self):
+        self.client.activate_effective = False
+        result = self.phone.launch_app("com.example.requested")
+        self.assertTrue(result["action_complete"])
+        self.assertFalse(result["foreground_verified"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.calls, [("POST", "/wda/apps/activate", {"bundleId": "com.example.requested"})])
+
+    def test_launch_observation_reads_current_page_without_foreground_poll_loop(self):
+        result = self.phone.launch_app("com.example.requested", observe="tree")
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(result["observation"]["app"], "com.example.requested")
+        self.assertEqual(sum(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls), 1)
+        self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 1)
+
     def test_home_http_success_without_foreground_change_is_failure(self):
         self.client.home_effective = False
-        self.assert_code("postcondition_failed", lambda: self.phone.press_button("home", observe="none"))
+        self.assert_code("postcondition_failed", lambda: self.phone.press_button("home", verify=True, observe="none"))
         self.assertEqual(self.client.app, "com.example.phone")
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
 
@@ -529,7 +534,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_home_post_action_read_failure_retains_execution_evidence(self):
         with patch.object(self.phone, "active_app", side_effect=WDAError("wda_unreachable", "read timed out")):
-            error = self.assert_code("wda_unreachable", lambda: self.phone.press_button("home", observe="none"))
+            error = self.assert_code("wda_unreachable", lambda: self.phone.press_button("home", verify=True, observe="none"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["home_foreground_verified"])
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
@@ -553,7 +558,7 @@ class ControllerTests(unittest.TestCase):
 
         with patch("wda_controller.time.monotonic", side_effect=lambda: clock[0]), \
                 patch("wda_controller.time.sleep", side_effect=sleep) as sleeper:
-            result = self.phone.launch_app(requested, observe="none")
+            result = self.phone.launch_app(requested, verify=True, observe="none")
         self.assertTrue(result["foreground_verified"])
         self.assertTrue(result["action_executed"])
         self.assertEqual(self.client.app, requested)
@@ -580,7 +585,7 @@ class ControllerTests(unittest.TestCase):
         with patch("wda_controller.time.monotonic", side_effect=lambda: clock[0]), \
                 patch("wda_controller.time.sleep", side_effect=sleep), \
                 patch.object(self.client, "request", side_effect=request):
-            error = self.assert_code("postcondition_failed", lambda: self.phone.launch_app(requested, observe="none"))
+            error = self.assert_code("postcondition_failed", lambda: self.phone.launch_app(requested, verify=True, observe="none"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
         self.assertEqual(error.details["foreground_app"], "com.example.phone")
@@ -595,7 +600,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_uncertain_launch_is_not_replayed_or_polled(self):
         self.client.activate_error = WDAError("action_uncertain", "Activation response timed out", uncertain=True)
-        error = self.assert_code("action_uncertain", lambda: self.phone.launch_app("com.example.requested", observe="none"))
+        error = self.assert_code("action_uncertain", lambda: self.phone.launch_app("com.example.requested", verify=True, observe="none"))
         self.assertTrue(error.uncertain)
         self.assertEqual(self.phone.accepted_actions, 0)
         self.assertFalse(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
@@ -606,7 +611,7 @@ class ControllerTests(unittest.TestCase):
         with patch("wda_controller.time.monotonic", side_effect=[100,104.99,105.01,105.02]), \
                 patch("wda_controller.time.sleep"), \
                 patch.object(self.phone,"active_app",return_value="com.example.previous") as active:
-            error=self.assert_code("postcondition_failed",lambda:self.phone.launch_app("com.example.requested",observe="none"))
+            error=self.assert_code("postcondition_failed",lambda:self.phone.launch_app("com.example.requested", verify=True, observe="none"))
         active.assert_called_once()
         self.assertGreater(active.call_args.kwargs["timeout"],0)
         self.assertTrue(error.details["action_executed"])
@@ -616,7 +621,7 @@ class ControllerTests(unittest.TestCase):
     def test_launch_channel_failure_after_activation_is_not_replayed(self):
         fault = WDAError("unknown error", "XCTDaemonErrorDomain Code=41 Not authorized for performing UI testing actions")
         with patch.object(self.phone, "active_app", side_effect=fault) as read:
-            error = self.assert_code("unknown error", lambda: self.phone.launch_app("com.example.requested", observe="none"))
+            error = self.assert_code("unknown error", lambda: self.phone.launch_app("com.example.requested", verify=True, observe="none"))
         read.assert_called_once()
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
@@ -652,7 +657,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_unicode_text_round_trips_exactly_before_submit(self):
         text = "你好 👋 Café 漢字 e\u0301"
-        result = self.phone.type_text({"label": "Target"}, text, submit=True, observe="none")
+        result = self.phone.type_text({"label": "Target"}, text, submit=True, observe="none", verify=True)
         self.assertTrue(result["exact_readback"])
         self.assertTrue(result["submitted"])
         self.assertFalse(result["submission_verified"])
@@ -661,9 +666,52 @@ class ControllerTests(unittest.TestCase):
         self.assertLess(max(i for i, path in enumerate(paths) if path.endswith("/attribute/value")), paths.index("/wda/keys"))
         self.assertEqual(self.client.actions()[-1][2], {"value": ["\n"]})
 
+    def test_default_text_input_sends_full_text_once_without_trial_or_value_reads(self):
+        text = "完整中文输入 👋 Café e\u0301 " * 100
+        result = self.phone.type_text({"label": "Target"}, text)
+        self.assertTrue(result["action_complete"])
+        self.assertTrue(result["verification_deferred"])
+        self.assertFalse(result["exact_readback"])
+        self.assertFalse(result["verified"])
+        self.assertEqual(self.client.elements[0]["value"], text)
+        self.assertEqual(sum(path.endswith("/attribute/type") for _, path, _ in self.client.calls), 1)
+        self.assertFalse(any(path.endswith("/attribute/value") or path.startswith("/source")
+                             for _, path, _ in self.client.calls))
+        self.assertEqual(sum(path == "/element/target/value" for _, path, _ in self.client.actions()), 1)
+
+    def test_default_append_does_not_clear_or_read_existing_text(self):
+        self.client.elements[0]["value"] = "Existing "
+        result = self.phone.type_text({"label": "Target"}, "追加", replace=False)
+        self.assertTrue(result["verification_deferred"])
+        self.assertEqual(self.client.elements[0]["value"], "Existing 追加")
+        self.assertFalse(any(path.endswith("/clear") or path.endswith("/attribute/value")
+                             for _, path, _ in self.client.calls))
+
+    def test_uncertain_default_input_stops_without_retyping_or_submission(self):
+        original = self.client.session
+
+        def session(method, path, payload=None, timeout=None):
+            if path == "/element/target/value":
+                self.client.calls.append((method, path, payload))
+                raise WDAError("action_uncertain", "Input response timed out", uncertain=True)
+            return original(method, path, payload, timeout)
+
+        with patch.object(self.client, "session", side_effect=session):
+            error = self.assert_code("action_uncertain", lambda: self.phone.type_text({"label": "Target"}, "one full input", submit=True))
+        self.assertTrue(error.uncertain)
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["action_complete"])
+        self.assertEqual(sum(path == "/element/target/value" for _, path, _ in self.client.actions()), 1)
+        self.assertFalse(any(path == "/wda/keys" for _, path, _ in self.client.actions()))
+
+    def test_optimistic_input_still_refuses_a_secure_field_before_any_mutation(self):
+        self.client.elements[0]["kind"] = "XCUIElementTypeSecureTextField"
+        self.assert_code("not_editable", lambda: self.phone.type_text({"label": "Target"}, "do not type"))
+        self.assertEqual(self.client.actions(), [])
+
     def test_input_mismatch_does_not_submit_or_retype(self):
         self.client.input_override = "你好 ?"
-        self.assert_code("input_mismatch", lambda: self.phone.type_text({"label": "Target"}, "你好 👋", submit=True, observe="none"))
+        self.assert_code("input_mismatch", lambda: self.phone.type_text({"label": "Target"}, "你好 👋", submit=True, observe="none", verify=True))
         paths = [call[1] for call in self.client.actions()]
         self.assertNotIn("/wda/keys", paths)
         self.assertEqual(paths.count("/element/target/value"), 1)
@@ -675,19 +723,65 @@ class ControllerTests(unittest.TestCase):
 
     def test_explicit_multiline_text_view_round_trips(self):
         self.client.elements[0]["kind"] = "XCUIElementTypeTextView"
-        result = self.phone.type_text({"label": "Target"}, "第一行\n第二行", allow_newlines=True, observe="none")
+        result = self.phone.type_text({"label": "Target"}, "第一行\n第二行", allow_newlines=True, observe="none", verify=True)
         self.assertTrue(result["exact_readback"])
         self.assertFalse(result["submitted"])
 
     def test_append_preserves_existing_text_and_verifies_combined_value(self):
         self.client.elements[0]["value"] = "Existing "
-        result = self.phone.type_text({"label": "Target"}, "追加", replace=False, observe="none")
+        result = self.phone.type_text({"label": "Target"}, "追加", replace=False, observe="none", verify=True)
         self.assertTrue(result["verified"])
         self.assertEqual(self.client.elements[0]["value"], "Existing 追加")
         self.assertFalse(any(path.endswith("/clear") for _, path, _ in self.client.actions()))
+        self.assertEqual(sum(path.endswith("/attribute/value") for _, path, _ in self.client.calls), 2)
+
+    def test_verified_replace_has_only_one_final_readback(self):
+        self.client.elements[0]["value"] = "old value"
+        result = self.phone.type_text({"label": "Target"}, "new value", verify=True)
+        self.assertTrue(result["exact_readback"])
+        self.assertEqual(sum(path.endswith("/attribute/value") for _, path, _ in self.client.calls), 1)
+        self.assertEqual(sum(path.endswith("/attribute/type") for _, path, _ in self.client.calls), 1)
+
+    def test_numeric_or_label_refresh_at_fixed_geometry_is_not_scroll_progress(self):
+        for change in ("value", "label", "width", "opposite_direction"):
+            with self.subTest(change=change):
+                self.setUp()
+                before = node("Counter 100", y=350, name="Stable row", value="100.00")
+                after = copy.deepcopy(before)
+                if change == "value":
+                    after["value"] = "100.25"
+                elif change == "label":
+                    after["label"] = "Counter 200"
+                elif change == "width":
+                    after.update(y=300, width=300)
+                else:
+                    after["y"] = 400
+                self.client.source_pages = [[before], [after]]
+                error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, max_attempts=1))
+                self.assertTrue(error.details["action_executed"])
+                self.assertFalse(error.details["changed"])
+                self.assertEqual(self.client.swipe_count, 1)
+
+    def test_stable_name_can_verify_movement_while_numeric_label_and_value_refresh(self):
+        self.client.source_pages = [
+            [node("Balance 100", y=350, name="Stable row", value="100.00")],
+            [node("Balance 200", y=300, name="Stable row", value="200.00")],
+        ]
+        result = self.phone.swipe(verify=True)
+        self.assertTrue(result["progress_verified"])
+        self.assertEqual(result["attempts"], 1)
+
+    def test_duplicate_anchor_labels_do_not_create_false_scroll_progress(self):
+        self.client.source_pages = [
+            [node("Repeated row", y=350), node("Repeated row", y=450)],
+            [node("Repeated row", y=300), node("Repeated row", y=400)],
+        ]
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, max_attempts=1))
+        self.assertFalse(error.details["changed"])
+        self.assertEqual(self.client.swipe_count, 1)
 
     def test_no_scroll_progress_tries_only_two_distinct_strategies(self):
-        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe())
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="tree"))
         self.assertEqual(error.details["attempts"], 2)
         self.assertEqual([call[1] for call in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
         self.assertTrue(error.details["action_executed"])
@@ -701,8 +795,8 @@ class ControllerTests(unittest.TestCase):
         for mode in ("none", "tree", "screenshot", "both"):
             with self.subTest(mode=mode):
                 self.setUp()
-                self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
-                result = self.phone.swipe(observe=mode)
+                self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
+                result = self.phone.swipe(verify=True, observe=mode)
                 self.assertTrue(result["verified"])
                 self.assertEqual(result["attempts"], 1)
                 self.assertEqual(self.client.swipe_count, 1)
@@ -716,7 +810,7 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 2)
 
     def test_no_progress_with_observe_none_still_executes_bounded_verification(self):
-        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(observe="none"))
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="none"))
         self.assertNotIn("observation", error.details)
         self.assertTrue(error.details["action_executed"])
         self.assertEqual(error.details["attempts"], 2)
@@ -726,7 +820,7 @@ class ControllerTests(unittest.TestCase):
         baseline = self.client.source()
         fault = WDAError("stale element reference", "Application local.pid.0 is not running")
         with patch.object(self.client, "source", side_effect=[baseline, fault]) as source:
-            error = self.assert_code("stale element reference", lambda: self.phone.swipe(observe="tree"))
+            error = self.assert_code("stale element reference", lambda: self.phone.swipe(verify=True, observe="tree"))
         self.assertEqual(source.call_count, 2)
         self.assertEqual(self.client.swipe_count, 1)
         self.assertEqual(self.phone.accepted_actions, 1)
@@ -736,7 +830,7 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("verification_required", error.details)
 
     def test_post_swipe_screenshot_failure_retains_accepted_gesture_and_stops(self):
-        self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
+        self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
         original = self.client.request
 
         def request(method, path, payload=None, timeout=None):
@@ -745,7 +839,7 @@ class ControllerTests(unittest.TestCase):
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "request", side_effect=request):
-            error = self.assert_code("wda_unreachable", lambda: self.phone.swipe(observe="both"))
+            error = self.assert_code("wda_unreachable", lambda: self.phone.swipe(verify=True, observe="both"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
         self.assertEqual(self.client.swipe_count, 1)
@@ -778,7 +872,7 @@ class ControllerTests(unittest.TestCase):
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "session", side_effect=session):
-            error = self.assert_code("action_uncertain", lambda: self.phone.swipe())
+            error = self.assert_code("action_uncertain", lambda: self.phone.swipe(verify=True))
         self.assertTrue(error.uncertain)
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
@@ -787,18 +881,21 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
 
     def test_no_progress_returns_requested_screenshot_for_inspection(self):
-        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(observe="both", max_attempts=1))
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="both", max_attempts=1))
         observed = error.details["observation"]
         self.assertEqual(Path(observed["image"]["path"]).read_bytes(), self.client.screenshot)
         self.assertEqual(observed["nodes"][0]["label"], "Row 1")
         self.assertIn(observed["observation_id"], self.phone.snapshots)
         self.assertEqual(error.details["attempts"], 1)
 
-    def test_explicitly_disabled_swipe_verification_is_not_reported_as_success(self):
-        result = self.phone.swipe(verify=False, observe="none")
+    def test_default_swipe_reports_deferred_verification_without_forcing_a_stop(self):
+        result = self.phone.swipe()
         self.assertTrue(result["action_executed"])
+        self.assertTrue(result["action_complete"])
         self.assertFalse(result["verified"])
-        self.assertIn("verification_required", result)
+        self.assertTrue(result["verification_deferred"])
+        self.assertFalse(result["progress_verified"])
+        self.assertNotIn("verification_required", result)
         self.assertEqual(self.client.swipe_count, 1)
         self.assertNotIn("observation", result)
 
@@ -821,12 +918,12 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
 
     def test_native_fallback_can_verify_progress(self):
-        self.client.source_pages = [[node("Row 1")], [node("Row 1")], [node("Row 2")]]
-        result = self.phone.swipe()
+        self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
+        result = self.phone.swipe(verify=True, observe="tree")
         self.assertTrue(result["verified"])
         self.assertEqual(result["attempts"], 2)
         self.assertEqual(result["strategy"], "native_swipe")
-        self.assertEqual(result["observation"]["nodes"][0]["label"], "Row 2")
+        self.assertEqual(result["observation"]["nodes"][-1]["label"], "Row 2")
 
     def test_wait_caps_each_transport_request_at_two_seconds(self):
         with patch("wda_controller.time.monotonic", side_effect=[100.0, 100.1]):
@@ -860,15 +957,19 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(error.details["polls"], 1)
         self.assertEqual(self.client.timeouts, [("POST", "/elements", 0.5)])
 
-    def test_batch_stops_after_unverified_action(self):
+    def test_batch_continues_routine_actions_with_deferred_verification(self):
         result = self.phone.batch([
-            {"op": "tap", "args": {"selector": {"label": "Target"}, "observe": "none"}},
-            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "never", "observe": "none"}},
+            {"op": "tap", "args": {"selector": {"label": "Target"}}},
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "continue"}},
+            {"op": "press_button", "args": {"name": "home"}},
         ])
-        self.assertFalse(result["complete"])
-        self.assertEqual(result["completed_steps"], 1)
-        self.assertEqual(result["stop_reason"], "verification_required")
-        self.assertEqual([call[1] for call in self.client.actions()], ["/element/target/click"])
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["completed_steps"], 3)
+        self.assertTrue(all(item["verification_deferred"] for item in result["results"]))
+        self.assertEqual(self.client.elements[0]["value"], "continue")
+        self.assertEqual(self.client.actions()[-1][1], "/wda/homescreen")
+        self.assertFalse(any(path.startswith("/source") or path == "/wda/activeAppInfo" or path.endswith("/attribute/value")
+                             for _, path, _ in self.client.calls))
 
     def test_batch_stops_after_uncertain_error(self):
         self.client.click_error = WDAError("action_uncertain", "Timeout", uncertain=True)
@@ -907,9 +1008,31 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(any(path == "/wda/pressButton" for _, path, _ in self.client.actions()))
         self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in self.client.actions()))
 
+    def test_batch_can_continue_after_explicit_submission_expectation(self):
+        result = self.phone.batch([
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Full input",
+                                          "submit": True, "expect": {"label": "Target"}}},
+            {"op": "press_button", "args": {"name": "home"}},
+        ])
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["completed_steps"], 2)
+        self.assertTrue(result["results"][0]["submission_verified"])
+        self.assertEqual(self.client.actions()[-1][1], "/wda/homescreen")
+
+    def test_batch_explicit_expectation_failure_stops_before_next_action(self):
+        with patch("wda_controller.time.monotonic", side_effect=[100, 100.1, 107]):
+            result = self.phone.batch([
+                {"op": "tap", "args": {"selector": {"label": "Target"}, "expect": {"label": "Missing"}}},
+                {"op": "press_button", "args": {"name": "home"}},
+            ])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["stop_reason"], "postcondition_failed")
+        self.assertTrue(result["error"]["action_executed"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/target/click"])
+
     def test_batch_continues_after_verified_home_navigation(self):
         result = self.phone.batch([
-            {"op": "press_button", "args": {"name": "home", "observe": "none"}},
+            {"op": "press_button", "args": {"name": "home", "observe": "none", "verify": True}},
             {"op": "observe", "args": {}},
         ])
         self.assertTrue(result["complete"])
@@ -921,20 +1044,40 @@ class ControllerTests(unittest.TestCase):
         result = self.phone.batch([
             {"op": "observe", "args": {}},
             {"op": "wait", "args": {"selector": {"label": "Target"}, "timeout_seconds": 0}},
-            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Verified input", "observe": "none"}},
+            {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Verified input", "observe": "none", "verify": True}},
         ])
         self.assertTrue(result["complete"])
         self.assertEqual(result["completed_steps"], 3)
         self.assertEqual(self.client.elements[0]["value"], "Verified input")
 
     def test_collect_list_does_not_claim_completeness_at_page_budget(self):
-        self.client.source_pages = [[node("Row 1")], [node("Row 2")]]
+        self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
         result = self.phone.collect_list(max_pages=2)
         self.assertEqual([row["label"] for row in result["rows"]], ["Row 1", "Row 2"])
         self.assertEqual(len(result["pages"]), 2)
         self.assertEqual(result["stop_reason"], "page_budget")
         self.assertFalse(result["complete"])
         self.assertFalse(result["coverage_verified"])
+        self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 2)
+
+    def test_scroll_find_reuses_the_one_matching_query_for_hittability(self):
+        result = self.phone.scroll_find({"label": "Target"}, max_swipes=0)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["swipes"], 0)
+        self.assertEqual(sum(path == "/elements" for _, path, _ in self.client.calls), 1)
+        self.assertEqual(sum(path == "/element/target/rect" for _, path, _ in self.client.calls), 1)
+        self.assertEqual(sum(path == "/element/target/attribute/hittable" for _, path, _ in self.client.calls), 1)
+        self.assertEqual(self.client.actions(), [])
+
+    def test_scroll_find_requeries_once_after_lightweight_scroll(self):
+        self.client.elements[0]["rect"]["y"] = 900
+        self.client.gesture_effects = [lambda: self.client.elements[0]["rect"].update(y=200)]
+        result = self.phone.scroll_find({"label": "Target"}, max_swipes=1)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["swipes"], 1)
+        self.assertEqual(sum(path == "/elements" for _, path, _ in self.client.calls), 2)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
 
     def test_end_marker_verifies_coverage_but_requires_business_reconciliation(self):
         self.client.elements[0]["label"] = "End"
@@ -944,14 +1087,71 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertEqual(result["stop_reason"], "explicit_end_marker")
         self.assertEqual(self.client.actions(), [])
+        self.assertEqual(sum(path == "/elements" for _, path, _ in self.client.calls), 1)
 
     def test_collect_list_stops_on_no_progress_without_claiming_coverage(self):
         result = self.phone.collect_list(max_pages=4)
         self.assertEqual(result["stop_reason"], "no_progress")
-        self.assertEqual(len(result["pages"]), 1)
+        self.assertEqual(len(result["pages"]), 2)
         self.assertFalse(result["complete"])
         self.assertFalse(result["coverage_verified"])
+        self.assertEqual(self.client.swipe_count, 1)
+
+    def test_collect_list_collects_virtualized_replacement_pages_without_fallback(self):
+        self.client.source_pages = [[node(label=label, y=350)] for label in ("A", "B", "C")]
+        result = self.phone.collect_list(max_pages=3)
+        self.assertEqual([row["label"] for row in result["rows"]], ["A", "B", "C"])
+        self.assertEqual(len(result["pages"]), 3)
+        self.assertEqual(result["stop_reason"], "page_budget")
+        self.assertFalse(result["complete"])
         self.assertEqual(self.client.swipe_count, 2)
+        self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 3)
+        self.assertFalse(any(path == "/wda/swipe" for _, path, _ in self.client.calls))
+
+    def test_collect_list_value_or_unrelated_carousel_refresh_does_not_drive_more_scrolls(self):
+        self.client.source_pages = [
+            [node("Stable row", y=350, value=value), node("Banner " + value, y=50, kind="StaticText")]
+            for value in ("100", "101", "102")
+        ]
+        result = self.phone.collect_list(max_pages=6)
+        self.assertEqual(result["stop_reason"], "no_progress")
+        self.assertEqual(len(result["pages"]), 2)
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertFalse(result["coverage_verified"])
+        self.assertEqual([row["value"] for row in result["rows"]], ["100", "101"])
+
+    def test_scroll_find_read_failure_after_gesture_preserves_execution_and_stops_batch(self):
+        original = self.client.session
+        def fail_later_query(method, path, payload=None, timeout=None):
+            if path == "/elements" and self.client.swipe_count:
+                raise WDAError("wda_unreachable", "Read response lost", uncertain=False)
+            return original(method, path, payload, timeout)
+        with patch.object(self.client, "session", side_effect=fail_later_query):
+            result = self.phone.batch([
+                {"op": "scroll_find", "args": {"selector": {"label": "Missing"}, "max_swipes": 2}},
+                {"op": "press_button", "args": {"name": "home"}},
+            ])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["stopped_at"], 0)
+        self.assertFalse(result["error"]["uncertain"])
+        self.assertTrue(result["error"]["action_executed"])
+        self.assertFalse(result["error"]["action_complete"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertNotIn("/wda/homescreen", [path for _, path, _ in self.client.calls])
+
+    def test_collect_list_read_failure_after_gesture_preserves_execution(self):
+        self.client.source_pages = [[node(label="Stable row", y=350)], [node(label="Stable row", y=300)]]
+        original = self.client.session
+        def fail_later_query(method, path, payload=None, timeout=None):
+            if path == "/elements" and self.client.swipe_count:
+                raise WDAError("wda_unreachable", "Read response lost", uncertain=False)
+            return original(method, path, payload, timeout)
+        with patch.object(self.client, "session", side_effect=fail_later_query), self.assertRaises(WDAError) as caught:
+            self.phone.collect_list(max_pages=3, end_selector={"label": "Missing"})
+        self.assertTrue(caught.exception.details["action_executed"])
+        self.assertFalse(caught.exception.details["action_complete"])
+        self.assertFalse(caught.exception.uncertain)
+        self.assertEqual(self.client.swipe_count, 1)
 
 
 @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"), "Apple Foundation requires macOS and clang")
