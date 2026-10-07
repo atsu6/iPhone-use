@@ -24,8 +24,12 @@ from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.2.4"
-SCREEN_URI="ui://iphone-use-wda/phone-0.2.4.html"
+VERSION="0.2.5"
+SCREEN_URI="ui://iphone-use-wda/phone-0.2.5.html"
+# Codex scopes reuse to the host, chat, server and UI resource. A stable result
+# ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
+# including after the MCP process reconnects; no device identifiers are needed.
+SCREEN_SESSION_ID="iphone-use-wda-screen"
 SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 # Seconds WDA may wait for animations to end before a post-action tree read; WDA_SETTLE_SECONDS overrides it.
@@ -110,7 +114,7 @@ DESCRIPTIONS={
 DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
 READS={"doctor","observe","find","wait","metrics","apps"}
 READS.update(("screen","screen_frame"))
-DESCRIPTIONS["screen"]="Open the live iPhone screen in the Codex side panel. No phone actions or UI controls. Pause the preview before password/Face ID user takeover; resume after explicit completion. READY also opens this view by default."
+DESCRIPTIONS["screen"]="Open or reuse the live iPhone screen in the Codex side panel. No phone actions or UI controls. Pause the preview before password/Face ID user takeover; resume after explicit completion. READY also opens or reuses this view by default."
 DESCRIPTIONS["screen_frame"]="App-only cached live preview and action cursor events. Never reads XML, starts sessions or occupies the phone operation lock."
 DESCRIPTIONS["screen_action"]="App-only toolbar of the live preview, pressed by the user: refresh the preview stream, send the iPhone Home, or copy a screenshot to the Mac clipboard. Refused while the preview is paused for authentication."
 
@@ -555,7 +559,10 @@ def tool_result(runtime,params):
         data=runtime.call(name,params.get("arguments",{}))
         # The preview App reads structuredContent; frames never become model text.
         if name=="wda_screen_frame":return {"content":[],"structuredContent":data,"isError":False}
-        return result_content(data,structured=name in ("wda_screen","wda_screen_action"))
+        result=result_content(data,structured=name in ("wda_screen","wda_screen_action"))
+        if name in ("wda_ready","wda_screen"):
+            result["_meta"]={"openai/widgetSessionId":SCREEN_SESSION_ID}
+        return result
     except WDAError as exc:return result_content({"error":exc.as_dict()},structured=name=="wda_screen_action")
     except Exception as exc:
         print("iphone-use-wda tool failure: "+type(exc).__name__,file=sys.stderr)
@@ -566,7 +573,7 @@ INSTRUCTIONS=(
  "Read iphone-wda-setup before setup and iphone-wda-use for tasks. First phone task in a new chat: wda_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
  "If READY fails with wda_unreachable/not_ready, continue initialization rather than end the task: wda_setup(action=status), reuse an active start/recovery job or start once from the existing config/build, poll that job until service.ready=true, then READY again. Missing config/source/build uses the setup skill. "
  "recover=true is runtime recovery, not cold startup; for state=recovering follow its setup job until the service is ready, then READY again. Honor explicit diagnostic/no-start/no-restart instructions. "
- "The live iPhone screen opens in the side panel with READY; use wda_screen to reopen it. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
+ "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use wda_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
  "Results are one compact JSON text. Tree nodes give type without the XCUIElementType prefix and rect=[x,y,width,height] in iPhone points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. "
  "A screenshot arrives as an image in the same result, scaled for reading: image pixels x image.pixel_to_point [x,y] = iPhone points. Standalone observation uses mode, mutation output uses observe. "
  "Selectors copy label/name/value/type from fresh nodes; use label_contains for long or changing labels. Matches nested at one place, or with only one on screen, resolve by themselves. "

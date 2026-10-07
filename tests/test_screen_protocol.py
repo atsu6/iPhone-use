@@ -180,6 +180,54 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
         self.assertEqual([kind for kind, _ in screen.events], ["start", "pause", "start", "pause", "start"])
 
+    def test_ready_open_and_authentication_calls_share_one_host_widget_session(self):
+        runtime, client, screen = self.runtime()
+        results = []
+        with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
+            for name, arguments in (("wda_ready", {"screenshot": False, "recover": False}),
+                                    ("wda_screen", {}), ("wda_screen", {"action": "pause"}),
+                                    ("wda_ready", {"screenshot": False, "recover": False}),
+                                    ("wda_screen", {"action": "resume"})):
+                results.append(self.call_over_stdio(runtime, name, arguments))
+        identifiers = [result["_meta"]["openai/widgetSessionId"] for result in results]
+        self.assertTrue(identifiers[0])
+        self.assertEqual(len(set(identifiers)), 1)
+        self.assertTrue(json.loads(results[0]["content"][0]["text"])["ready"])
+        self.assertTrue(results[2]["structuredContent"]["paused"])
+        self.assertTrue(json.loads(results[3]["content"][0]["text"])["ready"])
+        self.assertFalse(results[4]["structuredContent"]["paused"])
+        # Session identity is host metadata only: it must not duplicate model data
+        # or couple the display lifecycle to a phone session or user action.
+        for result in results:
+            self.assertNotIn("widgetSessionId", result["content"][0]["text"])
+        self.assertNotIn("structuredContent", results[0])
+        self.assertFalse(any(path == "/screenshot" for _, path, _ in client.calls))
+        self.assertEqual([path for _, path, _ in client.actions()], ["/session"])
+
+    def test_widget_session_survives_repeated_opens_and_mcp_process_reconnect(self):
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "wda_screen", "arguments": {}}}
+        first, repeated = self.exchange([request, {**request, "id": 2}])
+        reconnected, = self.exchange([request])
+        results = [reply["result"] for reply in (first, repeated, reconnected)]
+        identifiers = [result["_meta"]["openai/widgetSessionId"] for result in results]
+        self.assertTrue(identifiers[0])
+        self.assertEqual(len(set(identifiers)), 1)
+        self.assertTrue(all(result["isError"] is False for result in results))
+
+    def test_setup_status_and_failed_ready_do_not_create_a_widget_session(self):
+        runtime, client, screen = self.runtime()
+        with patch.object(runtime.setup_manager, "setup", return_value={"configured": True}):
+            status = self.call_over_stdio(runtime, "wda_setup", {"action": "status"})
+        client.locked = True
+        failed = self.call_over_stdio(runtime, "wda_ready", {"screenshot": False, "recover": False})
+        self.assertNotIn("_meta", status)
+        self.assertNotIn("_meta", failed)
+        self.assertTrue(failed["isError"])
+        self.assertEqual(json.loads(failed["content"][0]["text"])["error"]["code"], "phone_locked")
+        self.assertTrue(screen.is_paused)
+        self.assertEqual(client.actions(), [])
+
     def test_invalid_preview_arguments_rejected_before_backend_or_phone(self):
         cases = [("wda_screen", {"action": "click"}), ("wda_screen", {"x": 100}),
                  ("wda_screen_frame", {"after_seq": True}), ("wda_screen_frame", {"after_seq": -1}),
