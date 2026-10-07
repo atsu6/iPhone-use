@@ -26,6 +26,7 @@ type Preview = {
   device?: { model?: string } | null;
 };
 type LiveState = 'connecting' | 'live' | 'paused' | 'offline';
+type EmptyState = 'connecting' | 'offline' | 'locked' | 'authentication' | 'paused' | 'unavailable';
 type ToolName = 'refresh' | 'home' | 'screenshot';
 type CursorEffect = { node: HTMLElement; animation?: Animation; timer?: ReturnType<typeof setTimeout> };
 
@@ -34,6 +35,7 @@ const device = document.getElementById('device')!;
 const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const emptyState = document.getElementById('empty-state')!;
+const emptyText = document.getElementById('empty-state-text')!;
 const cursor = document.getElementById('cursor')!;
 const stage = document.getElementById('stage')!;
 const model = document.getElementById('model')!;
@@ -45,7 +47,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone Use Screen', version: '0.3.0' },
+  { name: 'iPhone Use Screen', version: '0.3.2' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -73,6 +75,10 @@ const REQUEST_TIMEOUT = 3000;
 // A screenshot or Home may queue behind the phone operation already running.
 const ACTION_TIMEOUT = 12000;
 const LIVE_TEXT: Record<LiveState, string> = { connecting: '连接中', live: 'Live', paused: '已暂停', offline: '未连接' };
+const EMPTY_TEXT: Record<EmptyState, string> = {
+  connecting: '正在连接', offline: '未连接', locked: '等待解锁',
+  authentication: '请完成认证', paused: '预览已暂停', unavailable: '画面暂不可用',
+};
 const DONE: Record<ToolName, string> = { refresh: '已刷新连接', home: '已回到主屏幕', screenshot: '截图已复制到剪贴板' };
 const FAILED: Record<string, string> = {
   device_busy: '手机正在执行操作，请稍后再试',
@@ -98,12 +104,17 @@ function syncTools() {
   tools.home.disabled = tools.screenshot.disabled = acting || paused;
 }
 
+function showEmpty(state: EmptyState) {
+  emptyState.dataset.state = state;
+  emptyText.textContent = EMPTY_TEXT[state];
+}
+
 function setLive(state: LiveState) {
+  if (!image.src) showEmpty(state === 'paused' ? 'paused' : state === 'offline' ? 'offline' : 'connecting');
   if (root.dataset.live === state) return;
   root.dataset.live = state;
   liveText.textContent = LIVE_TEXT[state];
   liveText.title = '';
-  if (!image.src) emptyState.textContent = state === 'paused' ? '预览已暂停' : '未连接';
   syncTools();
 }
 
@@ -301,7 +312,8 @@ function consume(value: unknown) {
     liveText.title = preview.pause_reason === 'device_locked'
       ? '解锁 iPhone 后继续任务，或点击刷新恢复预览'
       : '预览已暂停；完成手机认证后继续任务或点击刷新恢复画面';
-    emptyState.textContent = preview.pause_reason === 'device_locked' ? '等待解锁' : '预览已暂停';
+    showEmpty(preview.pause_reason === 'device_locked' ? 'locked'
+      : preview.pause_reason === 'authentication' ? 'authentication' : 'paused');
     return;
   }
   if (preview.frame_available === false) {
@@ -384,7 +396,11 @@ async function poll() {
 
 async function act(name: ToolName) {
   if (acting || disposed || tools[name].disabled) return;
-  if (name === 'refresh') frameGeneration++; // Ignore a poll from before this reconnect click.
+  const previousEmptyState = emptyState.dataset.state as EmptyState;
+  if (name === 'refresh') {
+    frameGeneration++; // Ignore a poll from before this reconnect click.
+    if (!image.src) showEmpty('connecting');
+  }
   acting = true;
   tools[name].dataset.busy = 'true';
   syncTools();
@@ -396,6 +412,7 @@ async function act(name: ToolName) {
     }, { timeout: ACTION_TIMEOUT });
     const data = result.structuredContent as (Partial<Preview> & { service_ready?: boolean; error?: { code?: string } }) | undefined;
     if (result.isError || data?.error) {
+      if (name === 'refresh' && !image.src) showEmpty(previousEmptyState);
       notify(FAILED[data?.error?.code ?? ''] ?? '操作未完成，请重试', true);
     } else {
       // A refresh answers with the new stream identity; take the next frame at once.
@@ -406,6 +423,7 @@ async function act(name: ToolName) {
       schedule(0);
     }
   } catch {
+    if (name === 'refresh' && !image.src) showEmpty(previousEmptyState);
     notify('操作未完成，请重试', true);
   } finally {
     acting = false;
@@ -446,6 +464,7 @@ image.onerror = () => {
   } else if (!lastGoodFrame) {
     clearFrame();
     setLive('offline');
+    showEmpty('unavailable');
   }
   frameSeq = 0; // Request a replacement without blanking the last decoded frame.
   retainFrame();
@@ -521,7 +540,8 @@ root.dataset.pageVisible = String(visible());
 device.hidden = screen.hidden = false;
 image.hidden = true;
 emptyState.hidden = false;
+showEmpty('connecting');
 fitFrame();
 syncTools();
-try { await connect(); } catch { retainFrame(); }
+try { await connect(); } catch { retainFrame(); setLive('offline'); }
 schedule(ready ? 0 : 1000);
