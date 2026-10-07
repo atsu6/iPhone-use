@@ -19,7 +19,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #toolbar button:disabled{opacity:.35;cursor:default;background:transparent;transform:none}
 #toolbar button[data-busy="true"]{opacity:1;animation:tool-busy 1s ease-in-out infinite}
-#toolbar svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#toolbar svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
 #toast{position:absolute;left:50%;bottom:70px;z-index:5;max-width:calc(100% - 32px);padding:7px 12px;overflow:hidden;border-radius:999px;background:var(--toast);color:var(--toast-text);line-height:1.2;text-overflow:ellipsis;white-space:nowrap;transform:translateX(-50%);box-shadow:0 6px 20px -8px #00000059;pointer-events:none;animation:toast-in .18s ease-out}
 #toast[data-tone="error"]{background:#b42318f2;color:#fff}
 #toast[hidden]{display:none}

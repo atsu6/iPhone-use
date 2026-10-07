@@ -24,8 +24,8 @@ from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.2.1"
-SCREEN_URI="ui://iphone-use-wda/phone-0.2.1.html"
+VERSION="0.2.2"
+SCREEN_URI="ui://iphone-use-wda/phone-0.2.2.html"
 SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 # Seconds WDA may wait for animations to end before a post-action tree read; WDA_SETTLE_SECONDS overrides it.

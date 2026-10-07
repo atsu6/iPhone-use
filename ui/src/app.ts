@@ -42,7 +42,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.1' },
+  { name: 'iPhone WDA Screen', version: '0.2.2' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
