@@ -43,7 +43,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.4' },
+  { name: 'iPhone WDA Screen', version: '0.2.5' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -167,7 +167,7 @@ function glowMask(width: number, height: number, radius: number, band: number) {
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
-// Three seamless, static wave phases crossfade with the colour fields. Dot sizes
+// Three seamless, static wave phases crossfade independently of the colour fields. Dot sizes
 // vary across each tile without per-frame SVG generation or gradient repainting.
 function glowDots(step: number, phase: number) {
   const count = 16;
