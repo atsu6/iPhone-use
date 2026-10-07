@@ -31,11 +31,14 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   const elements = Object.fromEntries(ids.map(id => [id, {
     style: { setProperty(name, value) { this[name] = value; } }, dataset: {},
     hidden: ['device', 'screen', 'cursor', 'toast'].includes(id), clientWidth: 400, clientHeight: 800,
-    disabled: false, textContent: '', handlers: new Map(),
+    disabled: false, textContent: '', handlers: new Map(), children: [],
     addEventListener(name, fn) { this.handlers.set(name, fn); },
     removeEventListener(name) { this.handlers.delete(name); },
     click() { this.handlers.get('click')?.(); },
     removeAttribute(name) { delete this[name]; },
+    cloneNode() { return { ...this, style: { ...this.style }, dataset: { ...this.dataset }, children: [], animation: undefined }; },
+    appendChild(node) { this.children.push(node); node.parent = this; return node; },
+    remove() { const children = this.parent?.children; if (children?.includes(this)) children.splice(children.indexOf(this), 1); },
     animate(frames, options) {
       const animation = { frames, options, cancelled: false, cancel() { this.cancelled = true; } };
       this.animation = animation;
@@ -131,11 +134,62 @@ test('preserves full frame aspect ratio and maps gestures using the point viewpo
   assert.equal(h.elements.image.src, 'data:image/png;base64,test-image-only');
   assert.equal(h.elements.cursor.style.left, '25%');
   assert.equal(h.elements.cursor.style.top, '25%');
-  assert.equal(h.elements.cursor.animation.options.duration, 540);
+  assert.equal(h.elements.cursor.animation.options.duration, 1600);
   h.app.ontoolresult({ structuredContent: preview({ events: [{ id: 2, kind: 'drag', at: 1000, from: { x: 40, y: 80 }, to: { x: 360, y: 720 }, duration_ms: 650 }] }) });
-  assert.equal(h.elements.cursor.style.left, '10%');
-  assert.equal(h.elements.cursor.animation.frames[2].transform, 'translate(320px, 640px) scale(1)');
-  assert.equal(h.elements.cursor.animation.options.duration, 650);
+  const drag = h.elements.screen.children[0];
+  assert.equal(drag.style.left, '10%');
+  assert.equal(drag.animation.frames[3].transform, 'translate(320px, 640px) scale(.92)');
+  assert.equal(drag.animation.options.duration, 1650);
+});
+
+test('tap feedback stays readable for one to two seconds with a small press and rebound', async () => {
+  const h = await harness();
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(), viewport: { width: 400, height: 800 },
+    events: [{ id: 1, kind: 'tap', at: 1000, point: { x: 200, y: 400 } }] }) });
+  const effect = h.elements.cursor.animation;
+  assert.ok(effect.options.duration >= 1000 && effect.options.duration <= 2000);
+  const visible = effect.frames.filter(frame => frame.opacity === 1);
+  assert.ok((visible.at(-1).offset - visible[0].offset) * effect.options.duration >= 1200);
+  const scales = effect.frames.map(frame => Number(frame.transform.match(/scale\(([^)]+)\)/)[1]));
+  assert.ok(Math.min(...scales) >= .85 && Math.min(...scales) < 1);
+  assert.ok(Math.max(...scales) > 1 && Math.max(...scales) <= 1.1);
+  effect.onfinish();
+  assert.equal(h.elements.cursor.hidden, true);
+});
+
+test('overlapping taps and short drags keep independent readable lifetimes', async () => {
+  const h = await harness();
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(), viewport: { width: 400, height: 800 }, events: [
+    { id: 1, kind: 'tap', at: 1000, point: { x: 100, y: 200 } },
+    { id: 2, kind: 'drag', at: 1000, from: { x: 200, y: 400 }, to: { x: 200, y: 600 }, duration_ms: 120 },
+  ] }) });
+  const tap = h.elements.cursor.animation;
+  const drag = h.elements.screen.children[0];
+  assert.equal(tap.cancelled, false);
+  assert.ok(drag.animation.options.duration >= 1600 && drag.animation.options.duration <= 2000);
+  assert.equal(drag.animation.frames.at(-2).opacity, 1);
+  tap.onfinish();
+  assert.equal(drag.hidden, false);
+  assert.equal(drag.animation.cancelled, false);
+  drag.animation.onfinish();
+  assert.equal(h.elements.screen.children.length, 0);
+});
+
+test('authentication pause removes every active gesture and its animation', async () => {
+  const h = await harness();
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(), viewport: { width: 400, height: 800 }, events: [
+    { id: 1, kind: 'tap', at: 1000, point: { x: 100, y: 200 } },
+    { id: 2, kind: 'tap', at: 1000, point: { x: 200, y: 400 } },
+  ] }) });
+  const first = h.elements.cursor.animation;
+  const second = h.elements.screen.children[0].animation;
+  h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
+  assert.equal(first.cancelled, true);
+  assert.equal(second.cancelled, true);
+  assert.equal(h.elements.cursor.hidden, true);
+  assert.equal(h.elements.screen.children.length, 0);
+  first.onfinish(); second.onfinish();
+  assert.equal(h.elements.cursor.hidden, true);
 });
 
 test('omitted frames preserve the displayed image and acknowledgements advance once', async () => {
@@ -244,6 +298,10 @@ test('reduced motion shows a stationary cursor and old gestures are not replayed
   assert.equal(h.elements.cursor.animation, undefined);
   h.app.ontoolresult({ structuredContent: preview({ server_time: 10000, events: [{ id: 2, kind: 'tap', at: 1000, point: { x: 200, y: 400 } }] }) });
   assert.equal(h.elements.cursor.style.left, '90%');
+  for (let i = 0; i < 5; i++) await h.tick();
+  assert.equal(h.elements.cursor.hidden, false);
+  for (let i = 0; i < 4; i++) await h.tick();
+  assert.equal(h.elements.cursor.hidden, true);
 });
 
 test('a reconnected server restarts acknowledgements and unavailable streams retain the last pixels', async () => {

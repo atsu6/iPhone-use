@@ -26,6 +26,7 @@ type Preview = {
 };
 type LiveState = 'connecting' | 'live' | 'paused' | 'offline';
 type ToolName = 'refresh' | 'home' | 'screenshot';
+type CursorEffect = { node: HTMLElement; animation?: Animation; timer?: ReturnType<typeof setTimeout> };
 
 const root = document.getElementById('app')!;
 const device = document.getElementById('device')!;
@@ -42,7 +43,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.2' },
+  { name: 'iPhone WDA Screen', version: '0.2.3' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -58,8 +59,7 @@ let dimensions: Size | undefined;
 let viewport: Size | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let failures = 0;
-let animation: Animation | undefined;
-let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+const cursorEffects = new Set<CursorEffect>();
 let requestedFullscreen = false;
 let connecting: Promise<void> | undefined;
 let suspended = false;
@@ -115,12 +115,16 @@ function applyTheme(theme: unknown) {
   if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
 }
 
+function finishCursor(effect: CursorEffect) {
+  if (!cursorEffects.delete(effect)) return;
+  effect.animation?.cancel();
+  if (effect.timer) clearTimeout(effect.timer);
+  effect.node.hidden = true;
+  if (effect.node !== cursor) effect.node.remove();
+}
+
 function hideCursor() {
-  animation?.cancel();
-  animation = undefined;
-  if (cursorTimer) clearTimeout(cursorTimer);
-  cursorTimer = undefined;
-  cursor.hidden = true;
+  for (const effect of cursorEffects) finishCursor(effect);
 }
 
 function clearFrame(resetOperating = true) {
@@ -221,15 +225,22 @@ function showGesture(gesture: Gesture) {
   const point = gesture.kind === 'tap' ? gesture.point : gesture.from;
   if (!validPoint(point)) return;
   if (gesture.kind === 'drag' && !validPoint(gesture.to)) return;
-  hideCursor();
-  Object.assign(cursor.style, pointStyle(point, size));
-  cursor.hidden = false;
-  const duration = gesture.kind === 'drag'
-    ? Math.max(120, Math.min(5000, gesture.duration_ms || 400))
-    : 540;
+  // Keep each indication readable even when several real actions arrive together.
+  // Overlapping effects have independent lifetimes, so a new tap cannot erase one.
+  const marker = cursor.hidden ? cursor : cursor.cloneNode(false) as HTMLElement;
+  if (marker !== cursor) {
+    marker.removeAttribute('id');
+    screen.appendChild(marker);
+  }
+  Object.assign(marker.style, pointStyle(point, size));
+  marker.hidden = false;
+  const effect: CursorEffect = { node: marker };
+  cursorEffects.add(effect);
+  const movement = Math.max(600, Math.min(1000, gesture.duration_ms || 650));
+  const duration = gesture.kind === 'drag' ? movement + 1000 : 1600;
   if (reducedMotion.matches) {
-    if (gesture.kind === 'drag') Object.assign(cursor.style, pointStyle(gesture.to!, size));
-    cursorTimer = setTimeout(hideCursor, 350);
+    if (gesture.kind === 'drag') Object.assign(marker.style, pointStyle(gesture.to!, size));
+    effect.timer = setTimeout(() => finishCursor(effect), duration);
     return;
   }
   const delta = gesture.kind === 'drag'
@@ -237,18 +248,26 @@ function showGesture(gesture: Gesture) {
     : '';
   const frames: Keyframe[] = gesture.kind === 'drag'
     ? [
-      { transform: 'translate(0, 0) scale(.85)', opacity: 0 },
-      { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: .08 },
-      { transform: `${delta} scale(1)`, opacity: 1, offset: .86 },
-      { transform: `${delta} scale(.9)`, opacity: 0 },
+      { transform: 'translate(0, 0) scale(.96)', opacity: 0 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: 80 / duration },
+      { transform: 'translate(0, 0) scale(.92)', opacity: 1, offset: 200 / duration, easing: 'cubic-bezier(.3,0,.2,1)' },
+      { transform: `${delta} scale(.92)`, opacity: 1, offset: (movement + 200) / duration },
+      { transform: `${delta} scale(1.06)`, opacity: 1, offset: (movement + 380) / duration },
+      { transform: `${delta} scale(1)`, opacity: 1, offset: (duration - 350) / duration },
+      { transform: `${delta} scale(1)`, opacity: 1, offset: (duration - 200) / duration },
+      { transform: `${delta} scale(.98)`, opacity: 0 },
     ]
     : [
-      { transform: 'scale(.65)', opacity: 0 },
-      { transform: 'scale(1)', opacity: 1, offset: .2 },
-      { transform: 'scale(1.35)', opacity: 0 },
+      { transform: 'scale(.96)', opacity: 0 },
+      { transform: 'scale(1)', opacity: 1, offset: .06 },
+      { transform: 'scale(.9)', opacity: 1, offset: .16 },
+      { transform: 'scale(1.06)', opacity: 1, offset: .28 },
+      { transform: 'scale(1)', opacity: 1, offset: .4 },
+      { transform: 'scale(1)', opacity: 1, offset: .875 },
+      { transform: 'scale(.98)', opacity: 0 },
     ];
-  animation = cursor.animate(frames, { duration, easing: gesture.kind === 'drag' ? 'linear' : 'ease-out' });
-  animation.onfinish = hideCursor;
+  effect.animation = marker.animate(frames, { duration, easing: 'linear' });
+  effect.animation.onfinish = () => finishCursor(effect);
 }
 
 function consume(value: unknown) {

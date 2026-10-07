@@ -26,7 +26,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #device{--bezel:10px;--screen-radius:50px;position:relative;flex:none;isolation:isolate;border-radius:calc(var(--screen-radius) + var(--bezel));background:linear-gradient(115deg,#c4c0b9 0%,#686662 12%,#b1ada6 24%,#555452 51%,#96938e 72%,#c9c6c0 91%,#686762 100%);box-shadow:0 0 0 .7px #252525ad,0 12px 28px -14px #00000055,0 4px 8px -4px #00000033;user-select:none;pointer-events:none}
 #device::before{content:"";position:absolute;inset:calc(var(--bezel) * .24);z-index:1;border-radius:calc(var(--screen-radius) + var(--bezel) * .76);background:#090a0c;box-shadow:0 0 0 .7px #00000099,inset 0 0 0 .7px #ffffff16;pointer-events:none}
 #screen{position:absolute;inset:var(--bezel);z-index:2;isolation:isolate;overflow:hidden;border-radius:var(--screen-radius);background:#050609;line-height:0;user-select:none}
-#device[hidden],#screen[hidden],#cursor[hidden]{display:none}
+#device[hidden],#screen[hidden],.gesture-cursor[hidden]{display:none}
 .side-button{position:absolute;z-index:0;width:calc(var(--bezel) * .27);left:calc(var(--bezel) * -.22);border-radius:calc(var(--bezel) * .15);background:linear-gradient(90deg,#5a5956,#b1aea7 55%,#5e5c59);box-shadow:0 0 0 .4px #35353280;pointer-events:none}
 .action-button{top:15%;height:3.7%}
 .volume-up{top:23%;height:6.4%}
@@ -56,7 +56,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 .dynamic-island{position:absolute;z-index:3;left:50%;top:calc(var(--bezel) * 1.17);width:calc(var(--bezel) * 11.25);height:calc(var(--bezel) * 3.46);transform:translateX(-50%);border-radius:999px;background:#030405;box-shadow:0 0 0 .5px #00000099,inset 0 .5px 0 #ffffff0d;pointer-events:none}
 .dynamic-island::after{content:"";position:absolute;right:calc(var(--bezel) * .66);top:50%;width:calc(var(--bezel) * 1.65);height:calc(var(--bezel) * 1.65);transform:translateY(-50%);border-radius:50%;background:radial-gradient(circle at 43% 38%,#274271 0%,#111d31 27%,#090c12 54%,#010203 73%);box-shadow:inset 0 0 0 .6px #111620;opacity:.7}
 #device[data-orientation="landscape"] .dynamic-island{left:calc(var(--bezel) * 2.9);top:50%;transform:translate(-50%,-50%) rotate(-90deg)}
-#cursor{position:absolute;z-index:4;width:26px;height:26px;margin:-13px 0 0 -13px;border:1.5px solid #ffffffec;border-radius:50%;background:#8faaff66;box-shadow:0 0 0 1px #516daa45,0 2px 10px #00000033;pointer-events:none;will-change:transform,opacity}
+.gesture-cursor{position:absolute;z-index:4;width:26px;height:26px;margin:-13px 0 0 -13px;border:1.5px solid #ffffffe6;border-radius:50%;background:#80808066;box-shadow:0 0 0 1px #4c4c4c66,0 2px 6px #00000026;pointer-events:none;will-change:transform,opacity}
 @keyframes glow-breathe{0%,100%{opacity:.8}50%{opacity:1}}
 @keyframes glow-a{0%,100%{opacity:1}33.33%,66.66%{opacity:0}}
 @keyframes glow-b{0%,66.66%,100%{opacity:0}33.33%{opacity:1}}
@@ -64,4 +64,4 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes tool-busy{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes toast-in{from{opacity:0}to{opacity:1}}
-@media(prefers-reduced-motion:reduce){.glow{transition:none}#app[data-operating="true"] .glow,#app[data-operating="true"] .glow i,#app[data-live="live"] .dot,#toolbar button[data-busy="true"],#toast{animation:none}#toolbar button{transition:none}#cursor{will-change:opacity}}
+@media(prefers-reduced-motion:reduce){.glow{transition:none}#app[data-operating="true"] .glow,#app[data-operating="true"] .glow i,#app[data-live="live"] .dot,#toolbar button[data-busy="true"],#toast{animation:none}#toolbar button{transition:none}.gesture-cursor{will-change:opacity}}
