@@ -2,7 +2,7 @@
 
 给 Codex 的本地 iPhone 视觉操作插件。默认读取 WDA 原生截图，由模型从画面选择目标并执行坐标操作。效率优先：直接使用已经看过的截图，操作后返回的截图可以继续指导下一步；无需在每次动作前重复观察。
 
-从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.1.2**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
+从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.1.3**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
 
 **运行条件：macOS、完整 Xcode、USB 连接的真实 iPhone、Python 3.9+、Node.js 20.19+/22.12+/24+ 和 npm 10+。** 不需要 Appium Server。WDA 固定为 16.14.0 / `d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6`。
 
@@ -23,7 +23,7 @@ sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-打包输出为 `dist/iphone-use-wda-vision-0.1.2-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
+打包输出为 `dist/iphone-use-wda-vision-0.1.3-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
 
 ## 开始操作
 
@@ -69,7 +69,7 @@ batch 适合点击已经看见的输入框后输入，或 Home 后启动已核�
 
 工具的执行完成不等于用户任务完成；模型根据截图和用户目标核验结果。动作超时或结果不确定时先看实际状态，避免重复输入或提交。通道恢复只重启归属已核验的插件服务，复用有效构建，不重放手机动作。iPhone 镜像运行本身不阻止 READY，按实际锁屏、通道状态和截图判断。
 
-密码、PIN、验证码及系统认证由用户在手机完成。接管期间暂停该手机的动作、读取和截图，收到用户明确完成通知后再观察并继续。
+密码、PIN、验证码及系统认证由用户在手机完成。模型通过宿主提问功能提示接管，首个选项为「已完成继续」。接管期间暂停该手机的动作、读取和截图，收到用户实际完成答复后再观察并继续。
 
 正常任务直接使用 MCP。只有具体工具确实缺失或宿主封装失败时，才按 [代码回退](skills/iphone-wda-vision-use/references/tool-fallback.md) 临时回退该操作；不要把全部操作改成 Python 调用。
 

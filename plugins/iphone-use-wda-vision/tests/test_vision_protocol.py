@@ -101,7 +101,7 @@ class VisualProtocolTests(unittest.TestCase):
             self.assertTrue(tool["inputSchema"]["properties"]["observe"]["default"])
         page = next(tool for tool in tools if tool["name"] == "wda_vision_read_page")
         self.assertNotIn("reason", page["inputSchema"].get("required", []))
-        self.assertEqual(initialized["serverInfo"]["version"], "0.1.2")
+        self.assertEqual(initialized["serverInfo"]["version"], json.loads((ROOT / "plugin.json").read_text())["version"])
 
     def test_default_runtime_reuses_original_shared_backend_state(self):
         fake_home = Path(self.directory.name) / "home"

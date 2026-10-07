@@ -1,6 +1,14 @@
-# iPhone Use WDA Vision 0.1.2 验证记录
+# iPhone Use WDA Vision 0.1.3 验证记录
 
-验证日期：2026-10-07（Asia/Shanghai）。基于 iphone-use-wda 0.1.4 的独立视觉插件，当前接口版本为 0.1.2。
+## 0.1.3 的认证提问指引
+
+日期：2026-10-07（Asia/Shanghai）。操作 / setup skill、认证参考及 MCP instructions 要求在密码、Face ID 或设备解锁接管时使用可用宿主提问工具，首个选项原样为「已完成继续」，第二个为「暂时无法完成」；Default 异步调用示例 JSON 按宿主 schema 核对。异步立即返回、预选、经过时间都不表示用户完成，等待真实答复后从新截图继续剩余任务。
+
+27 项视觉 MCP 协议回归通过，两个 skills、15 tools 与 manifests 校验通过。更新原协议测试的固定版本断言为发布 manifest 的版本，避免正常升级误报。本次仅修改指引和发布版本，没有操作 / 读取手机、触发认证或向用户发试验问题；实际模型执行接管流程仍随真实任务验收。发布包与本机安装通过标准安装脚本更新，新聊天使用新指引，已有聊天需重新连接。
+
+## 0.1.2 的历史验证
+
+验证日期：2026-10-07（Asia/Shanghai）。基于 iphone-use-wda 0.1.4 的独立视觉插件，该轮接口版本为 0.1.2。
 
 ## 模型工具绑定故障与修复
 
@@ -52,4 +60,4 @@ Codex 0.160.1 对所有 AgentPlugin 共用 64,000 字节的模型工具说明预
 
 通过 `sh scripts/install.sh` 注册本地 marketplace 并安装 iphone-use-wda-vision@iphone-wda-vision-local，再通过标准 MCP 注册更新同名入口到安装目录；重启或重新连接 Codex 后加载当前工具与 skills。两插件复用本机配置、会话及操作锁。
 
-用 `python3 scripts/package.py` 生成当前版本源码 ZIP，设备标识、签名配置、证书、日志、构建、截图、node_modules 和缓存不在打包白名单内。本次未发布 GitHub 或运行远端 CI。
+用 `python3 scripts/package.py` 生成当前版本源码 ZIP，设备标识、签名配置、证书、日志、构建、截图、node_modules 和缓存不在打包白名单内。0.1.2 该轮未发布 GitHub 或运行远端 CI。

@@ -1,5 +1,11 @@
 # 验证记录
 
+## 0.1.10 的认证提问指引
+
+日期：2026-10-07（Asia/Shanghai）。普通版与视觉版的 use / setup skill、认证参考及 MCP initialize instructions 统一要求调用可用宿主提问工具，首选 Default 的 request_user_input_async，首个选项原样为「已完成继续」。示例 JSON 按宿主 schema 校验，两个选项顺序与文字核对通过；异步返回、默认预选或等待超时不视为用户完成，确认后才恢复手机调用。
+
+普通版 50 项协议 / widget 资源测试通过，TypeScript 与自包含 HTML 构建、manifest / 工具目录校验通过。视觉版同一指引随 0.1.3 发布，验证见其独立记录。本次没有触发真实认证、弹出试验性用户问题、读取手机或重跑 T01；本次验证指引与调用参数，未宣称真实认证任务验收。新版本安装后需要重新连接已有聊天加载新指引。
+
 ## 0.1.9 的真机空白修复
 
 日期：2026-10-07（Asia/Shanghai）。测试会话手机控制工具工作正常，侧边栏无图像；读取预览状态时 paused=false。仅连接独立 USB MJPEG 端口复现：8 秒轮询 39 次没有帧，worker 仍运行、依赖已安装。实际 appium-ios-device 交接的 socket 为 paused=true；HTTP parser 挂载后 resume 即返回 200 multipart 和视频字节。之前使用流动 TCP socket 的 fixture 没覆盖 usbmux 的暂停行为。

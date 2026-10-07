@@ -58,7 +58,7 @@ bundle ID 已核实时直接使用；未知时用 `wda_vision_apps(query="应用
 
 ## 认证与通道恢复
 
-实际画面显示认证阻塞时，按 [认证接管](references/authentication.md) 请用户在手机完成。接管期间暂停该手机的动作、读取和截图，可以整理已有结果。收到明确完成通知后新截图核对当前进度，继续剩余任务，不重放整段输入或批次。
+实际画面显示密码、Face ID 或解锁等认证阻塞时，暂停该手机的动作、读取和截图，按 [认证接管](references/authentication.md) 调用宿主提问工具。优先使用 Default 模式可用的 `functions.request_user_input_async`，问题说明实际阻塞与手机操作，第一个选项原样为「已完成继续」，第二个为「暂时无法完成」。保持问题待答，可以整理已有结果；工具立即返回、按钮预选或等待超时均不表示完成。收到用户实际选择或明确完成答复后新截图核对当前进度，继续剩余任务，不重放整段输入或批次。仅在提问工具不可用时按参考中的聊天回退处理。
 
 READY 的 ready / state 和实际画面用于确认通道。ready=false、state=recovering 时按返回 status_tool / status_arguments 跟踪同一工作；setup status 的 jobs 是数组，service.ready 或 recovery_phase=serving 后再验 READY，长期 Runner 无需等 succeeded。恢复仅解决真实通道故障，复用有效构建，不重放手机动作。iPhone 镜像运行本身不需先退出，按实际锁屏、状态和截图处理。
 

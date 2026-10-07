@@ -21,7 +21,7 @@ description: 安装、签名和启动真实 iPhone 的 WebDriverAgent，直接�
 4. build 后 start 安装和运行 Runner 与 USB 转发，跟踪返回的同一 job_id，不重复启动。status 的 jobs 是数组；长期 Runner 保持 running 是正常状态，service.ready 或 recovery_phase=serving 后验 READY，无需等 succeeded。
 5. 若手机 / Xcode 实际要求开发者信任，由用户按提示完成，再验 READY。直接看 READY 截图确认通道即可，不额外读取 XML 或重复 observe。
 
-用户要完成登录、信任、重启或安装 Xcode 时说明实际阻塞和后续步骤；其他已授权本机配置继续执行。无需增加统一许可关卡，不卸载用户开发 App、不吊销共享证书、不强迫购买开发者计划。密码、验证码及认证由用户本人完成。
+用户要完成登录、解锁、信任、重启确认或安装 Xcode 时，用当前可用的宿主提问工具说明实际阻塞和后续步骤；优先 `functions.request_user_input_async`，第一个选项原样为「已完成继续」，第二个为「暂时无法完成」。按 [认证接管](../iphone-wda-vision-use/references/authentication.md) 保留待答状态，仅在用户实际选择或明确答复后继续依赖步骤；其他已授权且不依赖该操作的本机配置继续执行。无需增加统一许可关卡，不卸载用户开发 App、不吊销共享证书、不强迫购买开发者计划。密码、验证码及认证由用户本人完成，不要求发送到聊天。
 
 ## 恢复与继续
 
@@ -33,7 +33,7 @@ description: 安装、签名和启动真实 iPhone 的 WebDriverAgent，直接�
 
 自动恢复保留服务归属检查、工作去重和 120 秒冷却，不杀端口上归属不明的进程。确需手动重启时核对对应工作后 stop / start；外部 WDA 由所有者恢复。
 
-App 登录、密码、Face ID 或验证码按 [认证接管](../iphone-wda-vision-use/references/authentication.md) 由用户完成，接管期间暂停手机调用。收到明确完成通知后新截图核对页面与已有进度，继续剩余任务。App 认证本身不需要 build / restart；通道恢复不重放业务动作。
+App 登录、密码、Face ID 或验证码按 [认证接管](../iphone-wda-vision-use/references/authentication.md) 发出提问并由用户在手机完成，接管期间暂停手机调用。问题第一个选项为「已完成继续」；工具立即返回、预选或时间经过都不表示用户完成。收到实际完成答复后新截图核对页面与已有进度，继续剩余任务。App 认证本身不需要 build / restart；通道恢复不重放业务动作。
 
 输出 READY 或 NEEDS_USER_ACTION 时说明实际已验证层、缺项与下一步。通道可用、操作执行及完整任务结果分开核验。
 

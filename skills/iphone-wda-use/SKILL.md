@@ -21,7 +21,7 @@ READY 关联只有手机屏幕的侧边栏 widget，宿主支持时默认打开�
 
 后两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
-App 实际要求密码、PIN、验证码或 Face ID / Touch ID 时，按 [认证接管与恢复](references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再请用户在 iPhone 上完成并回复“继续”；保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到用户明确完成通知后先调用 `wda_screen(action="resume")`，再获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
+App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要用户解锁时，按 [认证接管与恢复](references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再必须调用宿主提问工具（Default 优先 `functions.request_user_input_async`）提示用户在 iPhone 上完成，首个选项固定「已完成继续」，第二个可为「暂时无法完成」；异步返回 / 预选不是用户答复，保持待答，不能只用文字提示代替；保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到用户实际选择「已完成继续」或明确完成通知后先调用 `wda_screen(action="resume")`，再获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
 
 ## 按下一步需要选择观察
 
