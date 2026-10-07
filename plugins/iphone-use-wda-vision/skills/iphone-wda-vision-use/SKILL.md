@@ -11,7 +11,7 @@ description: 通过 WebDriverAgent 的真实 iPhone 截图高效完成视觉读�
 
 ## 看图与坐标
 
-`wda_vision_observe()` 各读取一次截图、viewport 和前台 App，共 3 次 GET。MCP 附图；代码入口返回 image.path 时用可用图片工具实际查看。像素转换为 `x_point = x_pixel × image.pixel_to_point.x`，y 同理。使用 iPhone 点坐标，注意实际图像方向，不使用 Mac 坐标或宿主缩略图尺寸。
+`wda_vision_observe()` 各读取一次截图、viewport 和前台 App，共 3 次 GET。截图随结果以图片返回，已在本机缩放成适合阅读的 JPEG（原始 PNG 保存在同名 `.png`）；代码入口返回 image.path 时用可用图片工具实际查看。像素转换为 `x_point = x_pixel × pixel_to_point.x`，y 同理，比例按实际返回的图片尺寸计算。使用 iPhone 点坐标，注意实际图像方向，不使用 Mac 坐标或宿主缩略图尺寸。
 
 前台 App 元数据缺失仅给提示；按已经返回的截图识别页面，无需为此反复 READY 或重建服务。
 
@@ -62,4 +62,4 @@ bundle ID 已核实时直接使用；未知时用 `wda_vision_apps(query="应用
 
 READY 的 ready / state 和实际画面用于确认通道。ready=false、state=recovering 时按返回 status_tool / status_arguments 跟踪同一工作；setup status 的 jobs 是数组，service.ready 或 recovery_phase=serving 后再验 READY，长期 Runner 无需等 succeeded。恢复仅解决真实通道故障，复用有效构建，不重放手机动作。iPhone 镜像运行本身不需先退出，按实际锁屏、状态和截图处理。
 
-正常任务直接调用 `wda_vision_` MCP 工具，截图由 MCP 附图返回，无需额外运行 Python 或读取 image.path。只有具体工具确实缺失或宿主封装失败时，才按 [代码回退](references/tool-fallback.md) 临时回退该操作，其他可用操作继续用 MCP；不要为了调用方式一致而全部转为 CLI。两插件共享 session 和操作锁，同一手机只由一个代理操作。metrics 记录工具 / HTTP 耗时；继续完成全部 App、外部文件和用户交付，用户取消时停止后续动作。
+正常任务直接调用 `wda_vision_` MCP 工具，截图由 MCP 附图返回，无需额外运行 Python 或读取 image.path。长文本一次给出：结果为 `input_complete=false` 时用返回的 `continue_token` 代替 text 再调用一次，不重发文本，期间不做其他手机动作。只有具体工具确实缺失或宿主封装失败时，才按 [代码回退](references/tool-fallback.md) 临时回退该操作，其他可用操作继续用 MCP；不要为了调用方式一致而全部转为 CLI。两插件共享 session 和操作锁，同一手机只由一个代理操作。metrics 记录工具 / HTTP 耗时；继续完成全部 App、外部文件和用户交付，用户取消时停止后续动作。

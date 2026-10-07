@@ -2,14 +2,16 @@
 
 优先调用封装好的工具，默认乐观执行常规动作，下一步需要信息时顺带判断上一动作。工具绑定缺失、宿主转发错误或已确认的封装问题不等于 WDA 不可用；可对同一已授权动作使用插件代码入口。代码回退保留相同的配置、会话、操作锁和明确异常处理，不新增每步验收。
 
-普通版提供 16 个工具；先查看本回合实际可调用的工具绑定（支持时用 ALL_TOOLS 或工具搜索），不能只从 tools/list、文档或先前聊天推断已经绑定。0.1.6 的 install.sh 同时注册同名标准 MCP，避免 Codex 插件共享说明预算隐藏工具，并保留完整 batch schema。新版安装后重新连接聊天；实际仍缺少所需工具时才用下面的代码入口继续，不默认把已封装操作都改成 CLI。
+普通版提供 17 个模型工具；先查看本回合实际可调用的工具绑定（支持时用 ALL_TOOLS 或工具搜索），不能只从 tools/list、文档或先前聊天推断已经绑定。0.1.6 的 install.sh 同时注册同名标准 MCP，避免 Codex 插件共享说明预算隐藏工具，并保留完整 batch schema。新版安装后重新连接聊天；实际仍缺少所需工具时才用下面的代码入口继续，不默认把已封装操作都改成 CLI。
 
 ## 先区分错误
 
 - schema / 参数错误：按 argument_path、unknown_fields、allowed_fields 修正一次调用。action_executed=false 表示动作未发出，MCP 绑定仍不可用时可用代码入口；不要自动忽略未知参数。
 - `device_busy`：另一操作持有共享锁，等待它结束，不另建 Runtime 配置或 state directory 绕过锁。
 - `stale_observation`：提供的 ID 不属于当前 Runtime，或 App / 视口上下文已改变。用下一步所需的新信息定位，不为整图哈希、文本数字刷新或固定 30 秒期限增加读图；ID 是可选上下文，不是每个坐标动作的必填许可。
-- `occluded_target` / `offscreen_target`：目标点击没有执行。处理当前浮层或移动到可点范围再继续；不能推断未执行点击打开了浮层。自绘半屏面板可能没有原生 Alert / Sheet 节点，按真实截图判断。
+- selector 失败（`no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`search_exhausted`）：动作未发出，结果已附当前截图和坐标点。下一次调用立刻改用坐标——点击用 `tap_point` / candidates 的 `tap` / 截图位置调用 `wda_tap(x, y)`，输入先点中输入框再调用不带 selector 的 `wda_type_text`——不换标签写法重试，不先重新读树。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
+- `input_continuation_expired`：长文本续传已失效，本次没有输入任何内容。读取字段实际文字，用 `replace=false` 只补缺少的部分。
+- `occluded_target` / `offscreen_target`：目标点击没有执行，不能推断未执行点击打开了浮层。`occluded_target` 按附带截图判断：目标可见就按 `tap_point` 用坐标点击，确有遮挡先处理遮挡；`offscreen_target` 先向目标滑动。自绘半屏面板可能没有原生 Alert / Sheet 节点，按真实截图判断。
 - 显式验收的 `postcondition_failed`：动作已接收但验收条件未满足，查看实际状态再决定剩余步骤，不因验收失败自动重放动作。
 - `action_executed=true, action_complete=false`、`uncertain=true` 或动作后 timeout：至少部分动作可能已生效。输入、发送、提交、删除等先看真实字段 / 记录，不能切换代码入口后盲目再做。
 - 查询短暂失败：工具可有界重读一次；POST 查询接口不应按 mutation 处理，查询失效不证明手机动作已执行。
@@ -37,7 +39,7 @@ Home 使用专用 `/wda/homescreen`。默认不单独等待 SpringBoard；准备
 python3 <PLUGIN_ROOT>/scripts/phone.py wda_press_button '{"name":"home","observe":"none","verify":false}'
 ```
 
-脚本使用默认 `~/.local/share/iphone-use-wda` 的共享会话与操作锁，返回结构化结果。下一步需要未知页面信息时在本次动作显式选择 observe；需要关键验收时显式 verify=true。命令输出中的图片路径不会自动替代 MCP 附图。
+脚本使用默认 `~/.local/share/iphone-use-wda` 的共享会话与操作锁，返回结构化结果。下一步需要未知页面信息时在本次动作显式选择 observe；需要关键验收时显式 verify=true。命令输出只有 JSON：截图位于 `image.path`（已缩放的 JPEG，同名 `.png` 是原始截图），需要查看时用可用的图片工具打开，像素乘以 `image.pixel_to_point` 得到 iPhone 点。
 
 只有原通道确实使用非默认目录 / URL 才传匹配的 --state-dir / --url；不得为避开 busy 换目录或并行控制同一手机。
 

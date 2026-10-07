@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from wda_client import WDAClient, WDAError
+from wda_client import SESSION_SETTINGS, WDAClient, WDAError
 
 
 @contextlib.contextmanager
@@ -360,7 +360,12 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual([path for _, path, _ in requests], [
                     "/session", "/session/fresh/appium/settings", "/session/fresh/source"])
                 self.assertEqual(requests[0][2]["capabilities"]["alwaysMatch"]["waitForIdleTimeout"], 0)
-                self.assertEqual(requests[1][2], {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}})
+                self.assertEqual(requests[1][2], {"settings": SESSION_SETTINGS})
+                self.assertEqual((SESSION_SETTINGS["waitForIdleTimeout"], SESSION_SETTINGS["animationCoolOffTimeout"]), (0, 0))
+                # Queries return rect and type inline, so target selection needs no follow-up reads.
+                self.assertIs(SESSION_SETTINGS["shouldUseCompactResponses"], False)
+                self.assertEqual(set(SESSION_SETTINGS["elementResponseAttributes"].split(",")),
+                                 {"type", "label", "rect", "enabled", "attribute/name", "attribute/value"})
             finally:
                 client.close()
 
@@ -377,7 +382,7 @@ class ClientTests(unittest.TestCase):
                 client.session("GET", "/source")
                 self.assertEqual([path for _, path, _ in requests], [
                     "/session/persisted/appium/settings", "/session/persisted/source", "/session/persisted/source"])
-                self.assertEqual(requests[0][2], {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}})
+                self.assertEqual(requests[0][2], {"settings": SESSION_SETTINGS})
             finally:
                 client.close()
 

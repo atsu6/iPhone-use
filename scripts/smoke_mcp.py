@@ -30,9 +30,9 @@ def main():
         result={'server':init['serverInfo'],'tools':len(catalog['tools']),'protocol_ok':True}
         if args.ready:
             ready=rpc('tools/call',{'name':'wda_ready','arguments':{'recover':False}})
+            data=json.loads(ready['content'][0]['text'])
             if ready.get('isError'):
-                print(json.dumps({'ready':False,'error':ready['structuredContent'].get('error')},ensure_ascii=False));return 1
-            data=ready['structuredContent']
+                print(json.dumps({'ready':False,'error':data.get('error')},ensure_ascii=False));return 1
             if data.get('ready') is not True:
                 print(json.dumps({'server':result['server'],'tools':result['tools'],'protocol_ok':True,**data},ensure_ascii=False));return 1
             result['ready']=True;result['proof']=data['proof']

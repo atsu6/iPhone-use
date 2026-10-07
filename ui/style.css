@@ -1,11 +1,32 @@
-:root{color-scheme:light dark;background:transparent}
+:root{color-scheme:light dark;background:transparent;--text:#0d0d0d;--muted:#6e6e80;--surface:#0000000a;--surface-hover:#00000014;--line:#0000001a;--accent:#10a37f;--warn:#b7791f;--toast:#202123f2;--toast-text:#fff}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}}
+:root[data-theme="dark"]{--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
-#app{position:relative;width:100%;height:100vh;height:100dvh;display:flex;align-items:center;justify-content:center;padding:clamp(20px,3vh,32px) 16px;overflow:hidden}
+#app{position:relative;width:100%;height:100vh;height:100dvh;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 16px 16px;overflow:hidden;color:var(--text);font:500 12px/1 ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+#status{flex:none;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:28px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);letter-spacing:.01em;white-space:nowrap;user-select:none}
+#model{overflow:hidden;text-overflow:ellipsis;font-weight:600}
+#live{flex:none;display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55}
+#app[data-live="live"] #live{color:var(--accent)}
+#app[data-live="live"] .dot{opacity:1;animation:live-pulse 2.4s ease-in-out infinite}
+#app[data-live="paused"] #live{color:var(--warn)}
+#stage{flex:1 1 auto;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
+#toolbar{flex:none;display:inline-flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+#toolbar button{appearance:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--text);cursor:pointer;transition:background-color .15s ease,transform .1s ease,opacity .15s ease}
+#toolbar button:hover{background:var(--surface-hover)}
+#toolbar button:active{transform:scale(.94)}
+#toolbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#toolbar button:disabled{opacity:.35;cursor:default;background:transparent;transform:none}
+#toolbar button[data-busy="true"]{opacity:1;animation:tool-busy 1s ease-in-out infinite}
+#toolbar svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+#toast{position:absolute;left:50%;bottom:70px;z-index:5;max-width:calc(100% - 32px);padding:7px 12px;overflow:hidden;border-radius:999px;background:var(--toast);color:var(--toast-text);line-height:1.2;text-overflow:ellipsis;white-space:nowrap;transform:translateX(-50%);box-shadow:0 6px 20px -8px #00000059;pointer-events:none;animation:toast-in .18s ease-out}
+#toast[data-tone="error"]{background:#b42318f2;color:#fff}
+#toast[hidden]{display:none}
 #device{--bezel:10px;--screen-radius:50px;position:relative;flex:none;isolation:isolate;border-radius:calc(var(--screen-radius) + var(--bezel));background:linear-gradient(115deg,#c4c0b9 0%,#686662 12%,#b1ada6 24%,#555452 51%,#96938e 72%,#c9c6c0 91%,#686762 100%);box-shadow:0 0 0 .7px #252525ad,0 12px 28px -14px #00000055,0 4px 8px -4px #00000033;user-select:none;pointer-events:none}
 #device::before{content:"";position:absolute;inset:calc(var(--bezel) * .24);z-index:1;border-radius:calc(var(--screen-radius) + var(--bezel) * .76);background:#090a0c;box-shadow:0 0 0 .7px #00000099,inset 0 0 0 .7px #ffffff16;pointer-events:none}
 #screen{position:absolute;inset:var(--bezel);z-index:2;isolation:isolate;overflow:hidden;border-radius:var(--screen-radius);background:#050609;line-height:0;user-select:none}
-#device[hidden],#screen[hidden],#cursor[hidden]{display:none}
+#device[hidden],#screen[hidden],.gesture-cursor[hidden]{display:none}
 .side-button{position:absolute;z-index:0;width:calc(var(--bezel) * .27);left:calc(var(--bezel) * -.22);border-radius:calc(var(--bezel) * .15);background:linear-gradient(90deg,#5a5956,#b1aea7 55%,#5e5c59);box-shadow:0 0 0 .4px #35353280;pointer-events:none}
 .action-button{top:15%;height:3.7%}
 .volume-up{top:23%;height:6.4%}
@@ -19,16 +40,28 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #device[data-orientation="landscape"] .power-button{left:26%;right:auto;top:auto;bottom:calc(var(--bezel) * -.22);width:10.4%;background:linear-gradient(180deg,#5e5c59,#aaa7a1 45%,#5a5956)}
 #device[data-orientation="landscape"] .receiver{left:calc(var(--bezel) * .36);top:50%;width:calc(var(--bezel) * .19);height:15%;transform:translateY(-50%)}
 #image{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none}
-.edge-glow{position:absolute;inset:0;z-index:2;overflow:hidden;border-radius:inherit;box-shadow:inset 0 0 calc(var(--bezel) * 1.6) calc(var(--bezel) * .4) #93aaff38;pointer-events:none;filter:blur(calc(var(--bezel) * 1.1));opacity:0;transition:opacity 280ms ease}
-/* Rasterize the rounded, blurred rings once; pulse the composited result, not the gradients. */
-.edge-glow::before,.edge-glow::after{content:"";position:absolute;inset:0;border-radius:inherit;background-size:200% 200%;-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask-composite:exclude;pointer-events:none}
-.edge-glow::before{padding:calc(var(--bezel) * .75);background-image:linear-gradient(125deg,#91b9ff,#9c9cfa 28%,#adc5ff 52%,#8aa6ff 75%,#b7b0ff);background-position:50% 50%;opacity:.85}
-.edge-glow::after{padding:calc(var(--bezel) * 2.2);background-image:linear-gradient(235deg,#abcfff,#b4abff 28%,#7c9ef8 53%,#bfc0ff 78%,#99bdff);background-position:50% 50%;opacity:.55}
-#app[data-operating="true"] .edge-glow{opacity:1;will-change:opacity;animation:edge-breathe 4.4s ease-in-out infinite}
-#app[data-page-visible="false"] .edge-glow{animation-play-state:paused}
+/* The layout-sized mask fades both halo and rim out at the four edge midpoints.
+   Three static colour and dot-wave phases animate only their opacity. */
+.glow{position:absolute;inset:0;z-index:2;border-radius:inherit;opacity:0;transition:opacity .36s ease;pointer-events:none;-webkit-mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat;mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat}
+.glow i{--hues:#6cc4ff,#3f9dff 17%,#8fdcff 33%,#58a9ff 49%,#7d8dff 62%,#b59bff 72%,#f2a8dc 82%,#9bd6ff 92%,#6cc4ff;position:absolute;inset:0;border-radius:inherit}
+.glow i:nth-child(1){--dots:var(--glow-dots-0);background:conic-gradient(from 20deg,var(--hues))}
+.glow i:nth-child(2){--dots:var(--glow-dots-1);background:conic-gradient(from 140deg,var(--hues));opacity:0}
+.glow i:nth-child(3){--dots:var(--glow-dots-2);background:conic-gradient(from 260deg,var(--hues));opacity:0}
+.glow i::after{content:"";position:absolute;inset:0;border-radius:inherit;background-image:var(--dots);background-position:50% 50%;background-repeat:repeat;opacity:.72}
+#app[data-operating="true"] .glow{opacity:1;animation:glow-breathe 5s ease-in-out infinite}
+#app[data-operating="true"] .glow i:nth-child(1){animation:glow-a 12s linear infinite}
+#app[data-operating="true"] .glow i:nth-child(2){animation:glow-b 12s linear infinite}
+#app[data-operating="true"] .glow i:nth-child(3){animation:glow-c 12s linear infinite}
+#app[data-page-visible="false"] .glow,#app[data-page-visible="false"] .glow i,#app[data-page-visible="false"] .dot{animation-play-state:paused}
 .dynamic-island{position:absolute;z-index:3;left:50%;top:calc(var(--bezel) * 1.17);width:calc(var(--bezel) * 11.25);height:calc(var(--bezel) * 3.46);transform:translateX(-50%);border-radius:999px;background:#030405;box-shadow:0 0 0 .5px #00000099,inset 0 .5px 0 #ffffff0d;pointer-events:none}
 .dynamic-island::after{content:"";position:absolute;right:calc(var(--bezel) * .66);top:50%;width:calc(var(--bezel) * 1.65);height:calc(var(--bezel) * 1.65);transform:translateY(-50%);border-radius:50%;background:radial-gradient(circle at 43% 38%,#274271 0%,#111d31 27%,#090c12 54%,#010203 73%);box-shadow:inset 0 0 0 .6px #111620;opacity:.7}
 #device[data-orientation="landscape"] .dynamic-island{left:calc(var(--bezel) * 2.9);top:50%;transform:translate(-50%,-50%) rotate(-90deg)}
-#cursor{position:absolute;z-index:4;width:26px;height:26px;margin:-13px 0 0 -13px;border:1.5px solid #ffffffec;border-radius:50%;background:#8faaff66;box-shadow:0 0 0 1px #516daa45,0 2px 10px #00000033;pointer-events:none;will-change:transform,opacity}
-@keyframes edge-breathe{0%,100%{opacity:.82}50%{opacity:1}}
-@media(prefers-reduced-motion:reduce){.edge-glow{transition:none}#app[data-operating="true"] .edge-glow{animation:none;will-change:auto}#cursor{will-change:opacity}}
+.gesture-cursor{position:absolute;z-index:4;width:26px;height:26px;margin:-13px 0 0 -13px;border:1.5px solid #ffffffe6;border-radius:50%;background:#80808066;box-shadow:0 0 0 1px #4c4c4c66,0 2px 6px #00000026;pointer-events:none;will-change:transform,opacity}
+@keyframes glow-breathe{0%,100%{opacity:.8}50%{opacity:1}}
+@keyframes glow-a{0%,100%{opacity:1}33.33%,66.66%{opacity:0}}
+@keyframes glow-b{0%,66.66%,100%{opacity:0}33.33%{opacity:1}}
+@keyframes glow-c{0%,33.33%,100%{opacity:0}66.66%{opacity:1}}
+@keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes tool-busy{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes toast-in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.glow{transition:none}#app[data-operating="true"] .glow,#app[data-operating="true"] .glow i,#app[data-live="live"] .dot,#toolbar button[data-busy="true"],#toast{animation:none}#toolbar button{transition:none}.gesture-cursor{will-change:opacity}}

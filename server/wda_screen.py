@@ -133,19 +133,40 @@ class ScreenHub:
         self._frame = None
         self._seq = 0
         self._stream_id = uuid.uuid4().hex
+        self._state_cache = None
+        # Marketing name of the phone for the header; never its own name or identifiers.
+        self.device = None
         atexit.register(self.close)
 
     @staticmethod
     def _now():
         return int(time.time() * 1000)
 
-    def _read_state(self):
+    def _raw_state(self):
+        """Parsed state file. Every write replaces the file, so an unchanged
+        inode, mtime and size mean the cached parse is still current."""
+        try:
+            status = os.stat(self._state_path)
+        except OSError:
+            return {}
+        signature = (status.st_ino, status.st_mtime_ns, status.st_size)
+        cached = self._state_cache
+        if cached and cached[0] == signature:
+            return cached[1]
         try:
             raw = json.loads(self._state_path.read_text())
         except (OSError, ValueError):
             raw = {}
         if not isinstance(raw, dict):
             raw = {}
+        self._state_cache = (signature, raw)
+        return raw
+
+    def _paused(self):
+        return self._raw_state().get("paused") is True
+
+    def _read_state(self):
+        raw = self._raw_state()
         now = self._now()
         actors = raw.get("actors", {})
         actors = {key: at for key, at in actors.items()
@@ -218,7 +239,7 @@ class ScreenHub:
             else:
                 wire_frame = None
             return {"server_time": self._now(), "frame": wire_frame,
-                    "stream_id": self._stream_id,
+                    "stream_id": self._stream_id, "device": self.device,
                     "frame_available": self._frame is not None and not state["paused"],
                     "viewport": state["viewport"],
                     "busy": bool(state["actors"] or state["finished_at"]) and not state["paused"],
@@ -255,6 +276,17 @@ class ScreenHub:
                 child.terminate()
             except OSError:
                 pass
+
+    def paused(self):
+        return self._paused()
+
+    def restart(self):
+        """Drop the stream and its last frame; the next visible poll reconnects as a new stream."""
+        self.close()
+        with self._lock:
+            self._stream_id = uuid.uuid4().hex
+            self._seq = 0
+        return self._wire(self._read_state(), include_frame=False)
 
     def set_paused(self, paused):
         with self._state_transaction() as state:
@@ -313,7 +345,8 @@ class ScreenHub:
     def _live(self, stop):
         with self._lock:
             lease_live = time.monotonic() < self._lease_until
-        return lease_live and not stop.is_set() and not self._read_state()["paused"]
+        # Runs for every stream chunk: only the pause flag is needed here.
+        return lease_live and not stop.is_set() and not self._paused()
 
     def _publish_frame(self, raw, width, height, stop):
         with self._lock:
@@ -408,7 +441,7 @@ class ScreenHub:
                 with self._lock:
                     if self._child is child:
                         self._child = None
-                    if self._read_state()["paused"]:
+                    if self._paused():
                         self._frame = None
             if received:
                 backoff = 0.5

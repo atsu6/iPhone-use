@@ -1,4 +1,10 @@
-# iPhone Use WDA Vision 0.1.3 验证记录
+# iPhone Use WDA Vision 0.2.0 验证记录
+
+## 0.2.0 的图片下发、缩放与长文本输入
+
+日期：2026-10-07（Asia/Shanghai）。135 项自动测试全部通过，manifest / 2 skills / 15 tools 校验通过。新增回归覆盖：结果不带 `structuredContent` 且图片块与落盘文件一致、1320×2868 截图缩放为 722×1568 JPEG 及 `pixel_to_point`、动作结果只引用上一观察的 ID、分段输入的超时与顺序、时间预算与 `continue_token` 续传及其失效、中途失败报告已确认字数、batch 遇未输完文本停止。
+
+图片下发的依据是 Codex 0.160.0 源码：工具结果带 `structuredContent` 时模型只收到它，`content` 中的图片块被丢弃。本轮没有用真实模型验证图片是否显示，也没有用视觉版操作手机；缩放后的截图清晰度是用普通版在真机“设置”页取得的同尺寸 JPEG 检查的。已有聊天需要重新连接才会加载新版。
 
 ## 0.1.3 的认证提问指引
 

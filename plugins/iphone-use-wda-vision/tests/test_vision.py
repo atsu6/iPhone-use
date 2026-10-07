@@ -2,6 +2,7 @@
 import base64
 import copy
 import json
+import os
 from pathlib import Path
 import struct
 import sys
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from wda_client import WDAError
 from wda_vision_controller import VisualPhoneController
+import wda_image
 
 
 def png(width=780, height=1688, colour=(20, 40, 60)):
@@ -154,16 +156,20 @@ class VisualControllerTests(unittest.TestCase):
         self.assertTrue(result["visual_verification_required"])
         image = result["observation"]["image"]
         self.assertTrue(Path(image["path"]).is_file())
-        self.assertEqual(Path(image["path"]).read_bytes(), self.client.screenshot)
+        # The native capture is kept beside the image prepared for the model.
+        self.assertEqual(Path(image["path"]).with_suffix(".png").read_bytes(), self.client.screenshot)
 
     def test_observe_reads_each_screenshot_context_endpoint_exactly_once(self):
         observed = self.observation()
-        self.assertEqual(observed["mode"], "screenshot")
         self.assertEqual(observed["app"], self.client.app)
         self.assertEqual(observed["viewport"]["units"], "iPhone points")
-        self.assertEqual(observed["image_dimensions"], {"width": 780, "height": 1688})
-        self.assertEqual(observed["pixel_to_point"], {"x": .5, "y": .5})
-        self.assertEqual(observed["image"]["pixel_to_point"], {"x": .5, "y": .5})
+        image = observed["image"]
+        # Scaled for the model when the Mac can do it, otherwise the native capture; never upscaled.
+        self.assertIn((image["mimeType"], image["width"], image["height"]),
+                      (("image/jpeg", 725, 1568), ("image/png", 780, 1688)))
+        self.assertEqual(observed["pixel_to_point"], {"x": 390 / image["width"], "y": 844 / image["height"]})
+        self.assertEqual(set(observed), {"observation_id", "observed_at", "app", "viewport", "pixel_to_point", "image"})
+        self.assertEqual(set(image), {"path", "mimeType", "width", "height"})
         self.assertNotIn("nodes", observed)
         self.assertNotIn("total_nodes", observed)
         self.assertEqual(Path(observed["image"]["path"]).stat().st_mode & 0o777, 0o600)
@@ -184,7 +190,7 @@ class VisualControllerTests(unittest.TestCase):
                 self.assertIsNone(observed["app"])
                 self.assertTrue(observed["foreground_error"]["code"])
                 self.assertTrue(observed["warnings"])
-                self.assertEqual(Path(observed["image"]["path"]).read_bytes(), self.client.screenshot)
+                self.assertEqual(Path(observed["image"]["path"]).with_suffix(".png").read_bytes(), self.client.screenshot)
                 reads = [path for method, path, _ in self.client.calls if method == "GET"]
                 self.assertCountEqual(reads, ["/wda/activeAppInfo", "/window/size", "/screenshot"])
                 self.assertEqual(len(self.client.actions()), 0)
@@ -365,7 +371,8 @@ class VisualControllerTests(unittest.TestCase):
         self.assertEqual(len(self.client.actions()), 1)
 
     def test_wait_returns_a_screenshot_without_semantic_polling(self):
-        with patch("wda_vision_controller.time.sleep") as sleep:
+        # The scaling subprocess polls with the same clock; keep this test to the requested wait.
+        with patch("wda_vision_controller.time.sleep") as sleep, patch.dict(os.environ, {"WDA_IMAGE": "original"}):
             result = self.phone.wait(seconds=.5)
         sleep.assert_called_once_with(.5)
         self.assertIn("image", result["observation"])
@@ -459,6 +466,113 @@ class VisualControllerTests(unittest.TestCase):
         self.assertTrue(result["action_executed"])
         self.assertTrue(all(step["action_executed"] for step in result["results"]))
         self.assertEqual(len(self.client.actions()), 2)
+
+
+class VisualLatencyTests(unittest.TestCase):
+    """Smaller results and bounded waits: the 0.2.0 changes shared with the ordinary plugin."""
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.client = FakeVisualWDA()
+        self.phone = VisualPhoneController(self.client, self.directory.name)
+
+    def keys(self):
+        return ["".join(body["value"]) for _, path, body in self.client.actions() if path == "/wda/keys"]
+
+    @unittest.skipUnless(os.access(wda_image.SIPS, os.X_OK), "screenshot scaling uses macOS sips")
+    def test_screenshot_is_scaled_once_and_points_stay_exact(self):
+        self.client.screenshot = png(1320, 2868)
+        self.client.size = {"width": 440, "height": 956}
+        observed = self.phone.observe()
+        image = observed["image"]
+        self.assertEqual((image["mimeType"], image["width"], image["height"]), ("image/jpeg", 722, 1568))
+        self.assertEqual(observed["pixel_to_point"], {"x": 440 / 722, "y": 956 / 1568})
+        delivered = Path(image["path"])
+        self.assertEqual(delivered.read_bytes()[:2], b"\xff\xd8")
+        self.assertEqual(delivered.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(delivered.with_suffix(".png").read_bytes(), self.client.screenshot)
+        self.assertLess(delivered.stat().st_size, 1320 * 2868 // 4)
+
+    def test_action_result_names_the_previous_screenshot_instead_of_repeating_it(self):
+        before = self.phone.observe()
+        result = self.phone.tap(10, 20, observation_id=before["observation_id"])
+        self.assertEqual(result["before_observation_id"], before["observation_id"])
+        self.assertNotIn("before_observation", result)
+        self.assertNotIn("verification_required", result)
+        self.assertTrue(result["visual_verification_required"])
+        encoded = json.dumps(result)
+        self.assertEqual(encoded.count(before["image"]["path"]), 0)
+        self.assertEqual(encoded.count('"path"'), 1)
+
+    def test_long_text_is_typed_in_short_requests_with_matching_timeouts(self):
+        text = "视觉输入 long text。" * 50
+        result = self.phone.type_text(text, observe=False)
+        self.assertTrue(result["action_complete"])
+        self.assertEqual(result["characters"], len(text))
+        self.assertEqual("".join(self.keys()), text)
+        self.assertEqual([len(piece) for piece in self.keys()], [200, 200, 200, 150])
+        timeouts = [timeout for _, path, timeout in self.client.timeouts if path == "/wda/keys"]
+        # 200 characters at 30 per second take 6.7 s; the former fixed 15 s covered about 450 in one request.
+        self.assertAlmostEqual(timeouts[0], 200 / 30 * 2 + 10)
+        self.assertEqual(timeouts[-1], 20)
+        self.phone.type_text("short", observe=False)
+        self.assertEqual(self.client.timeouts[-1], ("POST", "/wda/keys", 15))
+
+    def test_budget_returns_a_token_and_the_rest_is_typed_without_resending_text(self):
+        self.phone.call_budget = 0
+        text = "".join(chr(0x4E00 + i % 400) for i in range(450))
+        first = self.phone.type_text(text)
+        self.assertEqual((first["input_complete"], first["characters"], first["remaining_characters"]), (False, 200, 250))
+        self.assertNotIn("observation", first)
+        self.assertFalse(any(path == "/screenshot" for _, path, _ in self.client.calls))
+        second = self.phone.type_text(continue_token=first["continue_token"], observe=False)
+        final = self.phone.type_text(continue_token=second["continue_token"])
+        self.assertTrue(final["action_complete"])
+        self.assertEqual(final["characters"], 450)
+        self.assertIn("image", final["observation"])
+        self.assertEqual("".join(self.keys()), text)
+        with self.assertRaises(WDAError) as caught:
+            self.phone.type_text(continue_token=second["continue_token"])
+        self.assertEqual(caught.exception.code, "input_continuation_expired")
+        self.assertFalse(caught.exception.details["action_executed"])
+        self.assertEqual("".join(self.keys()), text)
+
+    def test_another_action_or_extra_text_invalidates_the_continuation(self):
+        self.phone.call_budget = 0
+        first = self.phone.type_text("a" * 450, observe=False)
+        with self.assertRaises(WDAError) as mixed:
+            self.phone.type_text("more", continue_token=first["continue_token"])
+        self.assertEqual(mixed.exception.code, "invalid_argument")
+        self.phone.tap(10, 20, observe=False)
+        with self.assertRaises(WDAError) as caught:
+            self.phone.type_text(continue_token=first["continue_token"])
+        self.assertEqual(caught.exception.code, "input_continuation_expired")
+        self.assertEqual(len("".join(self.keys())), 200)
+
+    def test_failure_midway_reports_accepted_characters_and_never_retypes(self):
+        sent = []
+
+        def fail_second(path, payload):
+            if path == "/wda/keys":
+                sent.append(payload)
+                if len(sent) == 2:
+                    raise WDAError("action_uncertain", "Typing response timed out", uncertain=True)
+
+        self.client.mutation_effect = fail_second
+        with self.assertRaises(WDAError) as caught:
+            self.phone.type_text("a" * 900, observe=False)
+        details = caught.exception.details
+        self.assertEqual((details["characters_confirmed"], details["characters_total"]), (200, 900))
+        self.assertEqual(len(sent), 2)
+        self.assertIsNone(self.phone._pending_input)
+
+    def test_batch_stops_for_unfinished_input_before_later_steps(self):
+        self.phone.call_budget = 0
+        result = self.phone.batch([{"op": "type_text", "args": {"text": "a" * 450}},
+                                   {"op": "press_button", "args": {"name": "home"}}])
+        self.assertEqual((result["stop_reason"], result["stopped_at"], result["complete"]), ("input_continues", 0, False))
+        self.assertTrue(result["results"][0]["continue_token"])
+        self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in self.client.actions()))
 
 
 if __name__ == "__main__":

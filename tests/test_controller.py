@@ -44,6 +44,10 @@ class FakeWDA:
         self.activate_error = None
         self.foreground_sequence = None
         self.gesture_effects = None
+        self.focused = None
+        self.rich_elements = False
+        self.source_root = None
+        self.settings = []
         self.screenshot = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jXuoAAAAASUVORK5CYII=")
 
     def request(self, method, path, payload=None, timeout=None):
@@ -74,7 +78,10 @@ class FakeWDA:
 
     def source(self):
         nodes = self.nodes if self.source_pages is None else self.source_pages[min(self.swipe_count, len(self.source_pages)-1)]
-        root = ET.Element("AppiumAUT")
+        # A real WDA source root is the application itself, with its bundle ID and screen size.
+        root = ET.Element("AppiumAUT") if self.source_root is None else ET.Element(
+            "XCUIElementTypeApplication", {"type": "XCUIElementTypeApplication", "x": "0", "y": "0",
+                                           **{k: str(v) for k, v in self.source_root.items()}})
         for item in nodes:
             ET.SubElement(root, item["type"], {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in item.items()})
         return ET.tostring(root, encoding="unicode")
@@ -86,6 +93,11 @@ class FakeWDA:
             return self.source()
         if path == "/window/size":
             return self.size.copy()
+        if path == "/element/active":
+            if self.focused is None:
+                raise WDAError("no such element", "No element has keyboard focus")
+            answer = {ELEMENT_KEY: self.focused["id"]}
+            return {**answer, "type": self.focused["kind"]} if self.rich_elements else answer
         if path == "/elements":
             value = payload["value"]
             labels = re.findall(r"label == '([^']*)'", value)
@@ -93,7 +105,16 @@ class FakeWDA:
             enabled = re.search(r"enabled == (true|false)", value)
             if enabled:
                 matches = [item for item in matches if item.get("enabled", True) is (enabled[1] == "true")]
-            return [{ELEMENT_KEY: item["id"]} for item in matches]
+            if "CONTAINS" in value:
+                fragment = re.search(r"label CONTAINS '([^']*)'", value)[1]
+                matches = [item for item in self.elements if fragment in item["label"]]
+            if not self.rich_elements:
+                return [{ELEMENT_KEY: item["id"]} for item in matches]
+            # The pinned WDA answers like this once compact responses are switched off.
+            return [{ELEMENT_KEY: item["id"], "ELEMENT": item["id"], "type": item["kind"], "label": item["label"],
+                     "rect": item["rect"].copy(), "enabled": item.get("enabled", True),
+                     "attribute/name": item.get("name", item["label"]), "attribute/value": item["value"] or None}
+                    for item in matches]
         if path.startswith("/element/"):
             parts = path.split("/")
             element = next(item for item in self.elements if item["id"] == parts[2])
@@ -109,11 +130,13 @@ class FakeWDA:
             if suffix == "click":
                 if self.click_error:
                     raise self.click_error
+                self.focused = element
                 return None
             if suffix == "clear":
                 element["value"] = ""
                 return None
             if suffix == "value":
+                self.focused = element
                 element["value"] = self.input_override if self.input_override is not None else element["value"] + payload["text"]
                 return None
         if path in ("/wda/dragfromtoforduration", "/wda/swipe"):
@@ -129,12 +152,30 @@ class FakeWDA:
             if self.activate_effective:
                 self.app = payload["bundleId"]
             return None
-        if path in ("/wda/tap", "/wda/keys", "/wda/pressButton"):
+        if path == "/wda/keys":
+            text = "".join(payload["value"])
+            if self.focused is not None and text != "\n" and self.input_override is None:
+                self.focused["value"] += text
             return None
+        if path in ("/wda/tap", "/wda/pressButton"):
+            return None
+        if path == "/appium/settings":
+            self.settings.append(payload["settings"])
+            return {}
         raise AssertionError("Unexpected session request: " + path)
 
     def actions(self):
-        return [(method, path, body) for method, path, body in self.calls if method == "POST" and path != "/elements"]
+        return [(method, path, body) for method, path, body in self.calls
+                if method == "POST" and path not in ("/elements", "/appium/settings")]
+
+    def reapply_settings(self):
+        pass
+
+    def metrics(self):
+        return {"retained_requests": len(self.calls)}
+
+    def clear_metrics(self):
+        pass
 
 
 class ControllerTests(unittest.TestCase):
@@ -418,7 +459,7 @@ class ControllerTests(unittest.TestCase):
                         self.assertEqual("image" in observed, mode in ("screenshot", "both"))
                         self.assertEqual("nodes" in observed, mode in ("tree", "both"))
                         if "nodes" in observed:
-                            self.assertTrue(any(n["type"] == "XCUIElementTypeAlert" for n in observed["nodes"]))
+                            self.assertTrue(any(n["type"] == "Alert" for n in observed["nodes"]))
 
     def test_modal_disappearance_or_geometry_change_stops_intentional_modal_scroll(self):
         area = {"x": 70, "y": 250, "width": 200, "height": 250}
@@ -639,21 +680,149 @@ class ControllerTests(unittest.TestCase):
                 self.assertFalse(error.details["action_executed"])
                 self.assertEqual(error.details["target_rect"], self.client.elements[0]["rect"])
                 self.assertEqual(error.details["viewport"], {**self.client.size, "units": "iPhone points"})
-                self.assertEqual(error.details["recovery"]["next_tool"], "wda_observe")
-                self.assertEqual(error.details["recovery"]["next_arguments"], {"mode": "both"})
-                self.assertFalse(error.details["recovery"]["replay_action"])
+                # The failed selector step hands back the screen: the next call acts by coordinates.
+                recovery = error.details["recovery"]
+                self.assertEqual(recovery["use"], "coordinates")
+                self.assertFalse(recovery["replay_action"])
+                self.assertEqual(Path(error.details["observation"]["image"]["path"]).read_bytes(), self.client.screenshot)
+                self.assertNotIn("nodes", error.details["observation"])
                 if condition == "occluded":
-                    self.assertFalse(error.details["recovery"]["coordinate_bypass"])
-                    self.assertFalse(error.details["recovery"]["same_target_retry"])
+                    self.assertEqual(recovery["next_tool"], "wda_tap")
+                    self.assertEqual(recovery["next_arguments"], {"x": 195, "y": 222})
+                    self.assertEqual(error.details["tap_point"], {"x": 195, "y": 222})
+                else:
+                    self.assertEqual(recovery["next_tool"], "wda_swipe")
                 self.assertEqual(self.client.actions(), [])
 
-    def test_duplicate_exact_targets_require_disambiguation(self):
-        second = copy.deepcopy(self.client.elements[0])
-        second["id"] = "duplicate"
-        self.client.elements.append(second)
-        error = self.assert_code("ambiguous_target", lambda: self.phone.tap(selector={"label": "Target"}, observe="none"))
+    def add_match(self, ident, **changes):
+        element = copy.deepcopy(self.client.elements[0])
+        element.update(id=ident, **{k: v for k, v in changes.items() if k != "rect"})
+        element["rect"].update(changes.get("rect", {}))
+        self.client.elements.append(element)
+        return element
+
+    def test_separate_duplicate_targets_report_candidates_instead_of_guessing(self):
+        for rich in (False, True):
+            with self.subTest(rich=rich):
+                self.setUp()
+                self.client.rich_elements = rich
+                self.add_match("duplicate", rect={"y": 400})
+                error = self.assert_code("ambiguous_target", lambda: self.phone.tap(selector={"label": "Target"}, observe="none"))
+                self.assertEqual(error.details["matches"], 2)
+                self.assertFalse(error.details["action_executed"])
+                self.assertEqual([c["index"] for c in error.details["candidates"]], [0, 1])
+                self.assertEqual([c["rect"] for c in error.details["candidates"]], [[70, 200, 250, 44], [70, 400, 250, 44]])
+                self.assertTrue(all(c["hittable"] for c in error.details["candidates"]))
+                self.assertEqual("type" in error.details["candidates"][0], rich)
+                self.assertNotIn("element_id", json.dumps(error.details))
+                self.assertEqual(self.client.actions(), [])
+
+    def test_selector_index_picks_one_reported_candidate(self):
+        self.add_match("duplicate", rect={"y": 400})
+        result = self.phone.tap(selector={"label": "Target", "index": 1})
+        self.assertTrue(result["action_executed"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/duplicate/click"])
+        error = self.assert_code("no_such_element", lambda: self.phone.tap(selector={"label": "Target", "index": 2}))
         self.assertEqual(error.details["matches"], 2)
+        self.assertFalse(error.details["action_executed"])
+
+    def test_nested_or_coincident_matches_are_one_touch_target(self):
+        for inner in ({"x": 80, "y": 210, "width": 60, "height": 22}, {}):
+            with self.subTest(inner=inner):
+                self.setUp()
+                self.add_match("inner", rect=inner)
+                result = self.phone.tap(selector={"label": "Target"})
+                self.assertEqual(result["target"]["chosen"], "innermost_of_nested_matches")
+                self.assertEqual(result["target"]["matches"], 2)
+                expected = "inner" if inner else "target"
+                self.assertEqual([path for _, path, _ in self.client.actions()], [f"/element/{expected}/click"])
+
+    def test_nested_matches_skip_an_occluded_inner_element(self):
+        self.add_match("inner", rect={"x": 80, "y": 210, "width": 60, "height": 22}, hittable=False)
+        self.phone.tap(selector={"label": "Target"})
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/target/click"])
+        self.client.elements[0]["hittable"] = False
+        self.client.calls.clear()
+        error = self.assert_code("occluded_target", lambda: self.phone.tap(selector={"label": "Target"}))
+        self.assertEqual(error.details["recovery"]["use"], "coordinates")
+        self.assertEqual([candidate["tap"] for candidate in error.details["candidates"]], [[110, 221], [195, 222]])
         self.assertEqual(self.client.actions(), [])
+
+    def test_offscreen_duplicate_does_not_block_the_one_visible_match(self):
+        self.add_match("below", rect={"y": 2000})
+        result = self.phone.tap(selector={"label": "Target"})
+        self.assertEqual(result["target"], {"matches": 2, "chosen": "only_match_on_screen", "index": 0})
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/target/click"])
+        # Narrowing never replaces the hittable check of the chosen element.
+        self.client.elements[0]["hittable"] = False
+        self.client.calls.clear()
+        self.assert_code("occluded_target", lambda: self.phone.tap(selector={"label": "Target"}))
+        self.assertEqual(self.client.actions(), [])
+
+    def test_all_matches_offscreen_is_not_reported_as_ambiguity(self):
+        self.client.elements[0]["rect"]["y"] = 1500
+        self.add_match("below", rect={"y": 2000})
+        error = self.assert_code("offscreen_target", lambda: self.phone.tap(selector={"label": "Target"}))
+        self.assertEqual(len(error.details["candidates"]), 2)
+        self.assertFalse(error.details["action_executed"])
+        self.assertEqual(self.client.actions(), [])
+
+    def test_bare_id_matches_beyond_the_inspection_limit_stay_ambiguous(self):
+        for number in range(12):
+            self.add_match(f"far-{number}", rect={"y": 3000 + number * 50})
+        error = self.assert_code("ambiguous_target", lambda: self.phone.tap(selector={"label": "Target"}))
+        self.assertEqual(error.details["matches"], 13)
+        self.assertTrue(error.details["candidates_truncated"])
+        self.assertEqual(sum(path.endswith("/rect") for _, path, _ in self.client.calls), 8)
+        self.assertEqual(self.client.actions(), [])
+        # With inline rects every match is weighed, so the single visible one is certain.
+        self.client.rich_elements = True
+        self.client.calls.clear()
+        result = self.phone.tap(selector={"label": "Target"})
+        self.assertEqual(result["target"]["chosen"], "only_match_on_screen")
+        self.assertFalse(any(path.endswith("/rect") for _, path, _ in self.client.calls))
+
+    def test_typing_prefers_the_editable_match_among_same_labels(self):
+        self.client.rich_elements = True
+        self.add_match("container", kind="XCUIElementTypeOther", rect={"x": 0, "y": 180, "width": 390, "height": 90})
+        self.add_match("key", kind="XCUIElementTypeButton", rect={"y": 700})
+        result = self.phone.type_text({"label": "Target"}, "query")
+        self.assertTrue(result["action_complete"])
+        self.assertEqual(self.client.elements[0]["value"], "query")
+        self.assertFalse(any("/element/container/" in path or "/element/key/" in path for _, path, _ in self.client.calls))
+
+    def test_inline_element_attributes_replace_rect_and_type_reads(self):
+        self.client.rich_elements = True
+        self.phone.tap(selector={"label": "Target"})
+        self.assertEqual([path for _, path, _ in self.client.calls],
+                         ["/elements", "/window/size", "/element/target/attribute/hittable", "/element/target/click"])
+        self.client.calls.clear()
+        self.phone.type_text({"label": "Target"}, "text")
+        self.assertEqual([path for _, path, _ in self.client.calls],
+                         ["/elements", "/element/target/attribute/hittable", "/element/target/click",
+                          "/element/target/clear", "/element/target/value"])
+
+    def test_inline_type_still_refuses_secure_and_noneditable_fields(self):
+        self.client.rich_elements = True
+        for kind, secure in (("XCUIElementTypeSecureTextField", True), ("XCUIElementTypeButton", False)):
+            with self.subTest(kind=kind):
+                self.client.elements[0]["kind"] = kind
+                error = self.assert_code("not_editable", lambda: self.phone.type_text({"label": "Target"}, "never typed"))
+                self.assertEqual(error.details["secure_field"], secure)
+                self.assertEqual(self.client.actions(), [])
+
+    def test_label_contains_is_an_escaped_substring_query(self):
+        self.client.elements[0]["label"] = "Alex, see you tomorrow, 19:30"
+        result = self.phone.find({"label_contains": "Alex", "type": "TextField"})
+        self.assertEqual(result["matches"], 1)
+        self.assertEqual(result["elements"][0]["rect"], [70, 200, 250, 44])
+        self.assertNotIn("element_id", result["elements"][0])
+        self.assertEqual(predicate({"label_contains": "it's \n"}), "label CONTAINS 'it\\'s \\u000a'")
+        for selector in ({"index": 0}, {"label": "a", "index": -1}, {"label": "a", "index": True},
+                         {"label": "a", "index": 200}, {"predicate": "label == 'a'", "label_contains": "a"}):
+            with self.subTest(selector=selector):
+                self.assert_code("invalid_selector", lambda: predicate(selector))
+        self.assertEqual(predicate({"predicate": "label BEGINSWITH 'a'", "index": 3}), "label BEGINSWITH 'a'")
 
     def test_unicode_text_round_trips_exactly_before_submit(self):
         text = "你好 👋 Café 漢字 e\u0301"
@@ -903,7 +1072,7 @@ class ControllerTests(unittest.TestCase):
         self.client.elements.append({**self.client.elements[0], "id": "disabled", "enabled": False})
         for value, expected_id in ((True, "target"), ("true", "target"), (False, "disabled"), ("false", "disabled")):
             with self.subTest(value=value):
-                result = self.phone.find({"label": "Target", "enabled": value})
+                result = self.phone.query({"label": "Target", "enabled": value})
                 self.assertEqual(result["matches"], 1)
                 self.assertEqual(result["elements"][0]["element_id"], expected_id)
 
@@ -995,7 +1164,8 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["completed_steps"], 1)
         self.assertEqual(result["stop_reason"], "occluded_target")
         self.assertFalse(result["error"]["action_executed"])
-        self.assertFalse(result["error"]["recovery"]["coordinate_bypass"])
+        self.assertEqual(result["error"]["recovery"]["use"], "coordinates")
+        self.assertIn("image", result["error"]["observation"])
         self.assertEqual(self.client.actions(), [])
 
     def test_batch_submission_is_a_verification_barrier(self):
@@ -1020,7 +1190,9 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.client.actions()[-1][1], "/wda/homescreen")
 
     def test_batch_explicit_expectation_failure_stops_before_next_action(self):
-        with patch("wda_controller.time.monotonic", side_effect=[100, 100.1, 107]):
+        # Batch budget start, viewport stamp, wait deadline, first poll, then past the deadline.
+        clock = iter([100, 100, 100, 100.1])
+        with patch("wda_controller.time.monotonic", side_effect=lambda: next(clock, 107)):
             result = self.phone.batch([
                 {"op": "tap", "args": {"selector": {"label": "Target"}, "expect": {"label": "Missing"}}},
                 {"op": "press_button", "args": {"name": "home"}},

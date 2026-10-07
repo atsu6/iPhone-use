@@ -16,6 +16,13 @@ from wda_controller import PhoneController
 from test_controller import FakeWDA
 
 
+def payload(result):
+    """The model-facing data: one JSON text block, never a second structured copy."""
+    assert "structuredContent" not in result, "structuredContent would hide content blocks from the model"
+    assert result["content"][0]["type"] == "text"
+    return json.loads(result["content"][0]["text"])
+
+
 class ProtocolTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -53,7 +60,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(response["id"], "ready-state")
         self.assertNotIn("error", response)
         result = response["result"]
-        self.assertEqual(json.loads(result["content"][0]["text"]), result["structuredContent"])
+        # Compact separators: no padding bytes in the model context.
+        self.assertNotIn('": ', result["content"][0]["text"])
+        payload(result)
         return result
 
     def test_ready_diagnostic_and_pending_states_are_normal_mcp_results(self):
@@ -67,7 +76,7 @@ class ProtocolTests(unittest.TestCase):
                 client.app = "local.pid.0"
                 result = self.serve_ready(runtime, {"screenshot": False, "recover": False})
                 self.assertFalse(result["isError"])
-                data = result["structuredContent"]
+                data = payload(result)
                 self.assertFalse(data["ready"])
                 self.assertEqual(data["state"], "recovering" if pending else "recovery_required")
                 self.assertNotIn("error", data)
@@ -86,7 +95,7 @@ class ProtocolTests(unittest.TestCase):
         client.app = "local.pid.0"
         result = self.serve_ready(runtime, {"screenshot": False, "recover": True})
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertFalse(data["ready"])
         self.assertEqual(data["state"], "recovering")
         self.assertEqual(data["recovery"]["status_arguments"], {"action": "status", "job_id": "queued-recovery"})
@@ -111,7 +120,7 @@ class ProtocolTests(unittest.TestCase):
                     client.source = Mock(side_effect=WDAError("device-fault", "Unexpected channel fault"))
                 result = self.serve_ready(runtime, {"screenshot": False})
                 self.assertTrue(result["isError"])
-                self.assertEqual(result["structuredContent"]["error"]["code"], expected)
+                self.assertEqual(payload(result)["error"]["code"], expected)
                 self.assertEqual([path for _, path, _ in client.actions() if path != "/session"], [])
 
     def test_ready_success_keeps_mcp_observation_and_proof(self):
@@ -119,10 +128,11 @@ class ProtocolTests(unittest.TestCase):
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
             result = self.serve_ready(runtime, {"screenshot": False, "recover": False})
         self.assertFalse(result["isError"])
-        self.assertTrue(result["structuredContent"]["ready"])
-        self.assertEqual(result["structuredContent"]["state"], "ready")
-        self.assertTrue(result["structuredContent"]["proof"]["foreground_resolved"])
-        self.assertGreater(result["structuredContent"]["observation"]["total_nodes"], 0)
+        data = payload(result)
+        self.assertTrue(data["ready"])
+        self.assertEqual(data["state"], "ready")
+        self.assertTrue(data["proof"]["foreground_resolved"])
+        self.assertGreater(data["observation"]["total_nodes"], 0)
 
     def test_stdio_initialization_notifications_ping_and_tool_catalog(self):
         responses = self.exchange([
@@ -137,7 +147,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(responses[1]["result"], {})
         tools = responses[2]["result"]["tools"]
         names = [tool["name"] for tool in tools]
-        self.assertEqual(len(names), 18)
+        self.assertEqual(len(names), 19)
         self.assertEqual(len(names), len(set(names)))
         for name in ("wda_ready", "wda_setup", "wda_observe", "wda_tap", "wda_type_text", "wda_batch", "wda_collect_list", "wda_apps"):
             self.assertIn(name, names)
@@ -153,26 +163,30 @@ class ProtocolTests(unittest.TestCase):
     def test_action_schema_exposes_optimistic_defaults_and_explicit_checkpoints(self):
         response = self.exchange([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])[0]
         tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        def resolved(schema, prop):
+            value = schema["properties"][prop]
+            return schema["$defs"][value["$ref"].split("/")[-1]] if "$ref" in value else value
         for name in ("wda_tap", "wda_swipe", "wda_type_text", "wda_press_button", "wda_launch_app"):
             with self.subTest(name=name):
-                properties = tools[name]["inputSchema"]["properties"]
-                self.assertEqual(properties["observe"]["default"], "none")
-                self.assertIn("expect", properties)
+                schema = tools[name]["inputSchema"]
+                self.assertEqual(resolved(schema, "observe")["default"], "none")
+                self.assertEqual(set(resolved(schema, "expect")["properties"]), set(resolved(tools["wda_find"]["inputSchema"], "selector")["properties"]))
                 if name != "wda_tap":
-                    self.assertFalse(properties["verify"]["default"])
+                    self.assertFalse(schema["properties"]["verify"]["default"])
         for name in ("wda_tap", "wda_swipe"):
             self.assertNotIn("observation_id", tools[name]["inputSchema"].get("required", []))
         batch_steps = tools["wda_batch"]["inputSchema"]["properties"]["steps"]["items"]["oneOf"]
-        definitions = tools["wda_batch"]["inputSchema"]["$defs"]
-        def contract(value):
+        def contract(value, definitions):
             if isinstance(value, dict):
-                if "$ref" in value:return contract(definitions[value["$ref"].split("/")[-1]])
-                return {k:contract(v) for k,v in value.items() if k not in ("description", "examples")}
-            if isinstance(value, list):return [contract(v) for v in value]
+                if "$ref" in value:return contract(definitions[value["$ref"].split("/")[-1]], definitions)
+                return {k:contract(v, definitions) for k,v in value.items() if k not in ("description", "examples", "$defs")}
+            if isinstance(value, list):return [contract(v, definitions) for v in value]
             return value
         for step in batch_steps:
             op = step["properties"]["op"]["const"]
-            self.assertEqual(contract(step["properties"]["args"]), contract(tools["wda_" + op]["inputSchema"]))
+            standalone = tools["wda_" + op]["inputSchema"]
+            self.assertEqual(contract(step["properties"]["args"], tools["wda_batch"]["inputSchema"]["$defs"]),
+                             contract(standalone, standalone.get("$defs", {})))
 
     def test_stdio_apps_catalog_returns_public_evidence_without_wda_access(self):
         responses = self.exchange([
@@ -181,8 +195,7 @@ class ProtocolTests(unittest.TestCase):
         ], url="http://127.0.0.1:1")
         result = responses[0]["result"]
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
-        self.assertEqual(json.loads(result["content"][0]["text"]), data)
+        data = payload(result)
         self.assertTrue(data["ok"])
         self.assertEqual(data["searched_sources"], ["catalog"])
         self.assertEqual(data["candidates"][0]["bundle_id"], "com.cmbchina.MPBBank")
@@ -212,8 +225,7 @@ class ProtocolTests(unittest.TestCase):
         for response in responses:
             result = response["result"]
             self.assertTrue(result["isError"])
-            content = json.loads(result["content"][0]["text"])
-            self.assertEqual(content, result["structuredContent"])
+            content = payload(result)
             self.assertNotIn(content["error"]["code"], ("wda_unreachable", "action_uncertain", "internal_error"))
 
     def test_stdio_parse_error_does_not_break_following_ping(self):
@@ -260,8 +272,8 @@ class ProtocolTests(unittest.TestCase):
             runtime.call("wda_swipe", {"observe": "screenshot", "max_attempts": 1, "verify": True})
         result = result_content({"error": caught.exception.as_dict()})
         self.assertTrue(result["isError"])
-        self.assertEqual(result["structuredContent"]["error"]["code"], "no_scroll_progress")
-        self.assertTrue(result["structuredContent"]["error"]["action_executed"])
+        self.assertEqual(payload(result)["error"]["code"], "no_scroll_progress")
+        self.assertTrue(payload(result)["error"]["action_executed"])
         self.assertEqual([item["type"] for item in result["content"]], ["text", "image"])
         self.assertEqual(result["content"][1]["mimeType"], "image/png")
         import base64

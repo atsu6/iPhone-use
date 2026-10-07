@@ -16,6 +16,15 @@ import xml.etree.ElementTree as ET
 
 from wda_client import WDAError
 from wda_controller import PhoneController, action_result, fail, finite, integer
+import wda_image
+from wda_text import request_timeout, split_text
+
+# The session caps typing at this many characters per second.
+TYPING_FREQUENCY = 30
+TYPING_PIECE = 200
+# One call stops typing here and hands back a token for the rest.
+CALL_BUDGET = 90
+INPUT_TTL = 600
 
 
 class VisualPhoneController(PhoneController):
@@ -27,6 +36,8 @@ class VisualPhoneController(PhoneController):
         self._guard_observation = None
         self._latest_observation = None
         self._cached_viewport = None
+        self._pending_input = None
+        self.call_budget = CALL_BUDGET
 
     @staticmethod
     def _recovery():
@@ -41,6 +52,13 @@ class VisualPhoneController(PhoneController):
         self._guard_observation = None
         self._latest_observation = None
         self._cached_viewport = None
+        self._pending_input = None
+
+    @staticmethod
+    def _before(details, before):
+        """Name the screenshot an action was chosen from; its content was already delivered."""
+        if before is not None:
+            details["before_observation_id"] = before["observation_id"]
 
     def _visual_error(self, error):
         error.details.update(verified=False, visual_verification_required=True)
@@ -66,8 +84,7 @@ class VisualPhoneController(PhoneController):
             rejected = error.code in {"invalid session id", "invalid argument", "unknown command", "unsupported operation"}
             error.uncertain = error.uncertain or not rejected
             error.details.update(action_executed=None if error.uncertain else False, action_complete=False)
-            if before is not None:
-                error.details["before_observation"] = before
+            self._before(error.details, before)
             self._visual_error(error)
             self._error_observation(error)
             raise
@@ -106,9 +123,12 @@ class VisualPhoneController(PhoneController):
                 stream.write(data)
             # Restrict a reused artifact directory and each screenshot independently.
             dest.chmod(0o600)
-            for old in sorted(artifacts.glob("vision-*.png"))[:-100]:
-                old.unlink()
-            return dest
+            # The native PNG stays as evidence; the model gets a bounded image with an exact scale.
+            delivered = wda_image.model_image(dest)
+            for pattern in ("vision-*.png", "vision-*.jpg"):
+                for old in sorted(artifacts.glob(pattern))[:-100]:
+                    old.unlink()
+            return delivered
         except OSError as exc:
             raise WDAError("screenshot_save_failed", "Could not save the screenshot in the private artifact directory.") from exc
 
@@ -128,21 +148,18 @@ class VisualPhoneController(PhoneController):
         except WDAError as error:
             app = None
             foreground_error = {"code": error.code, "message": str(error)}
-        dest = self._save_image(data)
-        ident = uuid.uuid4().hex
-        scale = {"x": viewport["width"] / width, "y": viewport["height"] / height}
+        dest, mime, shown_width, shown_height = self._save_image(data)
+        width, height = shown_width or width, shown_height or height
+        ident = uuid.uuid4().hex[:12]
         result = {
-            "observation_id": ident, "observed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "mode": "screenshot", "app": app, "viewport": viewport,
-            "image_dimensions": {"width": width, "height": height}, "pixel_to_point": scale,
-            "image": {"path": str(dest), "mimeType": "image/png", "width": width, "height": height,
-                      "pixel_to_point": scale,
-                      "coordinates": "Convert screenshot pixels to iPhone points: x * pixel_to_point.x, y * pixel_to_point.y."},
-            "warnings": ["Inspect the screenshot before choosing coordinates. Screenshot differences alone do not verify task progress."],
+            "observation_id": ident, "observed_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "app": app, "viewport": viewport,
+            "pixel_to_point": {"x": viewport["width"] / width, "y": viewport["height"] / height},
+            "image": {"path": str(dest), "mimeType": mime, "width": width, "height": height},
         }
         if foreground_error:
             result["foreground_error"] = foreground_error
-            result["warnings"].append("Foreground app metadata is unavailable. The screenshot and coordinate conversion remain usable.")
+            result["warnings"] = ["Foreground app metadata is unavailable. The screenshot and coordinate conversion remain usable."]
         self.snapshots[ident] = {
             "viewport": viewport, "app": app, "observation": result,
         }
@@ -174,15 +191,14 @@ class VisualPhoneController(PhoneController):
     def _after_visual(self, before, observe=True, **details):
         result = {
             "action_executed": True, "action_complete": True, "verified": False,
-            "visual_verification_required": True, "before_observation": before,
-            "verification_required": "Inspect the resulting screenshot to confirm the intended task result.",
-            **details,
+            "visual_verification_required": True, **details,
         }
+        self._before(result, before)
         if observe:
             try:
                 result["observation"] = self.observe()
             except WDAError as error:
-                error.details["before_observation"] = before
+                self._before(error.details, before)
                 self._visual_error(error)
                 raise
         return result
@@ -225,9 +241,20 @@ class VisualPhoneController(PhoneController):
         return self._after_visual(before, observe=observe, attempts=1, strategy="short_drag", region=area)
 
     @action_result
-    def type_text(self, text, observation_id=None, focused_input_confirmed=None,
-                  allow_newlines=False, multiline_confirmed=None, observe=True):
+    def type_text(self, text=None, observation_id=None, focused_input_confirmed=None,
+                  allow_newlines=False, multiline_confirmed=None, observe=True, continue_token=None):
         self._capture_argument(observe)
+        if continue_token is not None:
+            if text is not None or allow_newlines:
+                fail("invalid_argument", "continue_token resumes the earlier text; do not send text with it.", action_executed=False)
+            plan = self._pending_input
+            if (not plan or plan["token"] != continue_token or self.accepted_actions != plan["mark"]
+                    or time.monotonic() - plan["created"] > INPUT_TTL):
+                self._pending_input = None
+                fail("input_continuation_expired",
+                     "This continuation is no longer usable: it was already finished, it expired, or another phone action ran since. Nothing was typed now.",
+                     action_executed=False, recovery=self._recovery())
+            return self._type_pieces(plan, self._reference(observation_id), observe)
         if not isinstance(text, str) or not 1 <= len(text) <= 10000 or "\x00" in text:
             fail("invalid_argument", "text must have 1..10000 characters without NUL.", action_executed=False)
         if any((ord(character) < 32 and character not in "\n\r") or ord(character) == 127 for character in text):
@@ -237,11 +264,41 @@ class VisualPhoneController(PhoneController):
         if "\n" in text or "\r" in text:
             if not allow_newlines:
                 fail("newline_requires_intent", "Line breaks can send a message. Explicit newline intent is required.", action_executed=False)
-        before = self._reference(observation_id)
-        self.post("/wda/keys", {"value": list(text)})
-        return self._after_visual(before, observe=observe, characters=len(text),
-                                  submitted=False, exact_readback=False,
-                                  newline_entered="\n" in text or "\r" in text)
+        self._pending_input = None
+        plan = {"pieces": split_text(text, TYPING_PIECE), "typed": 0, "total": len(text),
+                "newline": "\n" in text or "\r" in text}
+        return self._type_pieces(plan, self._reference(observation_id), observe)
+
+    def _type_pieces(self, plan, before, observe):
+        """Type bounded requests in order; a long text never outlives one request's timeout."""
+        deadline = time.monotonic() + self.call_budget
+        sent = 0
+        while plan["pieces"]:
+            if sent and time.monotonic() >= deadline:
+                break
+            piece = plan["pieces"][0]
+            timeout = request_timeout(len(piece), TYPING_FREQUENCY, getattr(self.client, "timeout", 15))
+            try:
+                self.post("/wda/keys", {"value": list(piece)}, timeout=timeout)
+            except WDAError as error:
+                error.details.update(characters_confirmed=plan["typed"], characters_total=plan["total"])
+                self._pending_input = None
+                raise
+            plan["pieces"].pop(0)
+            plan["typed"] += len(piece)
+            sent += 1
+        if plan["pieces"]:
+            plan.update(token=uuid.uuid4().hex[:12], mark=self.accepted_actions, created=time.monotonic())
+            self._pending_input = plan
+            result = {"action_executed": True, "action_complete": False, "input_complete": False, "verified": False,
+                      "characters": plan["typed"], "remaining_characters": plan["total"] - plan["typed"],
+                      "submitted": False, "continue_token": plan["token"],
+                      "next_step": "Call wda_vision_type_text with only continue_token to type the rest. Do not resend the text or act on the phone in between."}
+            self._before(result, before)
+            return result
+        self._pending_input = None
+        return self._after_visual(before, observe=observe, characters=plan["total"],
+                                  submitted=False, exact_readback=False, newline_entered=plan["newline"])
 
     def _foreground_after(self, bundle_id, before, observe=True):
         result = self._after_visual(before, observe=observe, requested_app=bundle_id)
@@ -330,6 +387,11 @@ class VisualPhoneController(PhoneController):
                     args.setdefault("observe", False)
                 result = allowed[step["op"]](**args)
                 results.append(result)
+                if result.get("input_complete") is False:
+                    return {"completed_steps": index, "stopped_at": index, "stop_reason": "input_continues",
+                            "results": results, "action_executed": True, "verified": False,
+                            "visual_verification_required": True, "complete": False,
+                            "next_step": "Call wda_vision_type_text with the returned continue_token until input_complete, then send the steps after stopped_at."}
             except WDAError as error:
                 return {"completed_steps": len(results), "stopped_at": index,
                         "stop_reason": error.code, "error": error.as_dict(), "results": results,

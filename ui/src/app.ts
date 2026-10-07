@@ -22,15 +22,28 @@ type Preview = {
   busy: boolean;
   paused: boolean;
   events: Gesture[];
+  device?: { model?: string } | null;
 };
+type LiveState = 'connecting' | 'live' | 'paused' | 'offline';
+type ToolName = 'refresh' | 'home' | 'screenshot';
+type CursorEffect = { node: HTMLElement; animation?: Animation; timer?: ReturnType<typeof setTimeout> };
 
 const root = document.getElementById('app')!;
 const device = document.getElementById('device')!;
 const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
+const stage = document.getElementById('stage')!;
+const model = document.getElementById('model')!;
+const liveText = document.getElementById('live-text')!;
+const toast = document.getElementById('toast')!;
+const tools: Record<ToolName, HTMLButtonElement> = {
+  refresh: document.getElementById('tool-refresh') as HTMLButtonElement,
+  home: document.getElementById('tool-home') as HTMLButtonElement,
+  screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
+};
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.14' },
+  { name: 'iPhone WDA Screen', version: '0.2.3' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -46,14 +59,25 @@ let dimensions: Size | undefined;
 let viewport: Size | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let failures = 0;
-let animation: Animation | undefined;
-let cursorTimer: ReturnType<typeof setTimeout> | undefined;
+const cursorEffects = new Set<CursorEffect>();
 let requestedFullscreen = false;
 let connecting: Promise<void> | undefined;
 let suspended = false;
 let lastGoodFrame: { source: string; size: Size } | undefined;
+let acting = false;
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
 const FRAME_INTERVAL = 250;
 const REQUEST_TIMEOUT = 3000;
+// A screenshot or Home may queue behind the phone operation already running.
+const ACTION_TIMEOUT = 12000;
+const LIVE_TEXT: Record<LiveState, string> = { connecting: '连接中', live: 'Live', paused: '已暂停', offline: '未连接' };
+const DONE: Record<ToolName, string> = { refresh: '已刷新连接', home: '已回到主屏幕', screenshot: '截图已复制到剪贴板' };
+const FAILED: Record<string, string> = {
+  device_busy: '手机正在执行操作，请稍后再试',
+  preview_paused: '认证接管期间已暂停',
+  clipboard_unavailable: '截图未能写入剪贴板',
+  wda_unreachable: '未连接到手机',
+};
 
 const validSize = (value: unknown): value is Size => {
   const size = value as Size | undefined;
@@ -65,12 +89,42 @@ const validPoint = (value: unknown): value is Point => {
   return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
 };
 
+function syncTools() {
+  const paused = root.dataset.live === 'paused';
+  tools.refresh.disabled = acting;
+  // While the user authenticates on the phone nothing is captured or sent from here.
+  tools.home.disabled = tools.screenshot.disabled = acting || paused;
+}
+
+function setLive(state: LiveState) {
+  if (root.dataset.live === state) return;
+  root.dataset.live = state;
+  liveText.textContent = LIVE_TEXT[state];
+  syncTools();
+}
+
+function notify(text: string, failed = false) {
+  toast.textContent = text;
+  toast.dataset.tone = failed ? 'error' : 'ok';
+  toast.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastTimer = undefined; toast.hidden = true; }, 1800);
+}
+
+function applyTheme(theme: unknown) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+}
+
+function finishCursor(effect: CursorEffect) {
+  if (!cursorEffects.delete(effect)) return;
+  effect.animation?.cancel();
+  if (effect.timer) clearTimeout(effect.timer);
+  effect.node.hidden = true;
+  if (effect.node !== cursor) effect.node.remove();
+}
+
 function hideCursor() {
-  animation?.cancel();
-  animation = undefined;
-  if (cursorTimer) clearTimeout(cursorTimer);
-  cursorTimer = undefined;
-  cursor.hidden = true;
+  for (const effect of cursorEffects) finishCursor(effect);
 }
 
 function clearFrame(resetOperating = true) {
@@ -94,11 +148,49 @@ function retainFrame() {
 
 const visible = () => !disposed && !suspended && !document.hidden;
 
+// Bake the soft rounded ring and its corner envelope into one layout-sized picture.
+// Both the halo and the crisp rim disappear at each edge's midpoint.
+function glowMask(width: number, height: number, radius: number, band: number) {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const bloom = Math.min(width, height) * .27;
+  const corners = [[0, 0], [width, 0], [0, height], [width, height]]
+    .map(([x, y]) => `<circle cx='${round(x)}' cy='${round(y)}' r='${round(bloom)}'/>`).join('');
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${round(width)}' height='${round(height)}'>`
+    + `<defs><linearGradient id='x'><stop stop-color='#fff'/><stop offset='.16' stop-color='#fff' stop-opacity='.85'/><stop offset='.36' stop-color='#fff' stop-opacity='0'/><stop offset='.64' stop-color='#fff' stop-opacity='0'/><stop offset='.84' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
+    + `<linearGradient id='y' x2='0' y2='1'><stop stop-color='#fff'/><stop offset='.1' stop-color='#fff' stop-opacity='.85'/><stop offset='.28' stop-color='#fff' stop-opacity='0'/><stop offset='.72' stop-color='#fff' stop-opacity='0'/><stop offset='.9' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
+    + `<mask id='ends'><rect width='100%' height='100%' fill='url(#y)'/></mask><mask id='corners'><rect width='100%' height='100%' fill='url(#x)' mask='url(#ends)'/></mask></defs>`
+    + `<filter id='f' x='-30%' y='-30%' width='160%' height='160%'><feGaussianBlur stdDeviation='${round(band * .3)}'/></filter>`
+    + `<filter id='g' x='-60%' y='-60%' width='220%' height='220%'><feGaussianBlur stdDeviation='${round(bloom * .42)}'/></filter>`
+    + `<g mask='url(#corners)'><g fill='#fff' fill-opacity='.46' filter='url(#g)'>${corners}</g>`
+    + `<rect width='${round(width)}' height='${round(height)}' rx='${round(radius)}' fill='none' stroke='#fff' stroke-width='${round(band * .9)}' filter='url(#f)'/>`
+    + `<rect x='.75' y='.75' width='${round(width - 1.5)}' height='${round(height - 1.5)}' rx='${round(Math.max(0, radius - .75))}' fill='none' stroke='#fff' stroke-opacity='.9' stroke-width='1.5'/></g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+// Three seamless, static wave phases crossfade with the colour fields. Dot sizes
+// vary across each tile without per-frame SVG generation or gradient repainting.
+function glowDots(step: number, phase: number) {
+  const count = 16;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const size = round(count * step);
+  const dots: string[] = [];
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      const diagonal = (col + row) / count * Math.PI * 2;
+      const bend = Math.sin((col - row) / count * Math.PI * 2) * .8;
+      const wave = (1 + Math.sin(diagonal + bend + phase)) / 2;
+      dots.push(`<circle cx='${round((col + .5) * step)}' cy='${round((row + .5) * step)}' r='${round(step * (.06 + .17 * wave))}' fill-opacity='${round(.25 + .65 * wave)}'/>`);
+    }
+  }
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'><g fill='#fff'>${dots.join('')}</g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
 function fitFrame() {
   if (!dimensions) return;
-  const style = getComputedStyle(root);
-  const width = Math.max(0, root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
-  const height = Math.max(0, root.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
+  // The stage is what remains between the status pill and the toolbar.
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
   const shortSide = Math.min(dimensions.width, dimensions.height);
   const bezel = shortSide * .024;
   const outerWidth = dimensions.width + 2 * bezel;
@@ -107,7 +199,14 @@ function fitFrame() {
   device.style.width = `${outerWidth * scale}px`;
   device.style.height = `${outerHeight * scale}px`;
   device.style.setProperty('--bezel', `${bezel * scale}px`);
-  device.style.setProperty('--screen-radius', `${shortSide * .12 * scale}px`);
+  const radius = shortSide * .12 * scale;
+  device.style.setProperty('--screen-radius', `${radius}px`);
+  device.style.setProperty('--glow-mask', glowMask(dimensions.width * scale, dimensions.height * scale,
+    radius, Math.min(bezel * scale * 3.8, radius)));
+  const dotStep = Math.max(5, bezel * scale * .95);
+  for (let phase = 0; phase < 3; phase++) {
+    device.style.setProperty(`--glow-dots-${phase}`, glowDots(dotStep, phase * Math.PI * 2 / 3));
+  }
   device.dataset.orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
 }
 
@@ -126,15 +225,22 @@ function showGesture(gesture: Gesture) {
   const point = gesture.kind === 'tap' ? gesture.point : gesture.from;
   if (!validPoint(point)) return;
   if (gesture.kind === 'drag' && !validPoint(gesture.to)) return;
-  hideCursor();
-  Object.assign(cursor.style, pointStyle(point, size));
-  cursor.hidden = false;
-  const duration = gesture.kind === 'drag'
-    ? Math.max(120, Math.min(5000, gesture.duration_ms || 400))
-    : 540;
+  // Keep each indication readable even when several real actions arrive together.
+  // Overlapping effects have independent lifetimes, so a new tap cannot erase one.
+  const marker = cursor.hidden ? cursor : cursor.cloneNode(false) as HTMLElement;
+  if (marker !== cursor) {
+    marker.removeAttribute('id');
+    screen.appendChild(marker);
+  }
+  Object.assign(marker.style, pointStyle(point, size));
+  marker.hidden = false;
+  const effect: CursorEffect = { node: marker };
+  cursorEffects.add(effect);
+  const movement = Math.max(600, Math.min(1000, gesture.duration_ms || 650));
+  const duration = gesture.kind === 'drag' ? movement + 1000 : 1600;
   if (reducedMotion.matches) {
-    if (gesture.kind === 'drag') Object.assign(cursor.style, pointStyle(gesture.to!, size));
-    cursorTimer = setTimeout(hideCursor, 350);
+    if (gesture.kind === 'drag') Object.assign(marker.style, pointStyle(gesture.to!, size));
+    effect.timer = setTimeout(() => finishCursor(effect), duration);
     return;
   }
   const delta = gesture.kind === 'drag'
@@ -142,18 +248,26 @@ function showGesture(gesture: Gesture) {
     : '';
   const frames: Keyframe[] = gesture.kind === 'drag'
     ? [
-      { transform: 'translate(0, 0) scale(.85)', opacity: 0 },
-      { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: .08 },
-      { transform: `${delta} scale(1)`, opacity: 1, offset: .86 },
-      { transform: `${delta} scale(.9)`, opacity: 0 },
+      { transform: 'translate(0, 0) scale(.96)', opacity: 0 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: 80 / duration },
+      { transform: 'translate(0, 0) scale(.92)', opacity: 1, offset: 200 / duration, easing: 'cubic-bezier(.3,0,.2,1)' },
+      { transform: `${delta} scale(.92)`, opacity: 1, offset: (movement + 200) / duration },
+      { transform: `${delta} scale(1.06)`, opacity: 1, offset: (movement + 380) / duration },
+      { transform: `${delta} scale(1)`, opacity: 1, offset: (duration - 350) / duration },
+      { transform: `${delta} scale(1)`, opacity: 1, offset: (duration - 200) / duration },
+      { transform: `${delta} scale(.98)`, opacity: 0 },
     ]
     : [
-      { transform: 'scale(.65)', opacity: 0 },
-      { transform: 'scale(1)', opacity: 1, offset: .2 },
-      { transform: 'scale(1.35)', opacity: 0 },
+      { transform: 'scale(.96)', opacity: 0 },
+      { transform: 'scale(1)', opacity: 1, offset: .06 },
+      { transform: 'scale(.9)', opacity: 1, offset: .16 },
+      { transform: 'scale(1.06)', opacity: 1, offset: .28 },
+      { transform: 'scale(1)', opacity: 1, offset: .4 },
+      { transform: 'scale(1)', opacity: 1, offset: .875 },
+      { transform: 'scale(.98)', opacity: 0 },
     ];
-  animation = cursor.animate(frames, { duration, easing: gesture.kind === 'drag' ? 'linear' : 'ease-out' });
-  animation.onfinish = hideCursor;
+  effect.animation = marker.animate(frames, { duration, easing: 'linear' });
+  effect.animation.onfinish = () => finishCursor(effect);
 }
 
 function consume(value: unknown) {
@@ -168,11 +282,18 @@ function consume(value: unknown) {
     root.dataset.operating = 'false';
     retainFrame();
   }
+  if (typeof preview.device?.model === 'string' && preview.device.model) model.textContent = preview.device.model;
   if (preview.paused === true) {
     clearFrame();
+    setLive('paused');
     return;
   }
-  if (preview.frame_available === false) retainFrame();
+  if (preview.frame_available === false) {
+    retainFrame();
+    setLive('offline');
+  } else if (preview.frame_available === true || preview.frame) {
+    setLive('live');
+  }
   if (validSize(preview.viewport)) viewport = preview.viewport;
   const frame = preview.frame;
   if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq > frameSeq
@@ -237,11 +358,48 @@ async function poll() {
     failures += 1;
     nextDelay = Math.min(2000, 500 * failures);
     retainFrame();
+    if (failures > 1 && root.dataset.live !== 'paused') setLive('offline');
   } finally {
     inFlight = false;
     schedule(nextDelay);
   }
 }
+
+async function act(name: ToolName) {
+  if (acting || disposed || tools[name].disabled) return;
+  acting = true;
+  tools[name].dataset.busy = 'true';
+  syncTools();
+  try {
+    if (!ready) await connect();
+    const result = await app.callServerTool({
+      name: 'wda_screen_action',
+      arguments: { action: name },
+    }, { timeout: ACTION_TIMEOUT });
+    const data = result.structuredContent as (Partial<Preview> & { error?: { code?: string } }) | undefined;
+    if (result.isError || data?.error) {
+      notify(FAILED[data?.error?.code ?? ''] ?? '操作未完成，请重试', true);
+    } else {
+      // A refresh answers with the new stream identity; take the next frame at once.
+      if (name === 'refresh') consume(data);
+      notify(DONE[name]);
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      schedule(0);
+    }
+  } catch {
+    notify('操作未完成，请重试', true);
+  } finally {
+    acting = false;
+    delete tools[name].dataset.busy;
+    syncTools();
+  }
+}
+const toolHandlers = (Object.keys(tools) as ToolName[]).map(name => {
+  const handler = () => { void act(name); };
+  tools[name].addEventListener('click', handler);
+  return [name, handler] as const;
+});
 
 function visibilityChanged() {
   root.dataset.pageVisible = String(visible());
@@ -257,7 +415,7 @@ function visibilityChanged() {
 }
 
 const resizeObserver = new ResizeObserver(fitFrame);
-resizeObserver.observe(root);
+resizeObserver.observe(stage);
 image.onload = () => {
   if (dimensions && image.src) lastGoodFrame = { source: image.src, size: dimensions };
 };
@@ -292,6 +450,10 @@ function dispose() {
   root.dataset.pageVisible = 'false';
   if (timer) clearTimeout(timer);
   timer = undefined;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = undefined;
+  toast.hidden = true;
+  for (const [name, handler] of toolHandlers) tools[name].removeEventListener('click', handler);
   clearFrame();
   resizeObserver.disconnect();
   document.removeEventListener('visibilitychange', documentVisibilityChanged);
@@ -304,6 +466,7 @@ app.ontoolresult = (result) => {
   if (!result.isError) consume(result.structuredContent);
   schedule(0);
 };
+app.onhostcontextchanged = (context) => { applyTheme(context?.theme); };
 app.onteardown = async () => { dispose(); return {}; };
 app.onclose = () => {
   ready = false;
@@ -324,6 +487,7 @@ async function initialize() {
   if (disposed) { await app.close(); return; }
   ready = true;
   const context = app.getHostContext();
+  applyTheme(context?.theme);
   if (!requestedFullscreen && context?.displayMode !== 'fullscreen'
       && context?.availableDisplayModes?.includes('fullscreen')) {
     requestedFullscreen = true;
@@ -332,5 +496,6 @@ async function initialize() {
 }
 
 root.dataset.pageVisible = String(visible());
+syncTools();
 try { await connect(); } catch { retainFrame(); }
 schedule(ready ? 0 : 1000);
