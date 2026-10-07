@@ -43,7 +43,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.3' },
+  { name: 'iPhone WDA Screen', version: '0.2.4' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -179,7 +179,7 @@ function glowDots(step: number, phase: number) {
       const diagonal = (col + row) / count * Math.PI * 2;
       const bend = Math.sin((col - row) / count * Math.PI * 2) * .8;
       const wave = (1 + Math.sin(diagonal + bend + phase)) / 2;
-      dots.push(`<circle cx='${round((col + .5) * step)}' cy='${round((row + .5) * step)}' r='${round(step * (.06 + .17 * wave))}' fill-opacity='${round(.25 + .65 * wave)}'/>`);
+      dots.push(`<circle cx='${round((col + .5) * step)}' cy='${round((row + .5) * step)}' r='${round(step * (.04 + .23 * wave))}' fill-opacity='${round(.25 + .65 * wave)}'/>`);
     }
   }
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'><g fill='#fff'>${dots.join('')}</g></svg>`;
