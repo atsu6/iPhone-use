@@ -40,19 +40,14 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #device[data-orientation="landscape"] .power-button{left:26%;right:auto;top:auto;bottom:calc(var(--bezel) * -.22);width:10.4%;background:linear-gradient(180deg,#5e5c59,#aaa7a1 45%,#5a5956)}
 #device[data-orientation="landscape"] .receiver{left:calc(var(--bezel) * .36);top:50%;width:calc(var(--bezel) * .19);height:15%;transform:translateY(-50%)}
 #image{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none}
-/* Edge light. The mask is one picture with the screen's exact size and corner radius, drawn once per
-   layout by the script: a ring blurred inward along the edge, fuller at the four corners. Inside it sit
-   three sky-blue colour fields (one conic gradient turned a third of the way round each time, with a
-   little violet and pink) and a grid of small white dots that fades with the light. Only opacity is
-   animated: the colours drift on the compositor with no repaint, live blur filter or gradient animation.
-   Until the script supplies the mask nothing shows. */
-.glow{--dot:max(5px,calc(var(--bezel) * .95));position:absolute;inset:0;z-index:2;border-radius:inherit;opacity:0;transition:opacity .36s ease;pointer-events:none;-webkit-mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat;mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat}
+/* The layout-sized mask fades both halo and rim out at the four edge midpoints.
+   Three static colour and dot-wave phases animate only their opacity. */
+.glow{position:absolute;inset:0;z-index:2;border-radius:inherit;opacity:0;transition:opacity .36s ease;pointer-events:none;-webkit-mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat;mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat}
 .glow i{--hues:#6cc4ff,#3f9dff 17%,#8fdcff 33%,#58a9ff 49%,#7d8dff 62%,#b59bff 72%,#f2a8dc 82%,#9bd6ff 92%,#6cc4ff;position:absolute;inset:0;border-radius:inherit}
-.glow i:nth-child(1){background:conic-gradient(from 20deg,var(--hues))}
-.glow i:nth-child(2){background:conic-gradient(from 140deg,var(--hues));opacity:0}
-.glow i:nth-child(3){background:conic-gradient(from 260deg,var(--hues));opacity:0}
-/* Dot grid: one small tile, repeated; it takes the light's own falloff from the mask above. */
-.glow::after{content:"";position:absolute;inset:0;border-radius:inherit;background:radial-gradient(circle,#fff 0,#fff calc(var(--dot) * .15),#fff0 calc(var(--dot) * .23)) 50% 50%/var(--dot) var(--dot);opacity:.62}
+.glow i:nth-child(1){--dots:var(--glow-dots-0);background:conic-gradient(from 20deg,var(--hues))}
+.glow i:nth-child(2){--dots:var(--glow-dots-1);background:conic-gradient(from 140deg,var(--hues));opacity:0}
+.glow i:nth-child(3){--dots:var(--glow-dots-2);background:conic-gradient(from 260deg,var(--hues));opacity:0}
+.glow i::after{content:"";position:absolute;inset:0;border-radius:inherit;background-image:var(--dots);background-position:50% 50%;background-repeat:repeat;opacity:.72}
 #app[data-operating="true"] .glow{opacity:1;animation:glow-breathe 5s ease-in-out infinite}
 #app[data-operating="true"] .glow i:nth-child(1){animation:glow-a 12s linear infinite}
 #app[data-operating="true"] .glow i:nth-child(2){animation:glow-b 12s linear infinite}

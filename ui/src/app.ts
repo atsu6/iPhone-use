@@ -42,7 +42,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.0' },
+  { name: 'iPhone WDA Screen', version: '0.2.1' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -144,20 +144,41 @@ function retainFrame() {
 
 const visible = () => !disposed && !suspended && !document.hidden;
 
-// The glow's mask: a ring along the screen edge blurred inward, fuller blooms at the four corners,
-// and a thin crisp rim. It is a static picture rebuilt only when the layout changes, so the soft
-// falloff costs nothing per frame.
+// Bake the soft rounded ring and its corner envelope into one layout-sized picture.
+// Both the halo and the crisp rim disappear at each edge's midpoint.
 function glowMask(width: number, height: number, radius: number, band: number) {
   const round = (value: number) => Math.round(value * 100) / 100;
   const bloom = Math.min(width, height) * .27;
   const corners = [[0, 0], [width, 0], [0, height], [width, height]]
     .map(([x, y]) => `<circle cx='${round(x)}' cy='${round(y)}' r='${round(bloom)}'/>`).join('');
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${round(width)}' height='${round(height)}'>`
+    + `<defs><linearGradient id='x'><stop stop-color='#fff'/><stop offset='.16' stop-color='#fff' stop-opacity='.85'/><stop offset='.36' stop-color='#fff' stop-opacity='0'/><stop offset='.64' stop-color='#fff' stop-opacity='0'/><stop offset='.84' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
+    + `<linearGradient id='y' x2='0' y2='1'><stop stop-color='#fff'/><stop offset='.1' stop-color='#fff' stop-opacity='.85'/><stop offset='.28' stop-color='#fff' stop-opacity='0'/><stop offset='.72' stop-color='#fff' stop-opacity='0'/><stop offset='.9' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
+    + `<mask id='ends'><rect width='100%' height='100%' fill='url(#y)'/></mask><mask id='corners'><rect width='100%' height='100%' fill='url(#x)' mask='url(#ends)'/></mask></defs>`
     + `<filter id='f' x='-30%' y='-30%' width='160%' height='160%'><feGaussianBlur stdDeviation='${round(band * .3)}'/></filter>`
     + `<filter id='g' x='-60%' y='-60%' width='220%' height='220%'><feGaussianBlur stdDeviation='${round(bloom * .42)}'/></filter>`
-    + `<g fill='#fff' fill-opacity='.46' filter='url(#g)'>${corners}</g>`
+    + `<g mask='url(#corners)'><g fill='#fff' fill-opacity='.46' filter='url(#g)'>${corners}</g>`
     + `<rect width='${round(width)}' height='${round(height)}' rx='${round(radius)}' fill='none' stroke='#fff' stroke-width='${round(band * .9)}' filter='url(#f)'/>`
-    + `<rect x='.75' y='.75' width='${round(width - 1.5)}' height='${round(height - 1.5)}' rx='${round(Math.max(0, radius - .75))}' fill='none' stroke='#fff' stroke-opacity='.9' stroke-width='1.5'/></svg>`;
+    + `<rect x='.75' y='.75' width='${round(width - 1.5)}' height='${round(height - 1.5)}' rx='${round(Math.max(0, radius - .75))}' fill='none' stroke='#fff' stroke-opacity='.9' stroke-width='1.5'/></g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+// Three seamless, static wave phases crossfade with the colour fields. Dot sizes
+// vary across each tile without per-frame SVG generation or gradient repainting.
+function glowDots(step: number, phase: number) {
+  const count = 16;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const size = round(count * step);
+  const dots: string[] = [];
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      const diagonal = (col + row) / count * Math.PI * 2;
+      const bend = Math.sin((col - row) / count * Math.PI * 2) * .8;
+      const wave = (1 + Math.sin(diagonal + bend + phase)) / 2;
+      dots.push(`<circle cx='${round((col + .5) * step)}' cy='${round((row + .5) * step)}' r='${round(step * (.06 + .17 * wave))}' fill-opacity='${round(.25 + .65 * wave)}'/>`);
+    }
+  }
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'><g fill='#fff'>${dots.join('')}</g></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
@@ -178,6 +199,10 @@ function fitFrame() {
   device.style.setProperty('--screen-radius', `${radius}px`);
   device.style.setProperty('--glow-mask', glowMask(dimensions.width * scale, dimensions.height * scale,
     radius, Math.min(bezel * scale * 3.8, radius)));
+  const dotStep = Math.max(5, bezel * scale * .95);
+  for (let phase = 0; phase < 3; phase++) {
+    device.style.setProperty(`--glow-dots-${phase}`, glowDots(dotStep, phase * Math.PI * 2 / 3));
+  }
   device.dataset.orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
 }
 
