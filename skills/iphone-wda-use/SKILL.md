@@ -23,7 +23,7 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone；新对�
 
 READY 关联手机屏幕侧边栏，宿主支持时默认打开或复用本聊天已有面板；重复 setup / 恢复通道、暂停 / 恢复预览沿用同一个 widget。已有面板时直接继续，不为刷新再调用屏幕打开工具；需要重新打开已关闭的面板时调用一次 `wda_screen()`，不要为打开画面重复 READY。用户要求“先打开 widget 让我看”时先打开，再继续初始化与已授权任务；只有明确要求等他确认再操作时才等待。widget 顶部显示机型和 Live 状态，底部的刷新 / 主屏幕 / 截图三个按钮只供用户自己点击，不是模型的工具：不要调用仅供 App 使用的 `wda_screen_frame` 和 `wda_screen_action`，不要为刷新预览增加轮询、截图或 observe。用户点过主屏幕后页面会变，按下一次观察到的实际状态继续。画面留空、光效或 cursor 都不证明 READY、动作成功或任务完成，也不是模型观察。预览问题按 [屏幕通道说明](../../docs/screen-widget.md) 排查，不为它反复恢复控制通道。
 
-App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要用户解锁时，按 [认证接管与恢复](references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再必须调用宿主提问工具（Default 优先 `functions.request_user_input_async`）提示用户在 iPhone 上完成，首个选项固定「已完成继续」，第二个可为「暂时无法完成」；异步返回 / 预选不是用户答复，保持待答，不能只用文字提示代替；保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到用户实际选择「已完成继续」或明确完成通知后先调用 `wda_screen(action="resume")`，再获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
+App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要用户解锁时，按 [认证接管与恢复](references/authentication.md) 等用户完成。App 认证先 `wda_screen(action="pause")`；`phone_locked` 已自动暂停为 `device_locked`，不要再用显式 pause 覆盖原因。必须调用宿主提问工具（Default 优先 `functions.request_user_input_async`），首个选项固定「已完成继续」，第二个可为「暂时无法完成」。异步返回 / 预选不是用户答复；接管期间暂停手机动作、读取和截图，不索取凭据。实际完成通知后，App 认证或旧版未知暂停先 `wda_screen(action="resume")` 再取新观察；设备解锁则重验 READY，成功时仅自动解除同一次锁屏暂停。READY 的 `preview.paused` / `pause_reason` 说明预览状态；不能把 READY 成功当成 App 认证已完成。根据新状态继续剩余工作。
 
 ## 按下一步需要选择观察
 
@@ -33,16 +33,29 @@ App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要�
 
 自绘内容、遮挡或缺失标签需要视觉判断时才取截图。截图随同一结果以图片返回，已缩放到适合阅读的尺寸：图像像素乘以 `image.pixel_to_point` 的 `[x, y]` 得到 iPhone 点，不要按原始分辨率或 Mac 屏幕换算。screenshot 跳过 XML；both 同时提供树和图。若 App 出现分享浮层，处理当前状态，不循环重复同一路径截图。
 
-## 标签失败就改用坐标
+## 失败时先看截图，再用坐标继续
 
-无障碍标签（selector）是首选，因为它精确；但不要在它上面反复尝试。凡是用 selector 定位的操作——点击、输入、等待出现、滚动查找——只要失败一次（`no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`search_exhausted` 等），下一次调用就改用屏幕坐标完成同一意图，不换其他标签写法重试，也不先重新读树：
+selector 是首选，但 `no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`offscreen_target`、`search_exhausted` 或 `no_focused_field` 后，不反复改标签、重复同一个坐标或直接让用户代操作。先查看失败结果里的当前截图，再尝试可见目标的坐标操作；失败结果没有可用截图时取一次 `wda_observe(mode="screenshot")`。不要先重读整树。
 
-- 点击：失败结果已附当前截图和坐标点。直接用 `tap_point`、candidates 里的 `tap`（单位已是 iPhone 点），或截图上目标的位置调用 `wda_tap(x, y)`。
-- 输入：先 `wda_tap(x, y)` 点中输入框，再调用不带 selector 的 `wda_type_text(text=...)`，文字进入当前获得焦点的输入框；长文本、verify、submit 等选项照常可用，安全输入框仍由用户接管。
-- 等待或 `expect` 的标签没有出现：按本次结果或一张截图里的实际画面判断，不换标签反复等待。
-- 滚动查找用尽：按截图用 `wda_swipe` 滚动，再按坐标点击。
+- 点击：`tap_point`、candidates 的 `tap` 是元素位置（iPhone 点），不证明它可点击。优惠券、广告、菜单或登录浮层可能盖住后台控件；先从截图找到实际可见的关闭 / 取消按钮，处理遮挡，再点目标。
+- 输入：先点截图中实际可见的输入框，再调用不带 selector 的 `wda_type_text(text=...)`。`no_focused_field` 表示没有输入；上一个点击可能被浮层拦截或落在错误位置，不能原样重复那组坐标和输入。按当前截图重新选点，下一步需要信息时让动作返回截图，以便判断页面与焦点。
+- 目标在屏幕外：先向目标滑动，再按随后截图点击。等待标签或滚动查找失败也按真实画面继续，不循环相同标签。
 
-`offscreen_target` 说明目标在屏幕外：先向它滑动，再按随后截图的坐标点击。截图显示目标确实被浮层、选择器或固定表头盖住时，先处理遮挡物再点。坐标动作同样乐观执行，在下一步本来需要的观察里确认效果。
+截图像素点 `(px, py)` 换算为 `x=px*image.pixel_to_point[0]`、`y=py*image.pixel_to_point[1]` 后传给 `wda_tap`。x/y 接受 iPhone 点，不能直接传截图像素或 Mac widget 坐标。
+
+通过 `functions.exec` 调工具时必须把图片真正转发给模型，不能 `text(result)` 输出整份含 base64 的结果：
+
+```javascript
+const result = await tools.mcp__iphone_wda__wda_observe({mode: "screenshot"});
+for (const block of result.content ?? []) {
+  if (block.type === "text") text(block.text);
+  else if (block.type === "image") image(block);
+}
+```
+
+点击、输入等失败结果同样转发图片块。如果图片没转发成功，用 `view_image` 打开返回的 `image.path` / `error.observation.image.path`；不能把图片元数据或 base64 当成看过截图。
+
+以上用于可恢复的界面定位问题。参数错误按 schema 修正，通道故障恢复 READY，锁屏 / 认证等用户完成。动作是否生效不确定时先读真实状态，不能重放输入、发送、下单或整个批次；截图足以处理的常规遮挡应继续尝试，不提前把任务交还用户。
 
 ## App 与常规动作
 

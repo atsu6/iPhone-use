@@ -24,8 +24,8 @@ from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.2.6"
-SCREEN_URI="ui://iphone-use-wda/phone-0.2.6.html"
+VERSION="0.2.7"
+SCREEN_URI="ui://iphone-use-wda/phone-0.2.7.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
 # ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
 # including after the MCP process reconnects; no device identifiers are needed.
@@ -347,12 +347,19 @@ class Runtime:
     def screen_action(self,action):
         """Toolbar of the preview App: the user's own click, outside the model's tool sequence."""
         if action=="refresh":
+            pause_id=self.screen.reconnect_pause_id()
             state=self.screen.restart()
             probe=WDAClient(self.base_url,timeout=2)
-            try:ready=(probe.request("GET","/status").get("value") or {}).get("ready") is True
+            try:
+                ready=(probe.request("GET","/status").get("value") or {}).get("ready") is True
+                if ready:
+                    if probe.request("GET","/wda/locked").get("value") is False:
+                        # Clicking refresh is the user's explicit request to resume.
+                        self.screen.resume_after_unlock(pause_id,explicit=True)
+                    else:self.screen.set_paused(True,reason="device_locked")
             except WDAError:ready=False
             finally:probe.close()
-            return {"ok":True,"action":action,"service_ready":ready,**state}
+            return {"ok":True,"action":action,"service_ready":ready,**state,**self.screen.pause_status()}
         if self.screen.paused():
             raise WDAError("preview_paused","The preview is paused while the user authenticates on the iPhone. No capture or phone action was made.",details={"action_executed":False})
         client=WDAClient(self.base_url,timeout=8)
@@ -386,13 +393,20 @@ class Runtime:
         return None
 
     def ready_once(self,screenshot):
+        try:lock_pause=self.screen.locked_pause_id()
+        except Exception:lock_pause=None
         status=self.client.request("GET","/status").get("value") or {}
         if status.get("ready") is not True:raise WDAError("not_ready","WDA is not accepting commands. Run wda_doctor and inspect setup status.")
         if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself, keep it awake, and verify READY again.")
         sid=self.client.ensure_session()
         observation=self.phone.observe("both" if screenshot else "tree")
         if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and WDA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
-        return {"ready":True,"state":"ready","proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
+        result={"ready":True,"state":"ready","proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
+        try:
+            self.screen.resume_after_unlock(lock_pause)
+            result["preview"]=self.screen.pause_status()
+        except Exception:pass  # Display state must not invalidate a healthy control channel.
+        return result
 
     def recovering_result(self,info,screenshot,recover,retried=False,cause=None):
         info=dict(info)
@@ -488,7 +502,7 @@ class Runtime:
         except WDAError as exc:
             error=exc.code
             if exc.code=="phone_locked" or (exc.code=="not_editable" and exc.details.get("secure_field")):
-                try:self.screen.set_paused(True)
+                try:self.screen.set_paused(True,reason="device_locked" if exc.code=="phone_locked" else "authentication")
                 except Exception:pass
             if op in READS:
                 exc.details.setdefault("action_executed",False)
@@ -575,13 +589,13 @@ INSTRUCTIONS=(
  "recover=true is runtime recovery, not cold startup; for state=recovering follow its setup job until the service is ready, then READY again. Honor explicit diagnostic/no-start/no-restart instructions. "
  "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use wda_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
  "Results are one compact JSON text. Tree nodes give type without the XCUIElementType prefix and rect=[x,y,width,height] in iPhone points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. "
- "A screenshot arrives as an image in the same result, scaled for reading: image pixels x image.pixel_to_point [x,y] = iPhone points. Standalone observation uses mode, mutation output uses observe. "
+ "A screenshot arrives as an image in the same result; through functions.exec forward each image block with image(block) and text blocks with text(block.text), never text(the whole result) or base64. If image forwarding is unavailable, use view_image on image.path or error.observation.image.path. It is scaled for reading: image pixels x image.pixel_to_point [x,y] = iPhone points. Standalone observation uses mode, mutation output uses observe. "
  "Selectors copy label/name/value/type from fresh nodes; use label_contains for long or changing labels. Matches nested at one place, or with only one on screen, resolve by themselves. "
- "When a selector step fails (no_such_element, ambiguous_target, occluded_target, offscreen_target, not_editable, search_exhausted), switch to screen coordinates in the very next call: the error already carries a screenshot and tap points, so tap with x/y, and for input tap the field then call type_text with text and no selector. Do not try other selector spellings or read the tree again first. Resolve unknown bundle IDs with wda_apps. "
+ "For selector failures or no_focused_field, inspect the attached screenshot FIRST and continue visually with wda_tap x/y (iPhone points). tap_point/candidates locate elements but do not prove they are unobstructed; close a visible popup before tapping a covered background target. For input tap the visible editable field, then type_text with text and no selector. If a coordinate tap or focus failed, inspect fresh screenshot state and choose a new visible target rather than repeat the same point or hand routine UI trouble to the user. If the error has no usable image take one wda_observe(mode=screenshot). Do not try other selector spellings or read the tree again first. Correct schema/channel/authentication errors by their own recovery; never blindly replay uncertain actions. Resolve unknown bundle IDs with wda_apps. "
  "Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. "
  "Chain known steps in batch; explicit expect/verify opts into checking key outcomes. Send long text whole: when type_text returns input_complete=false, call it again with only continue_token; a batch stopped by input_continues or time_budget continues from stopped_at. "
  "Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. "
- "For passwords, device unlock or Face ID call wda_screen(action=pause), pause phone calls and use the available host question tool (request_user_input_async in Default), first option exactly 已完成继续. Wait for the actual user answer; async return or preselection is not confirmation. Resume remaining work from fresh state only after the actual user completion answer. "
+ "For App passwords or Face ID call wda_screen(action=pause); phone_locked already auto-pauses the preview for device unlock, so do not overwrite that reason with an extra pause. Pause phone calls and use the available host question tool (request_user_input_async in Default), first option exactly 已完成继续. Wait for the actual user answer; async return or preselection is not confirmation. After the actual user completion answer, explicitly wda_screen(action=resume) for App authentication or legacy/unknown pause, then read fresh state. For device unlock run READY once; successful READY clears only its matching device_locked pause. READY/open never clear App authentication or unknown pause. Continue remaining work from that fresh state. "
  "Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."
 )
 

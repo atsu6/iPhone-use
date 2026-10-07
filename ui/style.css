@@ -23,7 +23,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #toast{position:absolute;left:50%;bottom:70px;z-index:5;max-width:calc(100% - 32px);padding:7px 12px;overflow:hidden;border-radius:999px;background:var(--toast);color:var(--toast-text);line-height:1.2;text-overflow:ellipsis;white-space:nowrap;transform:translateX(-50%);box-shadow:0 6px 20px -8px #00000059;pointer-events:none;animation:toast-in .18s ease-out}
 #toast[data-tone="error"]{background:#b42318f2;color:#fff}
 #toast[hidden]{display:none}
-#device{--bezel:10px;--screen-radius:50px;position:relative;flex:none;isolation:isolate;border-radius:calc(var(--screen-radius) + var(--bezel));background:linear-gradient(115deg,#c4c0b9 0%,#686662 12%,#b1ada6 24%,#555452 51%,#96938e 72%,#c9c6c0 91%,#686762 100%);box-shadow:0 0 0 .7px #252525ad,0 12px 28px -14px #00000055,0 4px 8px -4px #00000033;user-select:none;pointer-events:none}
+#device{--bezel:10px;--screen-radius:50px;position:relative;width:min(100%,350px);aspect-ratio:460/976;flex:none;isolation:isolate;border-radius:calc(var(--screen-radius) + var(--bezel));background:linear-gradient(115deg,#c4c0b9 0%,#686662 12%,#b1ada6 24%,#555452 51%,#96938e 72%,#c9c6c0 91%,#686762 100%);box-shadow:0 0 0 .7px #252525ad,0 12px 28px -14px #00000055,0 4px 8px -4px #00000033;user-select:none;pointer-events:none}
 #device::before{content:"";position:absolute;inset:calc(var(--bezel) * .24);z-index:1;border-radius:calc(var(--screen-radius) + var(--bezel) * .76);background:#090a0c;box-shadow:0 0 0 .7px #00000099,inset 0 0 0 .7px #ffffff16;pointer-events:none}
 #screen{position:absolute;inset:var(--bezel);z-index:2;isolation:isolate;overflow:hidden;border-radius:var(--screen-radius);background:#050609;line-height:0;user-select:none}
 #device[hidden],#screen[hidden],.gesture-cursor[hidden]{display:none}
@@ -40,6 +40,8 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #device[data-orientation="landscape"] .power-button{left:26%;right:auto;top:auto;bottom:calc(var(--bezel) * -.22);width:10.4%;background:linear-gradient(180deg,#5e5c59,#aaa7a1 45%,#5a5956)}
 #device[data-orientation="landscape"] .receiver{left:calc(var(--bezel) * .36);top:50%;width:calc(var(--bezel) * .19);height:15%;transform:translateY(-50%)}
 #image{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none}
+#image[hidden],#empty-state[hidden]{display:none}
+#empty-state{position:absolute;inset:0;z-index:1;display:grid;place-items:center;background:radial-gradient(ellipse at 12% 0%,#ffffff08,transparent 56%),linear-gradient(145deg,#16171a,#090a0c 48%,#050609);color:#89898f;font-size:11px;font-weight:400;line-height:1.4;letter-spacing:.06em;user-select:none}
 /* The layout-sized mask fades both halo and rim out at the four edge midpoints.
    Static colour and dot-wave phases crossfade on independent 8s and 4s cycles. */
 .glow{position:absolute;inset:0;z-index:2;border-radius:inherit;opacity:0;transition:opacity .36s ease;pointer-events:none;-webkit-mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat;mask:var(--glow-mask,linear-gradient(#0000,#0000)) 0 0/100% 100% no-repeat}

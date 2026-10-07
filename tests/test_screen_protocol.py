@@ -22,6 +22,7 @@ class MockScreen:
     def __init__(self):
         self.events = []
         self.is_paused = False
+        self.pause_reason = None
         self.device = None
         self.closed = False
         self.frame_result = {"frame": {"seq": 7, "data": "preview-only",
@@ -36,9 +37,26 @@ class MockScreen:
         self.events.append(("start", {}))
         return {"frame": None, "events": [], "busy": False, "paused": self.is_paused}
 
-    def set_paused(self, paused):
+    def set_paused(self, paused, reason="authentication"):
         self.is_paused = paused
+        self.pause_reason = reason if paused else None
         self.events.append(("pause", {"paused": paused}))
+
+    def pause_status(self):
+        return {"paused": self.is_paused, "pause_reason": self.pause_reason}
+
+    def locked_pause_id(self):
+        return "test-lock" if self.is_paused and self.pause_reason == "device_locked" else None
+
+    def reconnect_pause_id(self):
+        return "test-pause" if self.is_paused else None
+
+    def resume_after_unlock(self, expected_id, explicit=False):
+        if expected_id and (self.locked_pause_id() == expected_id or explicit):
+            self.is_paused = False
+            self.pause_reason = None
+            return True
+        return False
 
     def paused(self):
         return self.is_paused
@@ -387,7 +405,7 @@ class ScreenProtocolTests(unittest.TestCase):
         result = runtime.call("wda_screen_action", {"action": "refresh"})
         self.assertEqual((result["ok"], result["service_ready"], result["stream_id"]), (True, True, "restarted"))
         self.assertEqual([kind for kind, _ in screen.events], ["restart"])
-        self.assertEqual(phone.calls, [("GET", "/status", None)])
+        self.assertEqual(phone.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
         self.assertEqual(client.calls, [])
         phone.status_ready = False
         self.assertFalse(runtime.call("wda_screen_action", {"action": "refresh"})["service_ready"])
@@ -417,7 +435,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "clipboard_unavailable")
         self.assertFalse(list((Path(self.directory.name)).glob(".clipboard-*")))
 
-    def test_toolbar_never_captures_or_acts_during_authentication_pause(self):
+    def test_toolbar_blocks_actions_until_user_explicitly_reconnects(self):
         runtime, client, screen = self.runtime()
         phone = self.toolbar(runtime)
         screen.is_paused = True
@@ -426,7 +444,7 @@ class ScreenProtocolTests(unittest.TestCase):
                 runtime.call("wda_screen_action", {"action": action})
             self.assertEqual(caught.exception.code, "preview_paused")
         self.assertEqual(phone.calls, [])
-        self.assertTrue(runtime.call("wda_screen_action", {"action": "refresh"})["paused"])
+        self.assertFalse(runtime.call("wda_screen_action", {"action": "refresh"})["paused"])
         with self.assertRaises(WDAError) as caught:
             runtime.call("wda_screen_action", {"action": "tap"})
         self.assertEqual(caught.exception.code, "invalid_argument")

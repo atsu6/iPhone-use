@@ -26,7 +26,7 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   const requestOptions = [];
   let layoutReads = 0;
   let imageWrites = 0;
-  const ids = ['app', 'device', 'screen', 'image', 'cursor', 'stage', 'model', 'live-text', 'toast',
+  const ids = ['app', 'device', 'screen', 'image', 'empty-state', 'cursor', 'stage', 'model', 'live-text', 'toast',
     'tool-refresh', 'tool-home', 'tool-screenshot'];
   const elements = Object.fromEntries(ids.map(id => [id, {
     style: { setProperty(name, value) { this[name] = value; } }, dataset: {},
@@ -262,7 +262,8 @@ test('a hidden panel stops polling, and slow calls never overlap', async () => {
   resolve({ structuredContent: preview({ frame: frame(1) }) });
   await flush();
   assert.equal(h.timers.size, 0);
-  assert.equal(h.elements.screen.hidden, true);
+  assert.equal(h.elements.screen.hidden, false);
+  assert.equal(h.elements['empty-state'].hidden, false);
   h.visibility(false);
   await h.tick();
   assert.equal(h.calls.length, 2);
@@ -272,10 +273,12 @@ test('paused clears the screen, errors back off silently, teardown cancels work'
   const h = await harness({ reply: async () => ({ isError: true }) });
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(4), busy: true }) });
   h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
-  assert.equal(h.elements.screen.hidden, true);
+  assert.equal(h.elements.screen.hidden, false);
+  assert.equal(h.elements.image.hidden, true);
+  assert.equal(h.elements['empty-state'].textContent, '预览已暂停');
   assert.equal(h.elements.image.src, undefined);
   assert.equal(h.elements.app.dataset.busy, 'false');
-  assert.equal(h.elements.device.hidden, true);
+  assert.equal(h.elements.device.hidden, false);
   assert.equal(h.elements.app.dataset.operating, 'false');
   await h.tick();
   assert.equal([...h.timers.values()][0].delay, 500);
@@ -384,13 +387,43 @@ test('an initial host handshake failure retries instead of permanently disposing
 
 test('same-size frames avoid repeated layout reads and duplicate sequences avoid image writes', async () => {
   const h = await harness();
+  const initialLayouts = h.layoutReads; // One initial layout for the disconnected chassis.
   for (let seq = 1; seq <= 30; seq++) h.app.ontoolresult({ structuredContent: preview({ frame: frame(seq) }) });
-  assert.equal(h.layoutReads, 1);
+  assert.equal(h.layoutReads, initialLayouts + 1);
   assert.equal(h.imageWrites, 30);
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(30) }) });
   assert.equal(h.imageWrites, 30);
   h.resize.callback();
-  assert.equal(h.layoutReads, 2);
+  assert.equal(h.layoutReads, initialLayouts + 2);
+});
+
+test('no frame keeps a fitted black-screen chassis and disconnected label', async () => {
+  const h = await harness();
+  assert.equal(h.elements.device.hidden, false);
+  assert.equal(h.elements.screen.hidden, false);
+  assert.equal(h.elements.image.hidden, true);
+  h.app.ontoolresult({ structuredContent: preview({ frame_available: false }) });
+  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state'].hidden, false);
+  assert.ok(parseFloat(h.elements.device.style.height) <= h.stageSize.height);
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(1), frame_available: true }) });
+  assert.equal(h.elements['empty-state'].hidden, true);
+  assert.equal(h.elements.image.hidden, false);
+  // A transient gap retains actual pixels; the placeholder must not replace them.
+  h.app.ontoolresult({ structuredContent: preview({ frame_available: false }) });
+  assert.equal(h.elements['empty-state'].hidden, true);
+  assert.equal(h.elements.image.hidden, false);
+});
+
+test('first image decode failure returns to the disconnected chassis', async () => {
+  const h = await harness();
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(1) }) });
+  h.elements.image.onerror();
+  assert.equal(h.elements.image.src, undefined);
+  assert.equal(h.elements.image.hidden, true);
+  assert.equal(h.elements.device.hidden, false);
+  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state'].hidden, false);
 });
 
 test('decode failure restores the last loaded image, while authentication pause erases its backup', async () => {
@@ -407,7 +440,8 @@ test('decode failure restores the last loaded image, while authentication pause 
   h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
   h.elements.image.onerror();
   assert.equal(h.elements.image.src, undefined);
-  assert.equal(h.elements.screen.hidden, true);
+  assert.equal(h.elements.screen.hidden, false);
+  assert.equal(h.elements['empty-state'].hidden, false);
 });
 
 test('unavailable and paused previews poll slowly, and focus wakes recovery immediately', async () => {
@@ -431,7 +465,8 @@ test('a frame requested before authentication pause cannot restore cleared pixel
   resolve({ structuredContent: preview({ frame: frame(5), paused: false }) });
   await flush();
   assert.equal(h.elements.image.src, undefined);
-  assert.equal(h.elements.screen.hidden, true);
+  assert.equal(h.elements.screen.hidden, false);
+  assert.equal(h.elements['empty-state'].hidden, false);
   await h.tick();
   resolve({ structuredContent: preview({ frame: frame(6), paused: false }) });
   await flush();
@@ -455,9 +490,16 @@ test('status pill names the phone model and follows the stream state', async () 
   assert.equal(h.elements['tool-home'].disabled, true);
   assert.equal(h.elements['tool-screenshot'].disabled, true);
   assert.equal(h.elements['tool-refresh'].disabled, false);
+  h.app.ontoolresult({ structuredContent: preview({ paused: true, pause_reason: 'device_locked' }) });
+  assert.equal(h.elements['live-text'].textContent, '等待解锁');
+  assert.match(h.elements['live-text'].title, /刷新/);
+  assert.equal(h.elements.image.src, undefined);
+  h.app.ontoolresult({ structuredContent: preview({ paused: true, pause_reason: 'authentication' }) });
+  assert.equal(h.elements['live-text'].textContent, '已暂停');
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(2), frame_available: true }) });
   assert.equal(h.elements.app.dataset.live, 'live');
   assert.equal(h.elements['tool-home'].disabled, false);
+  assert.equal(h.elements['live-text'].title, '');
 });
 
 test('toolbar sends exactly one app-only action and reports its outcome', async () => {
@@ -518,6 +560,32 @@ test('refresh adopts the new stream and asks for a frame at once', async () => {
   assert.equal(polls.at(-1).arguments.after_seq, 0);
   // The last pixels stay until the new stream delivers its first frame.
   assert.equal(h.elements.device.hidden, false);
+});
+
+test('refresh reports a real disconnected service instead of a success toast', async () => {
+  const h = await harness({ reply: () => Promise.resolve({ structuredContent: { ok: true, service_ready: false, ...preview({ frame_available: false }) } }) });
+  h.elements['tool-refresh'].click();
+  await flush();
+  assert.match(h.elements.toast.textContent, /未连接到手机/);
+  assert.equal(h.elements.toast.dataset.tone, 'error');
+  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements.device.hidden, false);
+});
+
+test('a poll from before user reconnect cannot put the recovered preview back in pause', async () => {
+  let release;
+  const h = await harness({ reply: params => params.name === 'wda_screen_frame'
+    ? new Promise(resolve => { release = resolve; })
+    : Promise.resolve({ structuredContent: { ok: true, service_ready: true, ...preview({ stream_id: 'reconnected', frame_available: false }) } }) });
+  h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
+  await h.tick();
+  h.elements['tool-refresh'].click();
+  await flush();
+  release({ structuredContent: preview({ paused: true, pause_reason: 'unknown' }) });
+  await flush();
+  assert.equal(h.elements.app.dataset.live, 'offline');
+  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.calls.filter(call => call.name === 'wda_screen_action').length, 1);
 });
 
 test('host theme is applied and followed, and teardown releases the toolbar', async () => {

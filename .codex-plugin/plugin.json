@@ -1,6 +1,6 @@
 {
   "name": "iphone-use-wda",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Initialize WDA in new chats, then control iPhone with guided setup and optimistic actions.",
   "author": {
     "name": "ZHONG XIN"

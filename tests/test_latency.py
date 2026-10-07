@@ -271,14 +271,18 @@ class CoordinateFallbackTests(PhoneCase):
                 content = result_content({"error": error.as_dict()})["content"]
                 self.assertEqual([item["type"] for item in content], ["text", "image"])
                 if code == "occluded_target":
-                    self.assertEqual(details["recovery"]["next_arguments"], {"x": 195, "y": 222})
+                    self.assertNotIn("next_arguments", details["recovery"])
+                    self.assertIn("Inspect the attached screenshot FIRST", details["recovery"]["next_step"])
                 if code == "ambiguous_target":
                     self.assertEqual([candidate["tap"] for candidate in details["candidates"]], [[195, 222], [195, 422]])
 
     def test_coordinate_tap_then_reaches_what_the_selector_could_not(self):
         self.client.elements[0]["hittable"] = False
         error = self.assert_code("occluded_target", lambda: self.phone.tap(selector={"label": "Target"}))
-        result = self.phone.tap(**error.details["recovery"]["next_arguments"])
+        # Only after inspecting the image may the caller choose a visible point.
+        # The occluded background element no longer supplies an automatic action.
+        self.assertNotIn("next_arguments", error.details["recovery"])
+        result = self.phone.tap(x=195, y=222)
         self.assertTrue(result["action_executed"])
         self.assertEqual(self.client.actions(), [("POST", "/wda/tap", {"x": 195, "y": 222})])
 
