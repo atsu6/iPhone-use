@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime
+from iphone_use import Runtime
 from wda_client import WDAError
 from wda_controller import PhoneController
 from test_controller import FakeWDA

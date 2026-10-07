@@ -20,7 +20,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime, result_content, serve, tool_result
+from iphone_use import Runtime, result_content, serve, tool_result
 from wda_client import WDAError
 from wda_controller import PhoneController, compact_node
 import wda_image

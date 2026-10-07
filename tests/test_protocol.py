@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime, result_content, serve
+from iphone_use import Runtime, result_content, serve
 from wda_client import WDAError
 from wda_controller import PhoneController
 from test_controller import FakeWDA
@@ -30,7 +30,7 @@ class ProtocolTests(unittest.TestCase):
 
     def exchange(self, requests, url=None):
         payload = "".join(json.dumps(item, ensure_ascii=False, allow_nan=False) + "\n" if not isinstance(item, str) else item + "\n" for item in requests)
-        command = [sys.executable, str(ROOT / "server" / "iphone_wda.py"), "--state-dir", self.directory.name]
+        command = [sys.executable, str(ROOT / "server" / "iphone_use.py"), "--state-dir", self.directory.name]
         if url:
             command.extend(["--url", url])
         process = subprocess.run(
@@ -143,7 +143,7 @@ class ProtocolTests(unittest.TestCase):
         ])
         self.assertEqual([response["id"] for response in responses], [1, "ping", 3])
         self.assertEqual(responses[0]["result"]["protocolVersion"], "2025-06-18")
-        self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "iphone-use-wda")
+        self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "iphone-use")
         self.assertEqual(responses[1]["result"], {})
         tools = responses[2]["result"]["tools"]
         names = [tool["name"] for tool in tools]

@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 
 
-CATALOG_PATH = Path(__file__).resolve().parent.parent / "skills/iphone-wda-use/references/apps.json"
+CATALOG_PATH = Path(__file__).resolve().parent.parent / "skills/iphone-use/references/apps.json"
 INSTALLED_TTL = 300
 APPLE_TTL = 900
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -77,7 +77,7 @@ def fetch_apple(url):
     """Fetch JSON only from the fixed Apple HTTPS endpoints, with a 5s timeout."""
     if not _api_url(url):
         raise ValueError("Only https://itunes.apple.com/search or /lookup is allowed.")
-    request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "iPhone-use-wda/0.1"})
+    request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "iPhone-use/0.3"})
     with urllib.request.build_opener(_AppleRedirects()).open(request, timeout=5) as response:
         if not _api_url(response.geturl()):
             raise ValueError("Apple catalog returned an unexpected response URL.")

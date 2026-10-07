@@ -9,28 +9,29 @@ import sys
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
+FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
 DIRS=('assets','server','skills','scripts','docs','evals','tests','.github')
 
 
 def validate():
     manifest=json.loads((ROOT/'plugin.json').read_text());overlay=json.loads((ROOT/'.codex-plugin/plugin.json').read_text())
     ui=manifest['extensions']['com.openai']['interface']
-    assert manifest['name']=='iphone-use-wda' and re.fullmatch(r'\d+\.\d+\.\d+',manifest['version'])
+    assert manifest['name']=='iphone-use' and re.fullmatch(r'\d+\.\d+\.\d+',manifest['version'])
     assert len(ui['shortDescription'])<=30
     assert ui==overlay['interface']
     assert all(manifest[k]==overlay[k] for k in ('name','version','description'))
     assert overlay['mcpServers']=='./.mcp.json' and overlay['skills']=='./skills/'
     portable=json.loads((ROOT/'mcp.json').read_text());legacy=json.loads((ROOT/'.mcp.json').read_text())
     assert portable['mcpServers']==legacy['mcpServers']
+    assert list(portable['mcpServers'])==['iphone_use']
     for config in portable['mcpServers'].values():
-        assert config['type']=='stdio' and config['args']==['${PLUGIN_ROOT}/server/iphone_wda.py']
-    for skill in ('iphone-wda-use','iphone-wda-setup'):
+        assert config['type']=='stdio' and config['args']==['${PLUGIN_ROOT}/server/iphone_use.py']
+    for skill in ('iphone-use','iphone-use-setup'):
         path=ROOT/'skills'/skill/'SKILL.md';body=path.read_text()
         assert body.startswith('---\n') and re.search(r'^name: '+skill+r'$',body,re.M) and re.search(r'^description: .+',body,re.M)
     assert (ROOT/'tooling/package-lock.json').is_file()
     sys.path.insert(0,str(ROOT/'server'))
-    from iphone_wda import TOOLS,SCHEMAS,VERSION,SCREEN_URI
+    from iphone_use import TOOLS,SCHEMAS,VERSION,SCREEN_URI
     assert VERSION==manifest['version'] and len(TOOLS)==19
     assert sum(t.get('_meta',{}).get('ui',{}).get('visibility')!=['app'] for t in TOOLS)==17
     assert (ROOT/'assets/phone-screen.html').is_file()

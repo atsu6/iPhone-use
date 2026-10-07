@@ -1,6 +1,6 @@
 # 0.1.6 工具加载审计
 
-日期：2026-10-07（Asia/Shanghai）。视觉版会话定位到 Codex 插件 MCP 工具的共享说明预算；本轮对普通版进行同类检查。
+日期：2026-10-07（Asia/Shanghai）。历史会话暴露了 Codex 插件 MCP 工具的共享说明预算问题；本轮检查插件工具加载。
 
 ## 发现
 
@@ -10,7 +10,7 @@
 
 ## 修复
 
-- install.sh 安装后执行 codex mcp add iphone_wda，入口指向安装缓存中的 server/iphone_wda.py。Codex 的 Config 优先于 Plugin / SelectedPlugin，同名配置覆盖为单一服务，标准 MCP 不走插件总预算。skills 和原有工具名字保留。
+- install.sh 安装后执行 codex mcp add iphone_use，入口指向安装缓存中的 server/iphone_use.py。Codex 的 Config 优先于 Plugin / SelectedPlugin，同名配置覆盖为单一服务，标准 MCP 不走插件总预算。skills 和原有工具名字保留。
 - 仅 TOOLS 中公开的 batch schema 提取重复 selector / observe 为本地 $defs 引用，删除重复 description / examples，保留全部类型、枚举、必填字段与闭集约束。原始体积低于 5,000 bytes，宿主保留引用，不触发深层有损压缩。
 - Runtime 继续使用原 SCHEMAS 对 8 种步骤逐项预检，不依赖公开 schema 的引用解析；未知字段仍在设备请求前拒绝。
 

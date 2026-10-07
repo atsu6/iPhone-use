@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime, SCREEN_URI, serve
+from iphone_use import Runtime, SCREEN_URI, serve
 from wda_client import WDAError
 from wda_controller import PhoneController
 from test_controller import FakeWDA
@@ -104,7 +104,7 @@ class ScreenProtocolTests(unittest.TestCase):
     def exchange(self, requests):
         payload = "".join(json.dumps(item, ensure_ascii=False, allow_nan=False) + "\n"
                           for item in requests)
-        result = subprocess.run([sys.executable, str(ROOT / "server/iphone_wda.py"),
+        result = subprocess.run([sys.executable, str(ROOT / "server/iphone_use.py"),
                                  "--state-dir", self.directory.name,
                                  "--url", "http://127.0.0.1:1"],
                                 input=payload, capture_output=True, text=True,
@@ -157,7 +157,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(content["_meta"]["openai/ui"]["availableDisplayModes"], ["fullscreen"])
 
     def test_invalid_resource_uri_cannot_read_files_and_following_ping_survives(self):
-        invalid = ["file:///etc/passwd", "ui://iphone-use-wda/../config.json", "", None, [], {}]
+        invalid = ["file:///etc/passwd", "ui://iphone-use/../config.json", "", None, [], {}]
         requests = [{"jsonrpc": "2.0", "id": index, "method": "resources/read", "params": {"uri": uri}}
                     for index, uri in enumerate(invalid)]
         requests.append({"jsonrpc": "2.0", "id": "still-alive", "method": "ping"})
@@ -366,7 +366,7 @@ class ScreenProtocolTests(unittest.TestCase):
         """Route the toolbar's own short-lived connection to a synthetic phone."""
         phone = FakeWDA()
         phone.close = Mock()
-        patcher = patch("iphone_wda.WDAClient", return_value=phone)
+        patcher = patch("iphone_use.WDAClient", return_value=phone)
         patcher.start()
         self.addCleanup(patcher.stop)
         return phone
@@ -419,7 +419,7 @@ class ScreenProtocolTests(unittest.TestCase):
             copied.append((command, Path(command[-1]).read_bytes(), Path(command[-1]).stat().st_mode & 0o777))
             return Mock(returncode=0)
 
-        with patch("iphone_wda.subprocess.run", side_effect=run):
+        with patch("iphone_use.subprocess.run", side_effect=run):
             result = runtime.call("wda_screen_action", {"action": "screenshot"})
         self.assertEqual(result, {"ok": True, "action": "screenshot", "copied": True, "width": 1, "height": 1})
         command, data, mode = copied[0]
@@ -430,7 +430,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertFalse(Path(command[-1]).exists())
         self.assertEqual(phone.calls, [("GET", "/screenshot", None)])
         self.assertFalse(list((Path(self.directory.name)).glob("**/*.png")))
-        with patch("iphone_wda.subprocess.run", return_value=Mock(returncode=1)), self.assertRaises(WDAError) as caught:
+        with patch("iphone_use.subprocess.run", return_value=Mock(returncode=1)), self.assertRaises(WDAError) as caught:
             runtime.call("wda_screen_action", {"action": "screenshot"})
         self.assertEqual(caught.exception.code, "clipboard_unavailable")
         self.assertFalse(list((Path(self.directory.name)).glob(".clipboard-*")))

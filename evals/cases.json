@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "title": "iPhone WDA 合成场景评测",
+  "title": "iPhone Use 合成场景评测",
   "privacy": "所有应用、记录、金额、订单 ID、bundle ID 与会话名均为合成 fixture；不含历史用户数据。",
   "provenance": "参考 2026-10-06 镜像复盘的 18 个子用例形状；不是历史成绩复制，也不表示新插件已实测通过。",
   "execution": "场景规范供人工 / agent forward test 使用；JSON 本身不会操作设备。自动 mock 测试不能证明真实 App 无副作用。",

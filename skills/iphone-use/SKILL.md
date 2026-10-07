@@ -1,5 +1,5 @@
 ---
-name: iphone-wda-use
+name: iphone-use
 description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone；新对话默认先初始化并取得 READY，服务未启动时沿 setup 启动流程继续。默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集、手机屏幕侧边栏及密码或 Face ID 认证接管。
 ---
 
@@ -17,7 +17,7 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone；新对�
 
 - `ready=true, state="ready"`：通道已可用。直接复用 READY 中的 `observation` 准备下一步，不立即重复 observe，也不再加一轮 doctor、观察或导航预检。
 - `ready=false, state="recovering"` 或 `state="recovery_required"`：没有 error、MCP isError=false，仍不表示手机可操作。按 [启动与恢复](references/startup.md) 查询同一工作或按用户限制处理。
-- READY 返回 `wda_unreachable`、连接拒绝、`not_ready` 或明确服务未启动：这是启动分支，不是整个任务失败。`recover=true` 不会自动冷启动；调用 `wda_setup(action="status")`，复用活动中的 start / recover 工作，或在已配置且没有活动工作时 start 一次，服务就绪后重验 READY。逐步做法见 [启动与恢复](references/startup.md)，缺少配置 / 源码 / 构建时读取 `iphone-wda-setup`。
+- READY 返回 `wda_unreachable`、连接拒绝、`not_ready` 或明确服务未启动：这是启动分支，不是整个任务失败。`recover=true` 不会自动冷启动；调用 `wda_setup(action="status")`，复用活动中的 start / recover 工作，或在已配置且没有活动工作时 start 一次，服务就绪后重验 READY。逐步做法见 [启动与恢复](references/startup.md)，缺少配置 / 源码 / 构建时读取 `iphone-use-setup`。
 
 只读、禁止启动 / 重启等用户限制始终保留。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
@@ -46,7 +46,7 @@ selector 是首选，但 `no_such_element`、`ambiguous_target`、`occluded_targ
 通过 `functions.exec` 调工具时必须把图片真正转发给模型，不能 `text(result)` 输出整份含 base64 的结果：
 
 ```javascript
-const result = await tools.mcp__iphone_wda__wda_observe({mode: "screenshot"});
+const result = await tools.mcp__iphone_use__wda_observe({mode: "screenshot"});
 for (const block of result.content ?? []) {
   if (block.type === "text") text(block.text);
   else if (block.type === "image") image(block);

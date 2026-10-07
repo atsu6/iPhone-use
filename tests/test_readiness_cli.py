@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-import iphone_wda
+import iphone_use
 from wda_client import WDAError
 
 spec = importlib.util.spec_from_file_location("readiness_smoke", ROOT / "scripts" / "smoke_mcp.py")
@@ -29,7 +29,7 @@ class FakeChild:
     def __init__(self, ready_result):
         self.stdin = CapturedInput()
         responses = [
-            {"serverInfo": {"name": "iphone-use-wda", "version": "test"}},
+            {"serverInfo": {"name": "iphone-use", "version": "test"}},
             {"tools": [{"name": "wda_ready"}]},
             {},
             ready_result,
@@ -48,9 +48,9 @@ class ReadinessCLITests(unittest.TestCase):
         else:
             runtime.call.return_value = data
         output = io.StringIO()
-        with patch.object(iphone_wda, "Runtime", return_value=runtime), \
-                patch.object(sys, "argv", ["iphone_wda.py", "--ready"]), contextlib.redirect_stdout(output):
-            status = iphone_wda.main()
+        with patch.object(iphone_use, "Runtime", return_value=runtime), \
+                patch.object(sys, "argv", ["iphone_use.py", "--ready"]), contextlib.redirect_stdout(output):
+            status = iphone_use.main()
         runtime.call.assert_called_once_with("wda_ready", {})
         runtime.close.assert_called_once_with()
         return status, json.loads(output.getvalue())

@@ -1,14 +1,14 @@
 {
-  "name": "iphone-wda-local",
+  "name": "iphone-use-local",
   "interface": {
-    "displayName": "iPhone WDA Local"
+    "displayName": "iPhone Use Local"
   },
   "plugins": [
     {
-      "name": "iphone-use-wda",
+      "name": "iphone-use",
       "source": {
         "source": "local",
-        "path": "./dist/iphone-use-wda"
+        "path": "./dist/iphone-use"
       },
       "policy": {
         "installation": "AVAILABLE",

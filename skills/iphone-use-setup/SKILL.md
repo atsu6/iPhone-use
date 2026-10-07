@@ -1,5 +1,5 @@
 ---
-name: iphone-wda-setup
+name: iphone-use-setup
 description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgent；新对话默认先初始化 READY，服务未启动时复用配置与构建启动，诊断 USB 和 Xcode 连接并打开手机屏幕侧边栏；适用于首次配置、冷启动、断线恢复或签名过期。
 ---
 
@@ -32,7 +32,7 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 1. 根据 doctor 的具体缺项引导用户准备匹配 iOS 的完整 Xcode、接受首次启动许可，并在 Xcode 的账户设置登录自己的 Apple Account。账户登录、密码、验证码和设备解锁由用户在系统界面完成，不索取凭据。
 2. 用数据线连接 iPhone；首次配对在手机上点“信任此电脑”。从 Xcode 的 Devices and Simulators 或 discover 返回确认设备已被识别；只有 Finder 可见不代表已完成开发配对。
 3. 根据实际系统提示开启“设置 → 隐私与安全性 → 开发者模式”，完成重启后的确认。若没有该入口，先让 Xcode 完成设备配对和开发准备，再重新检查；不要把缺少入口判断为永久不支持。需要时检查“设置 → 开发者 → 启用 UI 自动化”。
-4. 用 `wda_setup(action="fetch")` 获取本插件固定版本的 WDA，然后 `configure` 配置用户的 `udid`、`team_id` 和可签名 `bundle_id`；可选 `source_dir`、`local_port`、`device_port`，默认本机转发端口 18100、设备端口 8100。本机运行数据默认在 `~/.local/share/iphone-use-wda`。不要照搬作者的 UDID、Team ID 或签名。自动签名失败时按返回日志查看 Runner target 的 Signing & Capabilities，选择用户自己的 Team；只有错误要求时才调整 bundle ID 或 provisioning。
+4. 用 `wda_setup(action="fetch")` 获取本插件固定版本的 WDA，然后 `configure` 配置用户的 `udid`、`team_id` 和可签名 `bundle_id`；可选 `source_dir`、`local_port`、`device_port`，默认本机转发端口 18100、设备端口 8100。本机运行数据默认在 `~/.local/share/iphone-use`。不要照搬作者的 UDID、Team ID 或签名。自动签名失败时按返回日志查看 Runner target 的 Signing & Capabilities，选择用户自己的 Team；只有错误要求时才调整 bundle ID 或 provisioning。
 5. 用 `build` 构建，然后 `start` 安装并启动 Runner 测试服务及本机 USB 转发。fetch/build/start 是后台工作；记录 job_id，用 `wda_setup(action="status", job_id=...)` 查询已有工作，从返回 `jobs` 数组按 id 找到它，不假定 status 返回单个 job。fetch / build 看终态，失败时读准确日志；start 是长期 Runner，工作仍 running 且 `service.ready=true` 时即可调用 READY，不等 succeeded、不重复 start。按状态、日志及返回的 retry_after_seconds 查询，不固定长间隔或固定次数盲等。start 使用当前配置的成功构建产物，默认保留数据线并保持设备可供 UI 测试使用。
 6. 若手机或 Xcode 报开发者不受信任，按当前设备的“设置 → 通用 → VPN 与设备管理”及其开发者条目完成验证；以当前提示为准，不把企业 App 的流程套用于所有开发签名。再执行 `status` 和 `wda_ready`。
 
@@ -42,7 +42,7 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 READY 已返回设备、会话、视口和当前 observation，复用这些信息准备下一步。不要紧接着重复读树或为每项任务增加导航预检；只有具体诊断确实需要时才在无副作用页面测试。常规导航默认 observe=none、verify=false；下一步需要未知页面信息时，在本次动作返回 tree / screenshot / both，不另加验证回合。最终关键操作显式 expect / verify 或一次终态读取。
 
-通道 READY 后，目标 App 仍可能要求密码、验证码或 Face ID。按 [认证接管与恢复](../iphone-wda-use/references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再按该参考调用提问工具提示用户在 iPhone 上完成，首个选项「已完成继续」；接管期间暂停手机调用。收到用户实际选择「已完成继续」或明确完成通知后调用 `wda_screen(action="resume")`，重新观察 App 和目标页。App 认证不是 WDA 故障，不为此重复 build / start / recover；手机真正锁屏或通道中断时才恢复 READY。
+通道 READY 后，目标 App 仍可能要求密码、验证码或 Face ID。按 [认证接管与恢复](../iphone-use/references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再按该参考调用提问工具提示用户在 iPhone 上完成，首个选项「已完成继续」；接管期间暂停手机调用。收到用户实际选择「已完成继续」或明确完成通知后调用 `wda_screen(action="resume")`，重新观察 App 和目标页。App 认证不是 WDA 故障，不为此重复 build / start / recover；手机真正锁屏或通道中断时才恢复 READY。
 
 断线、重启、停止测试进程或 USB 转发退出后，按上面的未启动流程查询 status 并复用已有工作 / 构建；只有具体缺项需要时才调用 doctor，按缺失层恢复连接或 start，最后重新 READY。用户接管手机后重新观察当前 App，不继续使用接管前的坐标或猜测原页面。
 
