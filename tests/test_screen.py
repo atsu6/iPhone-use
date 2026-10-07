@@ -221,7 +221,7 @@ class ScreenHubTests(unittest.TestCase):
 
 class NodeStreamTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is not installed.")
-    def test_usb_http_fixture_dechunks_binary_body_and_requests_only_stream_root(self):
+    def test_paused_usb_socket_dechunks_binary_body_and_requests_only_stream_root(self):
         body = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg() + b"\r\n--frame--\r\n"
         requests = []
 
@@ -254,8 +254,10 @@ class NodeStreamTests(unittest.TestCase):
                 stub = runtime / "node_modules/appium-ios-device"
                 stub.mkdir(parents=True)
                 (stub / "package.json").write_text('{"type":"module","main":"index.js"}')
+                # appium-ios-device returns the socket paused after unpiping its
+                # usbmux plist reader. A fresh, flowing TCP fixture hides this.
                 (stub / "index.js").write_text("import net from 'node:net'; export default {utilities:{connectPort: async () => "
-                                               f"net.connect({server.server_port}, '127.0.0.1')" + "}};")
+                                               f"net.connect({server.server_port}, '127.0.0.1').pause()" + "}};")
                 result = subprocess.run([shutil.which("node"), str(script), "TEST-DEVICE-1234", "9100"],
                                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
                 self.assertEqual(result.stdout, body)

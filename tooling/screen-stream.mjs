@@ -48,6 +48,10 @@ try {
       // pipe pauses the response when stdout is full, bounding backpressure.
       incoming.pipe(process.stdout, {end: false});
     });
+    // usbmux unpipes its plist reader before handing this socket over, leaving
+    // it paused. Resume only after HTTP has attached its response parser; a
+    // newly created TCP socket fixture would otherwise hide this USB behavior.
+    request.on('socket', assigned => assigned.resume());
     request.setTimeout(5000, () => stop(1));
     request.on('error', () => stop(1));
     request.end();

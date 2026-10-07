@@ -1,5 +1,15 @@
 # 验证记录
 
+## 0.1.9 的真机空白修复
+
+日期：2026-10-07（Asia/Shanghai）。测试会话手机控制工具工作正常，侧边栏无图像；读取预览状态时 paused=false。仅连接独立 USB MJPEG 端口复现：8 秒轮询 39 次没有帧，worker 仍运行、依赖已安装。实际 appium-ios-device 交接的 socket 为 paused=true；HTTP parser 挂载后 resume 即返回 200 multipart 和视频字节。之前使用流动 TCP socket 的 fixture 没覆盖 usbmux 的暂停行为。
+
+回归改为返回暂停 socket，删除 resume 的隔离负向测试稳定超时，保留修复后通过。普通版 273 项 Python 与 8 项界面 DOM 测试全部通过，严格 TypeScript 构建、Node 语法、资源 / manifest 检查通过。独立审查确认 parser 先于 resume 挂载，背压和自有连接清理保留。
+
+只读真机 ScreenHub 样本：首帧 0.407 秒，4 秒内序号达到 35，尺寸 1320×2868，缓存读取最长 0.93ms。这是一次设备样本；界面仍最多每秒请求 5 次最新帧。没有发出 WDA 命令、创建 session、重启服务或持有手机操作锁，没有输出或保存用户图像。
+
+已安装 0.1.9 的真实 stdio initialize / tools/list / ping 通过，目录 18 tools；标准 MCP 注册指向新版本缓存。Codex MCP Apps 实际挂载旧 0.1.8 页面，DOM 显示 bridge 更新 busy / frameSeq，但没有图像；安装不会替换已有聊天的旧进程 / 页面，需要重连。随后用已安装 0.1.9 HTML、官方 AppBridge 和本地 stdio 检查显示通道时，测试会话共享状态已 paused=true，因此保留认证暂停，没有擅自 resume 或读取认证画面。新版实际侧边栏图像显示仍需聊天重连且用户完成接管后验收；USB 修复和本机新版本安装已经实际验证，不能把旧页面或暂停页面说成新版已显示图像。
+
 ## 0.1.8 的柔光样式调整
 
 日期：2026-10-07（Asia/Shanghai）。按用户参考图将光效改为屏幕内侧的四边蓝紫渐变，中心透明，动画仅改变透明度和小幅缩放；不改变采集、操作或轮询逻辑。

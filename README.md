@@ -16,7 +16,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 1 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
 
-也可将 `dist/iphone-use-wda-0.1.8-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.9-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -127,7 +127,7 @@ Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊�
 
 Codex 插件 MCP 工具存在共享 64KB 说明预算，工具目录完整不代表模型收到完整绑定；大 schema 也可能被压缩成缺少参数的描述。安装脚本自动注册同名标准 MCP，工具名保持不变。batch 发布 schema 提取公共 selector / observe 引用，低于宿主默认 5KB 压缩门槛，8 种步骤的 op / args 全部保留，运行时仍按原闭集严格校验。加载原因与验证方法见 [工具绑定审计](docs/tool-loading-audit.md)。
 
-## 0.1.8 屏幕 widget
+## 0.1.9 屏幕 widget
 
 增加与 READY 关联的 MCP App 和 `wda_screen`：在支持的宿主中默认打开手机屏幕侧边栏，以独立 USB MJPEG 流显示最新画面，保持原有乐观执行与操作速度。点击 / 拖动使用实际请求坐标显示，边缘光效表示短时操作活动。认证接管暂停并清空预览，用户确认后再恢复；App 专用帧工具对模型隐藏。
 
