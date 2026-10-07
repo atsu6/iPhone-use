@@ -1,5 +1,11 @@
 # 验证记录
 
+## 0.2.6 的黑白叠层手机图标
+
+日期：2026-10-07（Asia/Shanghai）。logo 与 composerIcon 共用的 `assets/icon.svg` 改为圆角黑色底板、白色后层手机与半透明白色前层手机，采用静态高光与柔和阴影；SVG 为 512×512，无字体、脚本或外部资源依赖。
+
+363 项 Python、25 项 widget DOM、TypeScript 构建、Node 语法与 manifest 检查通过。SVG XML、全部渐变 / 滤镜引用有效；Ego 浏览器在浅 / 深背景与 256、64、48、32、16px 尺寸验证加载与实际渲染，没有外部资源请求。预览图片不进入发布包。本次未操作手机或重启 WDA；宿主插件列表的图标刷新未现场验收。
+
 ## 0.2.5 的标签复用、面板留白与独立光效周期
 
 日期：2026-10-07（Asia/Shanghai）。READY 与屏幕工具的成功结果统一返回稳定的 `openai/widgetSessionId`；setup 不关联 UI。重复初始化 / 连接恢复和预览 open / pause / resume 沿用同一标识，标识不含手机或聊天信息。

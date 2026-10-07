@@ -1,1 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#10282a"/><rect x="40" y="17" width="48" height="94" rx="12" fill="none" stroke="#b4f0ce" stroke-width="5"/><rect x="54" y="24" width="20" height="4" rx="2" fill="#b4f0ce"/><path d="M53 63l9 9 17-21" fill="none" stroke="#b4f0ce" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M55 102h18" stroke="#b4f0ce" stroke-width="4" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>iPhone Use WDA</title>
+  <defs>
+    <linearGradient id="tile" x1="84" y1="24" x2="408" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#242424"/>
+      <stop offset=".5" stop-color="#101010"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".65"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".12"/>
+    </linearGradient>
+    <linearGradient id="rear" x1="154" y1="78" x2="300" y2="374" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f5f5f5"/>
+      <stop offset="1" stop-color="#cecece"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="218" y1="138" x2="358" y2="434" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity=".94"/>
+      <stop offset=".5" stop-color="#ffffff" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#f1f1f1" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="glass-rim" x1="210" y1="138" x2="364" y2="434" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".38"/>
+    </linearGradient>
+    <filter id="tile-shadow" x="0" y="0" width="512" height="512" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="7" stdDeviation="6" flood-color="#000000" flood-opacity=".18"/>
+    </filter>
+    <filter id="rear-shadow" x="108" y="58" width="234" height="356" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity=".3"/>
+    </filter>
+    <filter id="glass-shadow" x="176" y="122" width="226" height="346" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="7" stdDeviation="6" flood-color="#000000" flood-opacity=".15"/>
+    </filter>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="117" fill="url(#tile)" stroke="url(#rim)" stroke-width="2" filter="url(#tile-shadow)"/>
+  <rect x="138" y="78" width="174" height="296" rx="34" fill="url(#rear)" filter="url(#rear-shadow)"/>
+  <rect x="139.5" y="79.5" width="171" height="293" rx="32.5" fill="none" stroke="#ffffff" stroke-opacity=".2" stroke-width="1.5"/>
+  <rect x="200" y="138" width="174" height="296" rx="36" fill="url(#glass)" stroke="url(#glass-rim)" stroke-width="3.5" filter="url(#glass-shadow)"/>
+  <rect x="255" y="411" width="64" height="7" rx="3.5" fill="#373737" fill-opacity=".65"/>
+</svg>
