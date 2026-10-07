@@ -11,6 +11,9 @@ const output = await build({
   target: 'es2022',
   format: 'esm',
   minify: true,
+  // The SDK transport debug messages include complete base64 preview frames.
+  // Omit only debug logging in the shipped bundle; keep warnings and errors.
+  pure: ['console.debug'],
   write: false,
   legalComments: 'inline',
 });

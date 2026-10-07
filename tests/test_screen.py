@@ -122,19 +122,72 @@ class ScreenHubTests(unittest.TestCase):
         self.hub.close()
         self.assertFalse(self.hub.start()["frame_available"])
 
-    def test_hidden_widget_lease_stops_only_its_owned_child(self):
+    def test_hidden_widget_lease_stops_only_its_owned_child_and_preserves_last_frame(self):
         unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
             with patch("wda_screen.FRAME_LEASE_SECONDS", .2), patch.object(self.hub, "_command", return_value=self.pipe_command(jpeg())):
                 self.hub.frame()
                 eventually(lambda: self.hub._child is not None and self.hub._frame is not None)
                 child = self.hub._child
+                cached = self.hub._wire(self.hub._read_state())["frame"]
                 eventually(lambda: child.poll() is not None)
-                eventually(lambda: self.hub._frame is None)
+                eventually(lambda: not self.hub._thread.is_alive())
+                self.assertEqual(self.hub._wire(self.hub._read_state())["frame"], cached)
+                self.hub.frame(after_seq=cached["seq"])
+                eventually(lambda: self.hub._child is not None and self.hub._child is not child)
+                self.assertEqual(self.hub._wire(self.hub._read_state())["frame"], cached)
                 self.assertIsNone(unrelated.poll())
         finally:
             unrelated.terminate()
             unrelated.wait(timeout=2)
+
+    def test_transient_stream_exit_keeps_cached_frame_until_explicit_close(self):
+        with patch.object(self.hub, "_command", return_value=self.pipe_command(jpeg(), repeat=False)):
+            self.hub.frame()
+            eventually(lambda: self.hub._child is not None and self.hub._frame is not None)
+            child = self.hub._child
+            cached = self.hub._wire(self.hub._read_state())["frame"]
+            eventually(lambda: child.poll() is not None and self.hub._child is None)
+            self.assertEqual(self.hub._wire(self.hub._read_state())["frame"], cached)
+            self.assertTrue(self.hub.start()["frame_available"])
+            self.hub.close()
+            self.assertIsNone(self.hub._wire(self.hub._read_state())["frame"])
+            self.assertFalse(self.hub.start()["frame_available"])
+
+    def test_latest_jpeg_is_encoded_only_when_requested_and_identical_frames_are_skipped(self):
+        stop = threading.Event()
+        state = self.hub._read_state()
+        with patch("wda_screen.base64.b64encode", wraps=base64.b64encode) as encode:
+            for index in range(30):
+                self.hub._publish_frame(jpeg(payload=str(index).encode()), 440, 956, stop)
+            self.assertEqual(self.hub._seq, 30)
+            self.assertEqual(encode.call_count, 0)
+            self.assertIsNone(self.hub.start()["frame"])
+            self.assertEqual(encode.call_count, 0)
+            latest = self.hub._wire(state)["frame"]
+            self.assertEqual(base64.b64decode(latest["data"]), jpeg(payload=b"29"))
+            self.assertNotIn("_jpeg", latest)
+            self.assertEqual(encode.call_count, 1)
+            for _ in range(30):
+                self.hub._publish_frame(jpeg(payload=b"29"), 440, 956, stop)
+            self.assertEqual(self.hub._seq, 30)
+            self.assertIsNone(self.hub._wire(state, after_seq=30)["frame"])
+            self.assertEqual(self.hub._wire(state)["frame"], latest)
+            self.assertEqual(encode.call_count, 1)
+            self.hub._publish_frame(jpeg(payload=b"next"), 440, 956, stop)
+            self.assertEqual(encode.call_count, 1)
+            self.assertEqual(self.hub._wire(state, after_seq=30)["frame"]["seq"], 31)
+            self.assertEqual(encode.call_count, 2)
+
+    def test_pause_clears_last_frame_and_a_late_capture_cannot_repopulate_it(self):
+        self.hub._publish_frame(jpeg(), 440, 956, self.hub._stop)
+        self.assertTrue(self.hub.start()["frame_available"])
+        stop = self.hub._stop
+        self.hub.set_paused(True)
+        self.hub._publish_frame(jpeg(payload=b"late"), 440, 956, stop)
+        self.assertIsNone(self.hub._frame)
+        self.assertIsNone(self.hub.frame()["frame"])
+        self.assertFalse(self.hub.start()["frame_available"])
 
     def test_pause_from_another_stdio_process_stops_stream_and_requires_resume(self):
         other = ScreenHub(self.directory)
@@ -145,6 +198,7 @@ class ScreenHubTests(unittest.TestCase):
                 child = self.hub._child
                 other.set_paused(True)
                 eventually(lambda: child.poll() is not None)
+                eventually(lambda: self.hub._frame is None)
                 calls = command.call_count
                 self.assertTrue(self.hub.start()["paused"])
                 self.assertIsNone(self.hub.frame()["frame"])

@@ -203,12 +203,21 @@ class ScreenHub:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
-    def _wire(self, state, after_seq=0, last_event_id=0):
+    def _wire(self, state, after_seq=0, last_event_id=0, include_frame=True):
         with self._lock:
-            frame = self._frame if not state["paused"] else None
+            frame = self._frame if include_frame and not state["paused"] else None
             if frame and frame["seq"] == after_seq:
                 frame = None
-            return {"server_time": self._now(), "frame": dict(frame) if frame else None,
+            if frame:
+                # The USB stream can produce many more frames than the widget
+                # consumes. Encode only a requested latest frame, and reuse its
+                # base64 if another widget requests the same sequence.
+                if "data" not in frame:
+                    frame["data"] = base64.b64encode(frame["_jpeg"]).decode("ascii")
+                wire_frame = {key: value for key, value in frame.items() if key != "_jpeg"}
+            else:
+                wire_frame = None
+            return {"server_time": self._now(), "frame": wire_frame,
                     "stream_id": self._stream_id,
                     "frame_available": self._frame is not None and not state["paused"],
                     "viewport": state["viewport"],
@@ -219,9 +228,7 @@ class ScreenHub:
 
     def start(self):
         """Fast initial widget metadata. Capture starts only on a live frame poll."""
-        result = self._wire(self._read_state())
-        result["frame"] = None
-        return result
+        return self._wire(self._read_state(), include_frame=False)
 
     def frame(self, after_seq=0, last_event_id=0):
         state = self._read_state()
@@ -308,6 +315,17 @@ class ScreenHub:
             lease_live = time.monotonic() < self._lease_until
         return lease_live and not stop.is_set() and not self._read_state()["paused"]
 
+    def _publish_frame(self, raw, width, height, stop):
+        with self._lock:
+            # A close/pause racing the read must not repopulate cleared pixels.
+            if stop.is_set():
+                return
+            if self._frame and self._frame.get("_jpeg") == raw:
+                return
+            self._seq += 1
+            self._frame = {"seq": self._seq, "_jpeg": raw,
+                           "mimeType": "image/jpeg", "width": width, "height": height}
+
     def _command(self):
         try:
             config = json.loads((self.state_dir / "config.json").read_text())
@@ -380,19 +398,17 @@ class ScreenHub:
                         for raw, (width, height) in parser.feed(chunk):
                             if not self._live(stop):
                                 break
-                            with self._lock:
-                                self._seq += 1
-                                self._frame = {"seq": self._seq, "data": base64.b64encode(raw).decode("ascii"),
-                                               "mimeType": "image/jpeg", "width": width, "height": height}
+                            self._publish_frame(raw, width, height, stop)
                             received = True
             except (OSError, ValueError):
-                # A missing device/stream shows a blank screen, never a red tool error.
+                # Keep the last frame through a transient device/stream gap.
                 pass
             finally:
                 self._terminate(child)
                 with self._lock:
                     if self._child is child:
                         self._child = None
+                    if self._read_state()["paused"]:
                         self._frame = None
             if received:
                 backoff = 0.5
@@ -400,5 +416,5 @@ class ScreenHub:
             while self._live(stop) and time.monotonic() < deadline:
                 stop.wait(0.1)
             backoff = min(2, backoff * 2)
-        with self._lock:
-            self._frame = None
+        # Lease expiry releases USB capture, but preserves the memory-only last
+        # frame for a quick window return. Explicit close and auth pause erase it.

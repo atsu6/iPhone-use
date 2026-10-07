@@ -30,7 +30,7 @@ const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.13' },
+  { name: 'iPhone WDA Screen', version: '0.1.14' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -39,6 +39,7 @@ let ready = false;
 let disposed = false;
 let inFlight = false;
 let frameSeq = 0;
+let frameGeneration = 0;
 let streamId: string | undefined;
 let eventId = 0;
 let dimensions: Size | undefined;
@@ -48,6 +49,11 @@ let failures = 0;
 let animation: Animation | undefined;
 let cursorTimer: ReturnType<typeof setTimeout> | undefined;
 let requestedFullscreen = false;
+let connecting: Promise<void> | undefined;
+let suspended = false;
+let lastGoodFrame: { source: string; size: Size } | undefined;
+const FRAME_INTERVAL = 250;
+const REQUEST_TIMEOUT = 3000;
 
 const validSize = (value: unknown): value is Size => {
   const size = value as Size | undefined;
@@ -68,16 +74,25 @@ function hideCursor() {
 }
 
 function clearFrame(resetOperating = true) {
+  frameGeneration++;
   hideCursor();
   image.removeAttribute('src');
   device.hidden = true;
   screen.hidden = true;
   dimensions = undefined;
+  lastGoodFrame = undefined;
   frameSeq = 0;
   root.dataset.frameSeq = '0';
   root.dataset.busy = 'false';
   if (resetOperating) root.dataset.operating = 'false';
 }
+
+function retainFrame() {
+  hideCursor();
+  root.dataset.busy = 'false';
+}
+
+const visible = () => !disposed && !suspended && !document.hidden;
 
 function fitFrame() {
   if (!dimensions) return;
@@ -122,12 +137,15 @@ function showGesture(gesture: Gesture) {
     cursorTimer = setTimeout(hideCursor, 350);
     return;
   }
+  const delta = gesture.kind === 'drag'
+    ? `translate(${(gesture.to!.x - point.x) / size.width * screen.clientWidth}px, ${(gesture.to!.y - point.y) / size.height * screen.clientHeight}px)`
+    : '';
   const frames: Keyframe[] = gesture.kind === 'drag'
     ? [
-      { ...pointStyle(point, size), transform: 'scale(.85)', opacity: 0 },
-      { ...pointStyle(point, size), transform: 'scale(1)', opacity: 1, offset: .08 },
-      { ...pointStyle(gesture.to!, size), transform: 'scale(1)', opacity: 1, offset: .86 },
-      { ...pointStyle(gesture.to!, size), transform: 'scale(.9)', opacity: 0 },
+      { transform: 'translate(0, 0) scale(.85)', opacity: 0 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: .08 },
+      { transform: `${delta} scale(1)`, opacity: 1, offset: .86 },
+      { transform: `${delta} scale(.9)`, opacity: 0 },
     ]
     : [
       { transform: 'scale(.65)', opacity: 0 },
@@ -143,23 +161,29 @@ function consume(value: unknown) {
   const preview = value as Partial<Preview>;
   if (typeof preview.stream_id === 'string' && preview.stream_id !== streamId) {
     streamId = preview.stream_id;
-    clearFrame();
+    // Sequence numbers restart with the server, but keep the last pixels until
+    // its replacement is ready. Authentication pause remains an explicit erase.
+    frameSeq = 0;
+    eventId = 0;
+    root.dataset.operating = 'false';
+    retainFrame();
   }
   if (preview.paused === true) {
     clearFrame();
     return;
   }
-  // A temporary frame gap does not end an operation; pause/connection resets do.
-  if (preview.frame_available === false) clearFrame(false);
+  if (preview.frame_available === false) retainFrame();
   if (validSize(preview.viewport)) viewport = preview.viewport;
   const frame = preview.frame;
-  if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq >= frameSeq
+  if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq > frameSeq
       && typeof frame.data === 'string' && frame.data.length > 0
       && ['image/jpeg', 'image/png', 'image/webp'].includes(frame.mimeType)) {
     frameSeq = frame.seq;
     root.dataset.frameSeq = String(frame.seq);
-    dimensions = { width: frame.width, height: frame.height };
-    fitFrame();
+    if (!dimensions || dimensions.width !== frame.width || dimensions.height !== frame.height) {
+      dimensions = { width: frame.width, height: frame.height };
+      fitFrame();
+    }
     image.src = `data:${frame.mimeType};base64,${frame.data}`;
     device.hidden = false;
     screen.hidden = false;
@@ -182,7 +206,7 @@ function consume(value: unknown) {
 }
 
 function schedule(delay: number) {
-  if (disposed || document.hidden || !ready || timer) return;
+  if (!visible() || timer) return;
   timer = setTimeout(() => {
     timer = undefined;
     void poll();
@@ -190,24 +214,29 @@ function schedule(delay: number) {
 }
 
 async function poll() {
-  if (disposed || document.hidden || !ready || inFlight) return;
+  if (!visible() || inFlight) return;
   inFlight = true;
   const started = performance.now();
-  let nextDelay = 200;
+  let nextDelay = FRAME_INTERVAL;
   try {
+    if (!ready) await connect();
+    if (!visible()) return;
+    const generation = frameGeneration;
     const result = await app.callServerTool({
       name: 'wda_screen_frame',
       arguments: { after_seq: frameSeq, last_event_id: eventId },
-    });
-    if (disposed || document.hidden) return;
+    }, { timeout: REQUEST_TIMEOUT });
+    if (!visible() || generation !== frameGeneration) return;
     if (result.isError) throw new Error('preview unavailable');
     consume(result.structuredContent);
     failures = 0;
-    nextDelay = Math.max(0, 200 - (performance.now() - started));
+    const preview = result.structuredContent as Partial<Preview> | undefined;
+    nextDelay = preview?.paused || preview?.frame_available === false
+      ? 1000 : Math.max(0, FRAME_INTERVAL - (performance.now() - started));
   } catch {
     failures += 1;
     nextDelay = Math.min(2000, 500 * failures);
-    clearFrame();
+    retainFrame();
   } finally {
     inFlight = false;
     schedule(nextDelay);
@@ -215,29 +244,60 @@ async function poll() {
 }
 
 function visibilityChanged() {
-  if (document.hidden) {
+  root.dataset.pageVisible = String(visible());
+  if (!visible()) {
     if (timer) clearTimeout(timer);
     timer = undefined;
-    hideCursor();
-    root.dataset.busy = 'false';
-  } else schedule(0);
+    retainFrame();
+  } else {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    schedule(0);
+  }
 }
 
 const resizeObserver = new ResizeObserver(fitFrame);
 resizeObserver.observe(root);
-image.onerror = () => clearFrame();
-document.addEventListener('visibilitychange', visibilityChanged);
+image.onload = () => {
+  if (dimensions && image.src) lastGoodFrame = { source: image.src, size: dimensions };
+};
+image.onerror = () => {
+  if (lastGoodFrame && image.src !== lastGoodFrame.source) {
+    image.src = lastGoodFrame.source;
+    dimensions = lastGoodFrame.size;
+    fitFrame();
+  }
+  frameSeq = 0; // Request a replacement without blanking the last decoded frame.
+  retainFrame();
+};
+function documentVisibilityChanged() {
+  if (!document.hidden) suspended = false;
+  visibilityChanged();
+}
+document.addEventListener('visibilitychange', documentVisibilityChanged);
+
+function pageHide() {
+  // WebViews may suspend a document without putting it in the browser cache.
+  // A real navigation destroys this JS context; only host teardown is terminal.
+  suspended = true;
+  visibilityChanged();
+}
+function pageShow() { suspended = false; visibilityChanged(); }
+function focusChanged() { if (!document.hidden) pageShow(); }
 
 function dispose() {
   if (disposed) return;
   disposed = true;
   ready = false;
+  root.dataset.pageVisible = 'false';
   if (timer) clearTimeout(timer);
   timer = undefined;
   clearFrame();
   resizeObserver.disconnect();
-  document.removeEventListener('visibilitychange', visibilityChanged);
-  window.removeEventListener('pagehide', dispose);
+  document.removeEventListener('visibilitychange', documentVisibilityChanged);
+  window.removeEventListener('pagehide', pageHide);
+  window.removeEventListener('pageshow', pageShow);
+  window.removeEventListener('focus', focusChanged);
 }
 
 app.ontoolresult = (result) => {
@@ -245,19 +305,32 @@ app.ontoolresult = (result) => {
   schedule(0);
 };
 app.onteardown = async () => { dispose(); return {}; };
-app.onclose = dispose;
-window.addEventListener('pagehide', dispose, { once: true });
+app.onclose = () => {
+  ready = false;
+  retainFrame();
+  schedule(1000);
+};
+window.addEventListener('pagehide', pageHide);
+window.addEventListener('pageshow', pageShow);
+window.addEventListener('focus', focusChanged);
 
-try {
-  await app.connect();
+function connect() {
+  if (!connecting) connecting = initialize().finally(() => { connecting = undefined; });
+  return connecting;
+}
+
+async function initialize() {
+  await app.connect(undefined, { timeout: REQUEST_TIMEOUT });
+  if (disposed) { await app.close(); return; }
   ready = true;
   const context = app.getHostContext();
   if (!requestedFullscreen && context?.displayMode !== 'fullscreen'
       && context?.availableDisplayModes?.includes('fullscreen')) {
     requestedFullscreen = true;
-    try { await app.requestDisplayMode({ mode: 'fullscreen' }); } catch { /* Keep the preview in the host's supported view. */ }
+    try { await app.requestDisplayMode({ mode: 'fullscreen' }, { timeout: REQUEST_TIMEOUT }); } catch { /* Keep the preview in the host's supported view. */ }
   }
-  schedule(0);
-} catch {
-  dispose();
 }
+
+root.dataset.pageVisible = String(visible());
+try { await connect(); } catch { retainFrame(); }
+schedule(ready ? 0 : 1000);

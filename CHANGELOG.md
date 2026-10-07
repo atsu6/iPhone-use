@@ -1,5 +1,11 @@
 # 更新记录
 
+## 0.1.14 — 2026-10-07
+
+- Keep the memory-only last preview frame across hidden-window lease expiry, stream gaps, request failures and bridge reconnects; resume polling on visibility / page-cache return. Authentication pause and teardown still erase all image backups, and delayed pre-pause replies cannot restore them.
+- Encode only requested latest JPEGs, skip identical frames, avoid repeated same-size layout, cap frame polling at 4 fps and apply bounded timeouts / retry backoff.
+- Remove SDK debug logs containing full frames; keep rounded gradient rings static and animate only composited opacity, pausing while hidden. Drag cursors use transform rather than left/top animation.
+
 ## 0.1.13 — 2026-10-07
 
 - 增加按短边比例定位的顶部灵动岛及细微摄像头装饰，横屏随外壳旋转至左侧。
