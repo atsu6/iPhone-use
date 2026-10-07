@@ -30,7 +30,7 @@ const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.12' },
+  { name: 'iPhone WDA Screen', version: '0.1.13' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -88,7 +88,7 @@ function fitFrame() {
   const bezel = shortSide * .024;
   const outerWidth = dimensions.width + 2 * bezel;
   const outerHeight = dimensions.height + 2 * bezel;
-  const scale = Math.min(width / outerWidth, height / outerHeight);
+  const scale = .96 * Math.min(width / outerWidth, height / outerHeight);
   device.style.width = `${outerWidth * scale}px`;
   device.style.height = `${outerHeight * scale}px`;
   device.style.setProperty('--bezel', `${bezel * scale}px`);

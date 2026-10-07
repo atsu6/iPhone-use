@@ -93,7 +93,7 @@ test('preserves full frame aspect ratio and maps gestures using the point viewpo
   const bezel = parseFloat(h.elements.device.style['--bezel']);
   const width = parseFloat(h.elements.device.style.width);
   const height = parseFloat(h.elements.device.style.height);
-  assert.ok(Math.abs(width - 376) < 1e-8);
+  assert.ok(Math.abs(width - 360.96) < 1e-8);
   assert.ok(Math.abs((width - 2 * bezel) / (height - 2 * bezel) - .5) < 1e-8);
   assert.ok(height <= 776);
   assert.equal(h.elements.device.dataset.orientation, 'portrait');
@@ -155,8 +155,8 @@ test('fits the entire chassis in narrow and landscape panels while preserving im
     const bezel = parseFloat(h.elements.device.style['--bezel']);
     const width = parseFloat(h.elements.device.style.width);
     const height = parseFloat(h.elements.device.style.height);
-    assert.ok(width <= panelWidth - 24 + 1e-8);
-    assert.ok(height <= panelHeight - 24 + 1e-8);
+    assert.ok(width <= .96 * (panelWidth - 24) + 1e-8);
+    assert.ok(height <= .96 * (panelHeight - 24) + 1e-8);
     assert.ok(Math.abs((width - 2 * bezel) / (height - 2 * bezel) - imageWidth / imageHeight) < 1e-8);
     assert.equal(h.elements.device.dataset.orientation, imageWidth > imageHeight ? 'landscape' : 'portrait');
     assert.equal(h.elements.screen.style.width, undefined);

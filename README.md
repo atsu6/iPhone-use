@@ -16,7 +16,7 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 1 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
 
-也可将 `dist/iphone-use-wda-0.1.12-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.13-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 每个新对话先初始化
 
@@ -42,9 +42,9 @@ WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动
 
 ## 侧边栏手机屏幕
 
-正常调用 `wda_ready` 后，Codex 可打开关联的 MCP App；也可调用 `wda_screen()` 重新打开。widget 以圆角 iPhone 外壳展示当前手机屏幕，包含细金属边框、黑色玻璃边缘与侧键装饰，没有可操作按钮、状态文字或其他控件。竖屏、横屏及窄侧栏都按完整画面比例缩放，圆形 cursor 使用实际点击与拖动位置。
+正常调用 `wda_ready` 后，Codex 可打开关联的 MCP App；也可调用 `wda_screen()` 重新打开。widget 以圆角 iPhone 外壳展示当前手机屏幕，包含细金属边框、黑色玻璃边缘、顶部灵动岛与侧键装饰，没有可操作按钮、状态文字或其他控件。竖屏、横屏及窄侧栏都按原始画面比例缩放，并在设备上下留出更多空间，圆形 cursor 使用实际点击与拖动位置。
 
-首次操作后，屏幕四周的涟漪渐变持续显示，工具调用间隙和准备下一步时不会闪灭；暂时缺帧或隐藏页面也保留该状态。认证暂停、通道断开或换流、关闭 / 重新加载页面后清除。光效表示已开始操作，不推断模型是否正在思考或任务是否已经完成，最终结果仍需验收。外框设计参考 [Apple 官方产品边框](https://developer.apple.com/design/resources/)与社区 [devices.css](https://github.com/picturepan2/devices.css)，以原创 CSS 绘制，不添加遮住实际画面的模拟灵动岛或 Home 条。
+首次操作后，屏幕四周的涟漪渐变持续显示，工具调用间隙和准备下一步时不会闪灭；暂时缺帧或隐藏页面也保留该状态。认证暂停、通道断开或换流、关闭 / 重新加载页面后清除。光效表示已开始操作，不推断模型是否正在思考或任务是否已经完成，最终结果仍需验收。外框设计参考 [Apple 官方产品边框](https://developer.apple.com/design/resources/)与社区 [devices.css](https://github.com/picturepan2/devices.css)，以原创 CSS 绘制；顶部灵动岛仅作外观装饰，光晕沿屏幕的圆角轮廓柔和过渡。
 
 画面来自 WDA 独立的 USB MJPEG 通道（默认设备端口 9100），widget 最多每秒获取 5 次最新缓存帧。它不轮询 WDA `/screenshot`、XML 或 XCTest 命令，不新增手机控制请求，不占用操作锁；图像只保留在内存。关闭或隐藏 widget 后停止获取，服务端预览租约在 5 秒后到期。USB / MJPEG 不可用时画面留空，控制任务按实际 WDA 状态继续；不因预览问题循环重启服务。
 
