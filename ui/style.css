@@ -49,10 +49,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 .glow i:nth-child(3){--dots:var(--glow-dots-2);background:conic-gradient(from 260deg,var(--hues));opacity:0}
 .glow i::after{content:"";position:absolute;inset:0;border-radius:inherit;background-image:var(--dots);background-position:50% 50%;background-repeat:repeat;opacity:.72}
 #app[data-operating="true"] .glow{opacity:1;animation:glow-breathe 5s ease-in-out infinite}
-#app[data-operating="true"] .glow i:nth-child(1){animation:glow-a 12s linear infinite}
-#app[data-operating="true"] .glow i:nth-child(2){animation:glow-b 12s linear infinite}
-#app[data-operating="true"] .glow i:nth-child(3){animation:glow-c 12s linear infinite}
-#app[data-page-visible="false"] .glow,#app[data-page-visible="false"] .glow i,#app[data-page-visible="false"] .dot{animation-play-state:paused}
+#app[data-operating="true"] .glow i:nth-child(1){animation:glow-a 4s linear infinite}
+#app[data-operating="true"] .glow i:nth-child(2){animation:glow-b 4s linear infinite}
+#app[data-operating="true"] .glow i:nth-child(3){animation:glow-c 4s linear infinite}
+#app[data-page-visible="false"] .glow,#app[data-page-visible="false"] .glow i:nth-child(n),#app[data-page-visible="false"] .dot{animation-play-state:paused}
 .dynamic-island{position:absolute;z-index:3;left:50%;top:calc(var(--bezel) * 1.17);width:calc(var(--bezel) * 11.25);height:calc(var(--bezel) * 3.46);transform:translateX(-50%);border-radius:999px;background:#030405;box-shadow:0 0 0 .5px #00000099,inset 0 .5px 0 #ffffff0d;pointer-events:none}
 .dynamic-island::after{content:"";position:absolute;right:calc(var(--bezel) * .66);top:50%;width:calc(var(--bezel) * 1.65);height:calc(var(--bezel) * 1.65);transform:translateY(-50%);border-radius:50%;background:radial-gradient(circle at 43% 38%,#274271 0%,#111d31 27%,#090c12 54%,#010203 73%);box-shadow:inset 0 0 0 .6px #111620;opacity:.7}
 #device[data-orientation="landscape"] .dynamic-island{left:calc(var(--bezel) * 2.9);top:50%;transform:translate(-50%,-50%) rotate(-90deg)}
@@ -64,4 +64,4 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 @keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes tool-busy{0%,100%{opacity:1}50%{opacity:.4}}
 @keyframes toast-in{from{opacity:0}to{opacity:1}}
-@media(prefers-reduced-motion:reduce){.glow{transition:none}#app[data-operating="true"] .glow,#app[data-operating="true"] .glow i,#app[data-live="live"] .dot,#toolbar button[data-busy="true"],#toast{animation:none}#toolbar button{transition:none}.gesture-cursor{will-change:opacity}}
+@media(prefers-reduced-motion:reduce){.glow{transition:none}#app[data-operating="true"] .glow,#app[data-operating="true"] .glow i:nth-child(n),#app[data-live="live"] .dot,#toolbar button[data-busy="true"],#toast{animation:none}#toolbar button{transition:none}.gesture-cursor{will-change:opacity}}
