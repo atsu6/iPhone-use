@@ -2,17 +2,17 @@
   <title>iPhone Use WDA</title>
   <defs>
     <linearGradient id="tile" x1="84" y1="24" x2="408" y2="488" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#242424"/>
-      <stop offset=".5" stop-color="#101010"/>
-      <stop offset="1" stop-color="#050505"/>
+      <stop stop-color="#484848"/>
+      <stop offset=".5" stop-color="#383838"/>
+      <stop offset="1" stop-color="#2d2d2d"/>
     </linearGradient>
     <linearGradient id="rim" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
       <stop stop-color="#fff" stop-opacity=".65"/>
       <stop offset="1" stop-color="#fff" stop-opacity=".12"/>
     </linearGradient>
     <linearGradient id="rear" x1="154" y1="78" x2="300" y2="374" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#f5f5f5"/>
-      <stop offset="1" stop-color="#cecece"/>
+      <stop stop-color="#bcbcbc"/>
+      <stop offset="1" stop-color="#989898"/>
     </linearGradient>
     <linearGradient id="glass" x1="218" y1="138" x2="358" y2="434" gradientUnits="userSpaceOnUse">
       <stop stop-color="#ffffff" stop-opacity=".94"/>

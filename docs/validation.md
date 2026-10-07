@@ -2,7 +2,7 @@
 
 ## 0.2.6 的黑白叠层手机图标
 
-日期：2026-10-07（Asia/Shanghai）。logo 与 composerIcon 共用的 `assets/icon.svg` 改为圆角黑色底板、白色后层手机与半透明白色前层手机，采用静态高光与柔和阴影；SVG 为 512×512，无字体、脚本或外部资源依赖。
+日期：2026-10-07（Asia/Shanghai）。logo 与 composerIcon 共用的 `assets/icon.svg` 改为圆角深灰色底板、灰色后层手机与半透明白色前层手机，采用静态高光与柔和阴影；SVG 为 512×512，无字体、脚本或外部资源依赖。
 
 363 项 Python、25 项 widget DOM、TypeScript 构建、Node 语法与 manifest 检查通过。SVG XML、全部渐变 / 滤镜引用有效；Ego 浏览器在浅 / 深背景与 256、64、48、32、16px 尺寸验证加载与实际渲染，没有外部资源请求。预览图片不进入发布包。本次未操作手机或重启 WDA；宿主插件列表的图标刷新未现场验收。
 
