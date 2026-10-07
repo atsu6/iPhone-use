@@ -13,14 +13,15 @@
       <span id="live"><i class="dot" aria-hidden="true"></i><span id="live-text">连接中</span></span>
     </header>
     <div id="stage">
-      <div id="device" data-orientation="portrait" hidden>
+      <div id="device" data-orientation="portrait">
         <div class="side-button action-button" aria-hidden="true"></div>
         <div class="side-button volume-up" aria-hidden="true"></div>
         <div class="side-button volume-down" aria-hidden="true"></div>
         <div class="side-button power-button" aria-hidden="true"></div>
         <div class="receiver" aria-hidden="true"></div>
-        <div id="screen" hidden>
-          <img id="image" alt="iPhone 实时屏幕" draggable="false">
+        <div id="screen">
+          <img id="image" alt="iPhone 实时屏幕" draggable="false" hidden>
+          <div id="empty-state" role="status">未连接</div>
           <div class="glow" aria-hidden="true">
             <div class="glow-colors"><i></i><i></i><i></i></div>
             <div class="glow-dots"><i></i><i></i><i></i></div>
@@ -32,7 +33,7 @@
     </div>
     <div id="toast" role="status" aria-live="polite" hidden></div>
     <nav id="toolbar" aria-label="手机工具">
-      <button id="tool-refresh" type="button" aria-label="刷新连接" title="刷新连接">
+      <button id="tool-refresh" type="button" aria-label="刷新连接" title="重新连接；认证完成后点击可恢复预览">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.5 8.25A7.5 7.5 0 1 0 19.5 12"/><path d="M18.5 4.25v4h-4"/></svg>
       </button>
       <button id="tool-home" type="button" aria-label="回到主屏幕" title="回到主屏幕">

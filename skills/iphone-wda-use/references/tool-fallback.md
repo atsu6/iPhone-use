@@ -9,13 +9,15 @@
 - schema / 参数错误：按 argument_path、unknown_fields、allowed_fields 修正一次调用。action_executed=false 表示动作未发出，MCP 绑定仍不可用时可用代码入口；不要自动忽略未知参数。
 - `device_busy`：另一操作持有共享锁，等待它结束，不另建 Runtime 配置或 state directory 绕过锁。
 - `stale_observation`：提供的 ID 不属于当前 Runtime，或 App / 视口上下文已改变。用下一步所需的新信息定位，不为整图哈希、文本数字刷新或固定 30 秒期限增加读图；ID 是可选上下文，不是每个坐标动作的必填许可。
-- selector 失败（`no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`search_exhausted`）：动作未发出，结果已附当前截图和坐标点。下一次调用立刻改用坐标——点击用 `tap_point` / candidates 的 `tap` / 截图位置调用 `wda_tap(x, y)`，输入先点中输入框再调用不带 selector 的 `wda_type_text`——不换标签写法重试，不先重新读树。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
+- selector 或焦点失败（`no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`search_exhausted`、`no_focused_field`）：先查看已附截图再用可见目标坐标继续；没有可用图片才补一张 screenshot。`tap_point` / candidates 不证明目标未被遮挡，先关闭可见浮层。输入先点可见输入框再 type_text；焦点仍失败不能原样重复旧坐标和输入。不换标签写法重试，不先重读树。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
 - `input_continuation_expired`：长文本续传已失效，本次没有输入任何内容。读取字段实际文字，用 `replace=false` 只补缺少的部分。
 - `occluded_target` / `offscreen_target`：目标点击没有执行，不能推断未执行点击打开了浮层。`occluded_target` 按附带截图判断：目标可见就按 `tap_point` 用坐标点击，确有遮挡先处理遮挡；`offscreen_target` 先向目标滑动。自绘半屏面板可能没有原生 Alert / Sheet 节点，按真实截图判断。
 - 显式验收的 `postcondition_failed`：动作已接收但验收条件未满足，查看实际状态再决定剩余步骤，不因验收失败自动重放动作。
 - `action_executed=true, action_complete=false`、`uncertain=true` 或动作后 timeout：至少部分动作可能已生效。输入、发送、提交、删除等先看真实字段 / 记录，不能切换代码入口后盲目再做。
 - 查询短暂失败：工具可有界重读一次；POST 查询接口不应按 mutation 处理，查询失效不证明手机动作已执行。
 - `local.pid.0`、`wda_foreground_unavailable` 或 XCTest Code 41：通道故障，调用 READY 恢复；不要通过更改 selector 或重复手机按钮处理。锁屏、签名和信任问题按 setup skill；App 密码 / Face ID 按认证接管。
+
+通过 `functions.exec` 时逐个内容块转发：文字用 `text(block.text)`，图片用 `image(block)`；不要 `text(result)` 把截图变成 base64 文本。图片无法转发时用 `view_image` 打开 `image.path` / `error.observation.image.path`。坐标按 `pixel_to_point` 换算。
 
 普通 `verified=false` 不是错误，不要求 observe 或停止 batch。HTTP accepted 只描述请求边界；常规路径继续，最终关键状态显式验收。
 

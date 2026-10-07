@@ -13,6 +13,8 @@ description: 在用户自己的 iPhone 上安装、签名、启动 WebDriverAgen
 
 正常任务调用 `wda_ready(recover=true)` 或省略 recover 使用默认 true，不因预检或谨慎主动关闭恢复。只读诊断或用户明确禁止重启时传 `recover=false`，保留限制。常规任务无需截图时可传 `screenshot=false`；截图能力待实际需要截图时再使用。返回 `ready=true, state="ready"` 的 proof 包含 WDA status、可用会话、真实前台 App、设备视口、解锁状态与当前观察；直接用嵌套 observation 准备下一步，不立即重复 observe 或再做一轮导航测试。若镜像占用且控件树为空，工具返回 `mirroring_conflict`，退出镜像后重验 READY。Runner 图标、BUILD SUCCEEDED 或端口开放不足以声明 READY。READY 同时关联手机屏幕侧边栏，宿主支持时默认打开；已有通道要重新打开画面用 `wda_screen()`，不要重复 READY。预览走独立 USB MJPEG 通道（默认设备端口 9100），不使用 XML 或截图轮询；预览不可用本身不否定控制通道 READY，也不要求循环重启。READY 证明控制通道可用；常规 App 操作默认乐观执行，下一步所需观察顺带判断进度，最终关键结果才显式验收。
 
+`phone_locked` 会自动暂停预览并记录 `device_locked`，无需再显式 pause。等待用户实际解锁通知后重验 READY；成功时仅解除同一次锁屏暂停，App 认证与旧版未知暂停保持显式恢复。READY 的 `preview` 返回暂停原因；不要把预览空白当成控制通道失效。
+
 ## 服务未启动时继续初始化
 
 `recover=true` 对持久 `local.pid.0` / XCTest 故障可排队恢复已核验归属的服务；它不代表自动完成首次配置或冷启动。READY 的 `wda_unreachable`、连接拒绝、`not_ready` 等未启动结果，应进入以下启动分支，不能直接 final 宣布手机任务失败：

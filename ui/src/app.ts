@@ -21,6 +21,7 @@ type Preview = {
   viewport: Size | null;
   busy: boolean;
   paused: boolean;
+  pause_reason?: 'device_locked' | 'authentication' | 'unknown' | null;
   events: Gesture[];
   device?: { model?: string } | null;
 };
@@ -32,6 +33,7 @@ const root = document.getElementById('app')!;
 const device = document.getElementById('device')!;
 const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
+const emptyState = document.getElementById('empty-state')!;
 const cursor = document.getElementById('cursor')!;
 const stage = document.getElementById('stage')!;
 const model = document.getElementById('model')!;
@@ -43,7 +45,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.2.6' },
+  { name: 'iPhone WDA Screen', version: '0.2.7' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -100,6 +102,8 @@ function setLive(state: LiveState) {
   if (root.dataset.live === state) return;
   root.dataset.live = state;
   liveText.textContent = LIVE_TEXT[state];
+  liveText.title = '';
+  if (!image.src) emptyState.textContent = state === 'paused' ? '预览已暂停' : '未连接';
   syncTools();
 }
 
@@ -128,17 +132,20 @@ function hideCursor() {
 }
 
 function clearFrame(resetOperating = true) {
+  const hadDimensions = !!dimensions;
   frameGeneration++;
   hideCursor();
   image.removeAttribute('src');
-  device.hidden = true;
-  screen.hidden = true;
+  image.hidden = true;
+  emptyState.hidden = false;
+  device.hidden = screen.hidden = disposed;
   dimensions = undefined;
   lastGoodFrame = undefined;
   frameSeq = 0;
   root.dataset.frameSeq = '0';
   root.dataset.busy = 'false';
   if (resetOperating) root.dataset.operating = 'false';
+  if (!disposed && hadDimensions) fitFrame();
 }
 
 function retainFrame() {
@@ -187,27 +194,27 @@ function glowDots(step: number, phase: number) {
 }
 
 function fitFrame() {
-  if (!dimensions) return;
+  const size = dimensions ?? viewport ?? { width: 440, height: 956 };
   // The stage is what remains between the status pill and the toolbar.
   const width = stage.clientWidth;
   const height = stage.clientHeight;
-  const shortSide = Math.min(dimensions.width, dimensions.height);
+  const shortSide = Math.min(size.width, size.height);
   const bezel = shortSide * .024;
-  const outerWidth = dimensions.width + 2 * bezel;
-  const outerHeight = dimensions.height + 2 * bezel;
+  const outerWidth = size.width + 2 * bezel;
+  const outerHeight = size.height + 2 * bezel;
   const scale = .96 * Math.min(width / outerWidth, height / outerHeight);
   device.style.width = `${outerWidth * scale}px`;
   device.style.height = `${outerHeight * scale}px`;
   device.style.setProperty('--bezel', `${bezel * scale}px`);
   const radius = shortSide * .12 * scale;
   device.style.setProperty('--screen-radius', `${radius}px`);
-  device.style.setProperty('--glow-mask', glowMask(dimensions.width * scale, dimensions.height * scale,
+  device.style.setProperty('--glow-mask', glowMask(size.width * scale, size.height * scale,
     radius, Math.min(bezel * scale * 3.8, radius)));
   const dotStep = Math.max(5, bezel * scale * .95);
   for (let phase = 0; phase < 3; phase++) {
     device.style.setProperty(`--glow-dots-${phase}`, glowDots(dotStep, phase * Math.PI * 2 / 3));
   }
-  device.dataset.orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
+  device.dataset.orientation = size.width > size.height ? 'landscape' : 'portrait';
 }
 
 function pointStyle(point: Point, size: Size) {
@@ -218,7 +225,7 @@ function pointStyle(point: Point, size: Size) {
 }
 
 function showGesture(gesture: Gesture) {
-  if (screen.hidden) return;
+  if (screen.hidden || image.hidden) return;
   const size = validSize(gesture.viewport) ? gesture.viewport : viewport;
   if (!size) return;
   if (dimensions && Math.abs((size.width / size.height) / (dimensions.width / dimensions.height) - 1) > .08) return;
@@ -283,9 +290,18 @@ function consume(value: unknown) {
     retainFrame();
   }
   if (typeof preview.device?.model === 'string' && preview.device.model) model.textContent = preview.device.model;
+  if (validSize(preview.viewport) && (viewport?.width !== preview.viewport.width || viewport?.height !== preview.viewport.height)) {
+    viewport = preview.viewport;
+    if (!dimensions) fitFrame();
+  }
   if (preview.paused === true) {
     clearFrame();
     setLive('paused');
+    liveText.textContent = preview.pause_reason === 'device_locked' ? '等待解锁' : LIVE_TEXT.paused;
+    liveText.title = preview.pause_reason === 'device_locked'
+      ? '解锁 iPhone 后继续任务，或点击刷新恢复预览'
+      : '预览已暂停；完成手机认证后继续任务或点击刷新恢复画面';
+    emptyState.textContent = preview.pause_reason === 'device_locked' ? '等待解锁' : '预览已暂停';
     return;
   }
   if (preview.frame_available === false) {
@@ -294,7 +310,6 @@ function consume(value: unknown) {
   } else if (preview.frame_available === true || preview.frame) {
     setLive('live');
   }
-  if (validSize(preview.viewport)) viewport = preview.viewport;
   const frame = preview.frame;
   if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq > frameSeq
       && typeof frame.data === 'string' && frame.data.length > 0
@@ -306,6 +321,8 @@ function consume(value: unknown) {
       fitFrame();
     }
     image.src = `data:${frame.mimeType};base64,${frame.data}`;
+    image.hidden = false;
+    emptyState.hidden = true;
     device.hidden = false;
     screen.hidden = false;
   }
@@ -367,6 +384,7 @@ async function poll() {
 
 async function act(name: ToolName) {
   if (acting || disposed || tools[name].disabled) return;
+  if (name === 'refresh') frameGeneration++; // Ignore a poll from before this reconnect click.
   acting = true;
   tools[name].dataset.busy = 'true';
   syncTools();
@@ -376,13 +394,13 @@ async function act(name: ToolName) {
       name: 'wda_screen_action',
       arguments: { action: name },
     }, { timeout: ACTION_TIMEOUT });
-    const data = result.structuredContent as (Partial<Preview> & { error?: { code?: string } }) | undefined;
+    const data = result.structuredContent as (Partial<Preview> & { service_ready?: boolean; error?: { code?: string } }) | undefined;
     if (result.isError || data?.error) {
       notify(FAILED[data?.error?.code ?? ''] ?? '操作未完成，请重试', true);
     } else {
       // A refresh answers with the new stream identity; take the next frame at once.
       if (name === 'refresh') consume(data);
-      notify(DONE[name]);
+      notify(name === 'refresh' && data?.service_ready === false ? '未连接到手机，请确认连接后重试' : DONE[name], name === 'refresh' && data?.service_ready === false);
       if (timer) clearTimeout(timer);
       timer = undefined;
       schedule(0);
@@ -420,10 +438,14 @@ image.onload = () => {
   if (dimensions && image.src) lastGoodFrame = { source: image.src, size: dimensions };
 };
 image.onerror = () => {
+  if (disposed || root.dataset.live === 'paused' || !image.src) return;
   if (lastGoodFrame && image.src !== lastGoodFrame.source) {
     image.src = lastGoodFrame.source;
     dimensions = lastGoodFrame.size;
     fitFrame();
+  } else if (!lastGoodFrame) {
+    clearFrame();
+    setLive('offline');
   }
   frameSeq = 0; // Request a replacement without blanking the last decoded frame.
   retainFrame();
@@ -496,6 +518,10 @@ async function initialize() {
 }
 
 root.dataset.pageVisible = String(visible());
+device.hidden = screen.hidden = false;
+image.hidden = true;
+emptyState.hidden = false;
+fitFrame();
 syncTools();
 try { await connect(); } catch { retainFrame(); }
 schedule(ready ? 0 : 1000);

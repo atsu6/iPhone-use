@@ -400,13 +400,15 @@ class PhoneController:
         except WDAError as failure:error.details["observation_error"]={"code":failure.code,"message":str(failure)}
         if error.code=="offscreen_target":
             tool,step="wda_swipe","The match lies outside the screen (see target_rect or candidates against viewport). Swipe toward it, then tap it by coordinates from the screenshot that follows."
+        elif error.code=="occluded_target":
+            tool,step="wda_tap","Inspect the attached screenshot FIRST. A popup may cover the target; dismiss its visible close/cancel control before tapping the field or target. tap_point is the background element's location, NOT proof it can be clicked."
         elif typing:
-            tool,step="wda_tap","Tap the field at its place in the attached screenshot with wda_tap x/y, then call wda_type_text with text and no selector to type into the focused field."
+            tool,step="wda_tap","Inspect the attached screenshot FIRST for a popup or wrong page. Tap the visible editable field with wda_tap x/y, then call wda_type_text with text and no selector. If a prior tap failed to focus the field, do not repeat the same point blindly; choose a new target from the current screenshot."
         else:
             tool,step="wda_tap","Tap the target at its place in the attached screenshot with wda_tap x/y; a returned tap or tap_point is already in iPhone points."
         recovery={"use":"coordinates","next_tool":tool,"replay_action":False,
-                  "next_step":step+" Image pixels x image.pixel_to_point give iPhone points. Do not try other selector spellings or read the tree again first."}
-        if tool=="wda_tap" and not typing and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
+                  "next_step":step+" Image pixels x image.pixel_to_point give iPhone points. Inspect the image content, not its base64 text; through functions.exec forward image blocks with image(block), or open observation.image.path with view_image. If no screenshot is available, take one wda_observe(mode=screenshot) before acting. Do not try other selector spellings or read the tree again first."}
+        if tool=="wda_tap" and not typing and error.code!="occluded_target" and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
         error.details["recovery"]=recovery
 
     def find(self,selector,limit=10):
@@ -633,7 +635,7 @@ class PhoneController:
 
     def focused_field(self):
         """The editable element that has keyboard focus, for typing after a coordinate tap."""
-        missing="No text field has keyboard focus. Tap the field with wda_tap x/y, then call wda_type_text with text and no selector again."
+        missing="No text field has keyboard focus; no text was entered. Inspect the screenshot for a blocking popup or wrong target, then tap the visible field with wda_tap x/y. Do not repeat a failed point blindly."
         try:found=self.client.session("GET","/element/active")
         except WDAError as error:
             if error.code!="no such element":raise

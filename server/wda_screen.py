@@ -197,7 +197,15 @@ class ScreenHub:
             events.append(clean)
         last_id = raw.get("last_event_id", 0)
         finished_at = raw.get("finished_at", 0)
-        return {"paused": raw.get("paused") is True, "actors": dict(list(actors.items())[-32:]),
+        paused = raw.get("paused") is True
+        reason = raw.get("pause_reason") if paused else None
+        if paused and reason not in ("device_locked", "authentication"):
+            reason = "unknown"
+        pause_id = raw.get("pause_id")
+        if not paused or not isinstance(pause_id, str) or not re.fullmatch(r"[0-9a-f]{32}", pause_id):
+            pause_id = None
+        return {"paused": paused, "pause_reason": reason, "pause_id": pause_id,
+                "actors": dict(list(actors.items())[-32:]),
                 "events": events, "last_event_id": last_id if isinstance(last_id, int) and last_id >= 0 else 0,
                 "finished_at": finished_at if isinstance(finished_at, int)
                 and 0 <= now - finished_at < ACTIVITY_GRACE_MS else 0,
@@ -243,7 +251,7 @@ class ScreenHub:
                     "frame_available": self._frame is not None and not state["paused"],
                     "viewport": state["viewport"],
                     "busy": bool(state["actors"] or state["finished_at"]) and not state["paused"],
-                    "paused": state["paused"],
+                    "paused": state["paused"], "pause_reason": state["pause_reason"],
                     "events": [event for event in state["events"] if event["id"] > last_event_id]
                     if not state["paused"] else []}
 
@@ -288,9 +296,46 @@ class ScreenHub:
             self._seq = 0
         return self._wire(self._read_state(), include_frame=False)
 
-    def set_paused(self, paused):
+    def pause_status(self):
+        state = self._read_state()
+        return {"paused": state["paused"], "pause_reason": state["pause_reason"]}
+
+    def locked_pause_id(self):
+        state = self._read_state()
+        return state["pause_id"] if state["pause_reason"] == "device_locked" else None
+
+    def reconnect_pause_id(self):
+        """A user refresh may explicitly resume even a legacy pause."""
         with self._state_transaction() as state:
-            state["paused"] = bool(paused)
+            if state["paused"] and not state["pause_id"]:
+                state["pause_id"] = uuid.uuid4().hex
+            return state["pause_id"]
+
+    def resume_after_unlock(self, expected_id, explicit=False):
+        """Clear the pause that preceded a successful unlock probe.
+
+        Another process may have paused for authentication during the probe.
+        READY clears only lock pauses. Explicit user refresh can resume other
+        reasons too; old releases' pauses always need that explicit action.
+        """
+        resumed = False
+        if expected_id:
+            with self._state_transaction() as state:
+                if state["paused"] and state["pause_id"] == expected_id and (
+                        explicit or state["pause_reason"] == "device_locked"):
+                    state.update(paused=False, pause_reason=None, pause_id=None)
+                    resumed = True
+        return resumed
+
+    def set_paused(self, paused, reason="authentication"):
+        if reason not in ("authentication", "device_locked"):
+            raise ValueError("Unknown preview pause reason")
+        with self._state_transaction() as state:
+            # A lock error cannot weaken an explicit or legacy authentication pause.
+            if not (paused and reason == "device_locked" and state["paused"]
+                    and state["pause_reason"] != "device_locked"):
+                state.update(paused=bool(paused), pause_reason=reason if paused else None,
+                             pause_id=uuid.uuid4().hex if paused else None)
             if paused:
                 state["actors"] = {}
                 state["finished_at"] = 0
