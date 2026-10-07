@@ -1,5 +1,9 @@
 # 更新记录
 
+## 0.3.4 — 2026-10-08
+
+- widget 背景增加很浅的静态灰色点阵，以单个 CSS 径向渐变按 20px 间距平铺；不增加 DOM 节点、动画或 JavaScript 绘制循环。
+
 ## 0.3.3 — 2026-10-08
 
 - 插件简介改为英文「Let Codex control your iPhone」，表达让 Codex 操作用户自己的 iPhone。
