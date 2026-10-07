@@ -117,7 +117,7 @@ Repeated preview opens in the same chat reuse the existing widget. Its toolbar o
 - **Explicit failure semantics:** a shared operation lock guards concurrent processes; uncertain mutations require reading the actual state before retrying.
 - **Preview lifecycle:** streamed frames are not saved to disk; lock-induced pauses and explicit pauses are distinguished, and Refresh can reconnect.
 
-These changes reduce duplicate requests and model round trips. Overall task speed still depends on the app, USB / WDA state, and model response time. Engineering regressions and device acceptance checks are recorded separately in [validation](docs/validation.md).
+These changes reduce duplicate requests and model round trips. Overall task speed still depends on the app, USB / WDA state, and model response time. Engineering regressions and device acceptance checks are recorded separately in local development notes.
 
 ## Tools
 
@@ -157,9 +157,11 @@ sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-The UI builds into self-contained HTML. Source packages are written to `dist/iphone-use-<version>-source.zip`; normal installation and use do not require rebuilding the UI.
+The UI builds into self-contained HTML. Source packages are written to `dist/iphone-use-<version>-source.zip`; normal installation and use do not require rebuilding the UI. Installed plugins retain the complete widget source, styles, build scripts, configuration, dependency lockfile, and widget tests for local maintenance.
 
-See [architecture](docs/architecture.md), [screen widget](docs/screen-widget.md), [latency optimization](docs/latency-optimization.md), [problem mapping](docs/problem-mapping.md), [app identifiers](skills/iphone-use/references/apps.md), [troubleshooting](skills/iphone-use-setup/references/troubleshooting.md), and [changelog](CHANGELOG.md).
+`docs/` and `evals/` are maintained locally and excluded from Git, source archives, and plugin installs. Operational guidance remains in `skills/` and its `references/`. The repository and source archive retain development checks and tests; installs omit root Python tests, CI workflows, and development benchmark / smoke scripts while preserving widget build and validation tools.
+
+See [screen preview and recovery](skills/iphone-use/references/screen.md), [app identifiers](skills/iphone-use/references/apps.md), [troubleshooting](skills/iphone-use-setup/references/troubleshooting.md), and [changelog](CHANGELOG.md).
 
 ## Dependencies and acknowledgements
 

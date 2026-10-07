@@ -119,7 +119,7 @@ sh scripts/install.sh
 - **明确失败语义。** 多进程共享操作锁；动作超时或断线可能标记不确定，先读实际状态，避免盲目重放点击、输入或提交。
 - **实时预览与暂停恢复。** 屏幕流不落盘；区分锁屏与主动暂停，解锁后的 READY 可恢复锁屏预览，刷新可主动重连。
 
-这些优化主要减少重复请求与模型往返，完整任务速度仍取决于 App、USB / WDA 状态和模型响应。工程回归与真机验收分别记录在 [验证记录](docs/validation.md)。
+这些优化主要减少重复请求与模型往返，完整任务速度仍取决于 App、USB / WDA 状态和模型响应。工程回归与真机验收分别记录在本地开发资料中。
 
 ## 工具概览
 
@@ -161,12 +161,11 @@ sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-构建结果是自包含屏幕 HTML，源代码包位于 `dist/iphone-use-<版本>-source.zip`。安装和普通使用不需要重新构建 UI。
+构建结果是自包含屏幕 HTML，源代码包位于 `dist/iphone-use-<版本>-source.zip`。安装和普通使用不需要重新构建 UI。安装后的插件仍完整保留 widget 的源码、样式、构建脚本、配置、依赖锁文件和测试，便于本地维护。
 
-- [运行架构](docs/architecture.md)
-- [屏幕 widget](docs/screen-widget.md)
-- [延迟优化](docs/latency-optimization.md)
-- [历史问题与处理](docs/problem-mapping.md)
+`docs/` 与 `evals/` 只在本地维护，不纳入 Git、源代码包或插件安装目录。插件需要的操作说明保留在 `skills/` 与其 `references/` 中。仓库和源代码包保留开发检查与测试；安装目录不复制根目录的 Python 测试、CI 工作流和开发基准 / 冒烟脚本，widget 的构建与验证工具则随插件保留。
+
+- [屏幕预览与恢复](skills/iphone-use/references/screen.md)
 - [App 标识参考](skills/iphone-use/references/apps.md)
 - [安装与连接故障排查](skills/iphone-use-setup/references/troubleshooting.md)
 - [更新记录](CHANGELOG.md)
