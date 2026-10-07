@@ -29,7 +29,7 @@ const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.7' },
+  { name: 'iPhone WDA Screen', version: '0.1.8' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );

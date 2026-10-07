@@ -18,8 +18,8 @@ from wda_setup import SetupManager
 from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 
-VERSION="0.1.7"
-SCREEN_URI="ui://iphone-use-wda/phone-0.1.7.html"
+VERSION="0.1.8"
+SCREEN_URI="ui://iphone-use-wda/phone-0.1.8.html"
 SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
