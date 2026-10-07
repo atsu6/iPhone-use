@@ -1,9 +1,11 @@
 ---
 name: iphone-wda-use
-description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集、默认手机屏幕侧边栏及密码或 Face ID 认证接管。
+description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone；新对话默认先初始化并取得 READY，服务未启动时沿 setup 启动流程继续。默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集、手机屏幕侧边栏及密码或 Face ID 认证接管。
 ---
 
 # 用 WDA 完成 iPhone 任务
+
+新对话没有本对话的有效 READY 证明时，先执行下面的初始化流程，再开始手机任务；此前聊天成功、安装了插件、打开 widget 或看到 Runner 图标都不替代本对话 READY。WDA 服务尚未启动是需要继续处理的启动步骤，不能据此提前结束用户任务。已有配置默认复用，只启动缺失服务，不整套重装。
 
 先确定用户要交付的结果和完成条件。默认把一次正常返回的动作当作已按计划执行，继续准备下一步；不要为每次点击、切页、Home、启动或输入专门调用观察来证明成功。下一步需要页面信息时，读取一次并顺带判断上一步是否生效；明确未生效再调整或重做。最终关键操作、发送或提交结果、关键文本以及交付文件需要有实际结果证据。
 
@@ -11,15 +13,25 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认�
 
 ## READY 与认证
 
-复用已有 READY 通道，不为每步重验。正常任务首次调用 `wda_ready(recover=true)`，也可省略 recover 使用默认 true；需要安装或恢复时使用 `iphone-wda-setup`。`recover=false` 仅用于用户明确禁止重启或明确要求只读诊断，不能因谨慎主动设置或自动覆盖用户限制。
+正常任务在本对话首次使用手机时，默认调用 `wda_ready(recover=true, screenshot=false)`；文字任务保留 status / session / tree / viewport / 解锁检查，无需额外截图。需要视觉信息时再按下一步需要取得截图。已有本对话 READY 且通道未失效则直接复用，不为每步重验。`recover=false` 仅用于用户明确禁止重启或明确要求只读诊断，不能因谨慎主动设置或自动覆盖用户限制。
 
 - `ready=true, state="ready"`：通道已可用。直接复用 READY 中的 `observation` 准备下一步，不立即重复 observe。
 - `ready=false, state="recovering"`：按 recovery 的 job_id 和 status 参数查询同一工作。从返回的 `jobs` 数组找到该工作，recovery_phase=serving 后重验 READY；长期 Runner 可以保持 running，不等 succeeded，不重复 start。
 - `ready=false, state="recovery_required", reason="recovery_disabled"`：仅在用户指令允许恢复时按 next_tool / next_arguments 调用 recover=true；明确禁止重启则保留限制并报告阻塞。
 
+`recover=true` 可恢复已核验归属的失效 XCTest 通道，但不自动完成冷启动。若 READY 返回 `wda_unreachable`、连接拒绝、`not_ready` 或明确服务未启动，立即转入以下流程，不把这次工具错误当作整个任务失败。`initialization_required=true` 及 recovery 的 next_tool / next_arguments 指向初始化下一步，不表示已自动启动：
+
+1. 调用 `wda_setup(action="status")` 查看 `configured`、`service` 和 `jobs`。
+2. 已有与当前配置 / endpoint 对应的 start / recover 工作为 queued 或 running 时，记录其 `id`，用 `wda_setup(action="status", job_id=...)` 查询同一工作；从返回的 `jobs` 数组匹配 id，不复用旧的无关工作。恢复到 `recovery_phase="serving"` 或启动服务达到 `service.ready=true` 后重新调用 READY，长期 Runner 可以保持 running，不等 succeeded，也不再 start。若对应 fetch / build 工作正在运行，先复用并查询该工作，再继续缺失步骤。
+3. `configured=true`、服务未就绪且没有可复用的活动工作时，调用一次 `wda_setup(action="start")`，复用现有签名构建。根据实际返回记录新工作的 `job_id`，或 `already_running=true` 时的 `job.id`，再查询同一工作。只在返回明确提示源代码 / 构建缺失或失效时按 `iphone-wda-setup` 补 fetch / build；不因服务未启动先重建、重新签名或重装。若 `service.ready=true`，直接重验 READY，无需 start。
+4. `configured=false` 时读取 `iphone-wda-setup`，按实际缺项完成 doctor / discover、fetch、configure、build / start。真实 USB、Xcode、信任、开发者模式或签名阻塞才转入对应处理；用户本人需解锁、登录或确认时用下面的提问接管流程。
+5. READY 返回 `ready=true` 后复用它的 observation 继续原任务，不再加一轮 doctor、观察或导航预检。只读、禁止启动 / 重启等用户限制始终保留；缺项需用户完成或存在真实启动失败时才报告准确阻塞。
+
 READY 关联以圆角 iPhone 外壳展示手机屏幕的侧边栏 widget，宿主支持时默认打开。已有 READY 通道而屏幕未显示、用户关闭后要重新打开时，调用一次 `wda_screen()`；不要为打开画面重复 READY。外壳和侧键仅作装饰，widget 没有可操作按钮或其他控件，无需操作它来控制手机。
 
-后两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
+用户要求“先打开 widget 让我看”时先打开预览，再继续初始化与已授权任务；仅有这句话不要求暂停等批准。只有用户明确要求等他确认再操作时才等待。服务还未启动时 widget 可能暂时空白，打开或留空既不证明 READY，也不是整项任务失败。
+
+`recovering` 与 `recovery_required` 两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
 App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要用户解锁时，按 [认证接管与恢复](references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再必须调用宿主提问工具（Default 优先 `functions.request_user_input_async`）提示用户在 iPhone 上完成，首个选项固定「已完成继续」，第二个可为「暂时无法完成」；异步返回 / 预选不是用户答复，保持待答，不能只用文字提示代替；保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到用户实际选择「已完成继续」或明确完成通知后先调用 `wda_screen(action="resume")`，再获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
 

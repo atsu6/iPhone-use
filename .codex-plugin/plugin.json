@@ -1,7 +1,7 @@
 {
   "name": "iphone-use-wda",
-  "version": "0.1.11",
-  "description": "Local WDA iPhone control and guided setup for Codex.",
+  "version": "0.1.12",
+  "description": "Initialize WDA in new chats, then control iPhone with guided setup and optimistic actions.",
   "author": {
     "name": "ZHONG XIN"
   },
@@ -11,7 +11,7 @@
   "interface": {
     "displayName": "iPhone Use WDA",
     "shortDescription": "Fast optimistic iPhone control",
-    "longDescription": "Direct local WDA control with guided setup, optimistic routine actions, batched navigation and deliberate verification of key results.",
+    "longDescription": "For the first iPhone task in a new chat, initialize WDA and establish READY. If the service is stopped, continue guided setup and start the existing build instead of abandoning the task. Reuse a healthy channel for fast optimistic actions and verify key final results.",
     "developerName": "ZHONG XIN",
     "category": "Productivity",
     "logo": "./assets/icon.svg",

@@ -1,5 +1,15 @@
 # 验证记录
 
+## 0.1.12 的新对话默认初始化
+
+日期：2026-10-07（Asia/Shanghai）。读取“测试 T01 并更新评测表”记录，确认首次打开 widget 后提前等待用户确认，随后 READY(recover=true) 不可达时结束任务，直到用户另行要求恢复才执行 status / doctor / start。代码审计确认 recover=true 只处理已运行 WDA 的特定通道故障，不会冷启动停止的服务。
+
+插件描述、MCP initialize instructions、READY / setup 描述与 use / setup skill 补齐新聊天默认初始化路径：READY → 不可达时 setup status → 复用已有启动工作或启动当前配置的成功构建 → 同一工作状态可用后重验 READY → 继续用户任务。缺少配置或构建时才进入对应安装步骤；已有通道不重复初始化。“先打开 widget 让我看”本身不增加用户确认停点。
+
+READY 不可达 / 未接收命令的原错误仍保留，附 ready=false、initialization_required=true 及下一步只读 setup(status) 参数，不假装 READY 或擅自启动。新增回归覆盖两种错误及 recover=true/false，确认不启动恢复、不执行手机动作、不返回 READY proof。普通版 274 项 Python 与 10 项 DOM 测试、TypeScript / HTML 构建、Node 与 manifest 检查通过。
+
+本轮没有执行真实 READY、启动 / 停止 WDA 或操作测试会话的手机，没有重跑 T01。验证覆盖指引、结构化错误与原有回归，不保证任意模型都能遵守整个任务流程；已有聊天需要重新连接以读取新版说明。
+
 ## 0.1.11 的持续光效与设备外壳
 
 日期：2026-10-07（Asia/Shanghai）。首次收到操作活动或新手势后保持光效，连续 50 次 idle 更新不会熄灭；隐藏及临时缺帧保留状态，认证暂停、换流、断线和销毁清除。外壳按短边计算边框及圆角，整体适配竖屏、横屏、窄面板，cursor 仍按内部屏幕百分比映射。

@@ -132,6 +132,24 @@ class RecoveryTests(unittest.TestCase):
         self.manager.recover.assert_not_called()
         self.assert_no_phone_mutation()
 
+    def test_cold_start_failure_directs_setup_without_starting_or_claiming_ready(self):
+        for code in ("wda_unreachable", "not_ready"):
+            for recover in (True, False):
+                with self.subTest(code=code, recover=recover):
+                    fault = WDAError(code, "Service is not accepting connections")
+                    with patch.object(self.client, "request", side_effect=fault):
+                        error = self.assert_error(code, screenshot=False, recover=recover)
+                    self.assertFalse(error["ready"])
+                    self.assertFalse(error["action_executed"])
+                    self.assertTrue(error["initialization_required"])
+                    self.assertEqual(error["recovery"]["next_tool"], "wda_setup")
+                    self.assertEqual(error["recovery"]["next_arguments"], {"action": "status"})
+                    self.assertFalse(error["recovery"]["replay_action"])
+                    self.assertNotIn("proof", error)
+                    self.manager.recover.assert_not_called()
+                    self.manager.dispatch.assert_not_called()
+                    self.assert_no_phone_mutation()
+
     def assert_not_ready_state(self, result, state):
         self.assertFalse(result["ready"])
         self.assertEqual(result["state"], state)

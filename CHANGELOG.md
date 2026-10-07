@@ -1,5 +1,13 @@
 # 更新记录
 
+## 0.1.12 — 2026-10-07
+
+- 插件说明、操作与 setup skill 明确新对话默认先初始化 READY，文字任务使用 `recover=true, screenshot=false`，复用 READY 返回的观察继续任务。
+- WDA 未启动、连接拒绝或 not_ready 进入 status / start 启动分支；复用已有 queued / running 工作、配置和有效构建，按实际缺项补 fetch / build，不直接结束任务或整套重装。
+- 未启动错误保留准确错误码，并附 `ready=false`、`initialization_required=true` 与 setup status 下一步，不自动执行启动 / 重启。
+- 区分冷启动与已核验归属的 XCTest 自动恢复；长期 Runner 不等 succeeded，服务可探测仍需 READY 证明。保留只读、禁止启动 / 重启等用户限制，真实用户前置条件使用「已完成继续」提问流程。
+- 打开 widget 或临时空白不代表 READY / 任务失败；“先打开让我看”后继续初始化与已授权任务，仅明确要求等待确认时暂停。
+
 ## 0.1.11 — 2026-10-07
 
 - 首次操作后持续显示屏幕边缘渐变与涟漪，不随工具调用间隙闪灭；暂时缺帧 / 隐藏保留状态，认证暂停、断开 / 换流及页面结束清除。

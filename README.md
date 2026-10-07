@@ -1,6 +1,6 @@
 # iPhone Use WDA
 
-给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。使用时侧边栏以圆角 iPhone 外壳展示手机屏幕，开始操作后持续显示边缘渐变光效，并用圆形指示点击 / 拖动位置。
+给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），新对话默认先初始化并取得 READY，服务未启动时沿 setup 启动流程继续。直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。使用时侧边栏以圆角 iPhone 外壳展示手机屏幕，开始操作后持续显示边缘渐变光效，并用圆形指示点击 / 拖动位置。
 
 另有独立的[截图视觉版插件](plugins/iphone-use-wda-vision/README.md)，基于 v0.1.4 复制，默认用截图确定并核验每次操作；XML 仅作为页面数据读取的可选工具。两版可共享已有 WDA 配置和运行通道。
 
@@ -16,7 +16,15 @@ sh scripts/install.sh
 
 此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 1 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
 
-也可将 `dist/iphone-use-wda-0.1.11-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.12-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+
+## 每个新对话先初始化
+
+本对话还没有 READY 证明时，默认先调用 `wda_ready(recover=true, screenshot=false)`，成功后复用返回的 observation 开始任务。已有本对话 READY 且通道正常时直接继续，不逐步重复就绪检查。
+
+WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动分支，不能直接结束用户任务：先用 `wda_setup(action="status")` 查看配置、服务和 `jobs`。已有与当前配置 / endpoint 对应的 queued / running start / recover 工作就记录其 id，查询同一工作；服务可用或恢复到 serving 后重验 READY，长期 Runner 不等 succeeded。已配置且无可复用的活动工作时 start 一次复用现有构建，记录实际返回的 `job_id` 或 `already_running` 中的 `job.id`；只按实际缺失补 fetch / build。未配置时进入 `iphone-wda-setup` 的首次安装流程，真实连接、Xcode、签名或用户确认阻塞按准确缺项处理。明确只读、禁止启动 / 重启等用户限制始终保留。
+
+打开 widget 或看到空白画面都不替代 READY。用户说“先打开 widget 让我看”时先打开，再继续初始化与已授权任务；只有明确要求等他确认才等待。服务未启动和临时空帧不表示整个任务失败。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -28,7 +36,7 @@ sh scripts/install.sh
 4. `wda_setup(action="configure", udid="自己的设备标识", team_id="自己的10位TeamID", bundle_id="com.example.iphonewda.WebDriverAgentRunner")` 保存本机配置。已有相同版本且无跟踪修改的 WDA 可传 `source_dir` 复用。
 5. `build` 签名构建，成功后 `start` 运行 WDA 并建立 `127.0.0.1:18100 → iPhone:8100` USB 转发。两个操作都返回后台 job，不占住 MCP 等待整次编译。
 6. 若 iOS 要求，在“设置 → 通用 → VPN 与设备管理”信任自己的开发者证书，解锁并保持手机唤醒。
-7. 正常任务用 `wda_ready(recover=true)`（或省略 recover），同时核验 status.ready、可用 session、viewport、控件树与截图。检查手机解锁状态；镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务；READY 同时关联手机屏幕 widget，宿主支持时默认打开侧边栏。
+7. 正常文字任务用 `wda_ready(recover=true, screenshot=false)`，核验 status.ready、可用 session、viewport、控件树与解锁状态；需要截图能力时再取得截图。镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务；READY 同时关联手机屏幕 widget，宿主支持时默认打开侧边栏。服务还未启动时按上面的新对话初始化流程继续。
 
 安装遇到免费账户 App 名额、签名过期、证书未信任、手机锁定、USB 断开时，setup skill 给出与实际错误对应的步骤。需要用户本人完成的登录、Face ID 与信任不会由 WDA 代替。工具不自动卸载其他 App。
 
@@ -132,6 +140,10 @@ Codex 插件 MCP 工具存在共享 64KB 说明预算，工具目录完整不代
 ## 0.1.11 屏幕 widget
 
 与 READY 关联的 MCP App 和 `wda_screen` 在支持的宿主中默认打开手机屏幕侧边栏，以独立 USB MJPEG 流显示最新画面，保持原有乐观执行与操作速度。0.1.11 增加自适应圆角 iPhone 外壳，光效从首次操作开始持续显示，点击 / 拖动仍使用实际请求坐标。认证接管暂停并清空预览，通过宿主提问功能提示用户，首个选项固定「已完成继续」，收到实际完成答复后再恢复；App 专用帧工具对模型隐藏。
+
+## 0.1.12 新对话初始化
+
+插件说明与两个 skills 明确在新对话首次操作前取得 READY；服务未启动时复用已有配置、后台工作与构建继续启动。区分冷启动、持久 XCTest 通道恢复和真实用户前置条件，避免因为一次连接拒绝或空白 widget 提前结束任务。
 
 ## 历史行为（0.1.1–0.1.4；当前默认以 0.1.5 为准）
 
