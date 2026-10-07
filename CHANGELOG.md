@@ -1,5 +1,22 @@
 # 更新记录
 
+## 0.2.0 — 2026-10-07
+
+延迟优化：减少每轮进入模型上下文的数据、完成一步所需的回合数，并去掉会卡住任务的超时。细节与实测见 [延迟优化说明](docs/latency-optimization.md)。
+
+- **观察结果紧凑化。** 节点去掉 `XCUIElementType` 前缀，name / value 与文字相同时不重复，默认值省略，`rect` 为整数 `[x, y, width, height]`；同一 99 节点页面从 18,424 降到 6,868 字节。`wda_find`、`scroll_find`、`collect_list` 使用同一格式，不再返回元素 ID。这是输出格式变化，依赖旧字段的脚本需要调整。
+- **截图真正到达模型。** 面向模型的结果只返回一个紧凑 JSON 文本块和图片块，不再附带 `structuredContent`：Codex 在有结构化内容时会丢弃图片块。截图先用系统 `sips` 缩到 722×1568 级别的 JPEG，返回精确的 `image.pixel_to_point`，原始 PNG 保留在同名 `.png`。
+- **标签失败立刻改用坐标。** selector 找不到、不唯一、被判定不可点或不可编辑时，错误结果附当前截图和坐标点，下一次调用直接按坐标操作；输入可先按坐标点中输入框，再调用不带 selector 的 `wda_type_text`。同名元素叠在同一位置或只有一个在屏幕内时自动取该目标；selector 新增 `label_contains` 与 `index`。
+- **长文本输入。** 按约 200 字一段发送并按字数计算超时，不再在约 450 字处超时成“不确定”；超过单次调用时间预算时返回 `continue_token` 续传，不重发文本。batch 同样有时间预算，到点在步骤之间停下。
+- **动作后的观察等转场结束。** 动作附带的树读取前让 WDA 等动画结束（上限 0.8 秒），避免读到两页混在一起的树。
+- **更少的请求。** 元素查询一次返回类型与位置；页面源码根节点直接提供前台 App 和屏幕尺寸；坐标动作复用短时视口缓存。暖路径 selector 点击 5 → 3 次请求，树观察 3 → 1 次。
+- **预览与响应性。** 帧请求和工具栏在读取线程直接应答，长时间的手机操作不再冻住预览；推流线程按文件签名缓存状态。
+- **手机屏幕 widget 重做。** 顶部显示机型和 Live 状态，底部增加刷新、主屏幕、截图到剪贴板三个按钮（仅供用户点击，认证暂停期间禁用后两个）；边缘光效改为沿屏幕大圆角等宽环绕的光带：三层静态彩色光环交替淡入淡出，带细颗粒纹理，只做透明度动画，柔边烘焙在一张遮罩图里而不是实时 blur 滤镜；跟随宿主深浅色。
+- **度量。** `wda_metrics` 增加每个工具的返回字节数、各接口字节数和两次调用之间的等待时间，支持 `reset`；新增 `scripts/benchmark.py` 固定真机任务。
+- 工具说明模型可见部分从 29,568 降到 21,419 字节；两个 skill 的启动、恢复细节移到 references。目录共 19 个工具：17 个模型工具、2 个仅供 App 使用。
+- `tooling/` 的依赖清单版本不再随插件版本改动：它的锁文件哈希决定是否重装 USB 依赖，无依赖变化的发布不应让下一次冷启动多跑一次 `npm ci`。
+- 独立视觉版同步发布 0.2.0。
+
 ## 0.1.14 — 2026-10-07
 
 - Keep the memory-only last preview frame across hidden-window lease expiry, stream gaps, request failures and bridge reconnects; resume polling on visibility / page-cache return. Authentication pause and teardown still erase all image backups, and delayed pre-pause replies cannot restore them.

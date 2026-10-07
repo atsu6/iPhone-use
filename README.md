@@ -1,6 +1,6 @@
 # iPhone Use WDA
 
-给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），新对话默认先初始化并取得 READY，服务未启动时沿 setup 启动流程继续。直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。使用时侧边栏以圆角 iPhone 外壳展示手机屏幕，开始操作后持续显示边缘渐变光效，并用圆形指示点击 / 拖动位置。
+给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），新对话默认先初始化并取得 READY，服务未启动时沿 setup 启动流程继续。直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。使用时侧边栏以圆角 iPhone 外壳展示手机屏幕，顶部标出机型和 Live 状态，底部有刷新、主屏幕、截图三个按钮；开始操作后屏幕边缘显示彩色光效，并用圆形指示点击 / 拖动位置。
 
 另有独立的[截图视觉版插件](plugins/iphone-use-wda-vision/README.md)，基于 v0.1.4 复制，默认用截图确定并核验每次操作；XML 仅作为页面数据读取的可选工具。两版可共享已有 WDA 配置和运行通道。
 
@@ -14,9 +14,9 @@ cd iPhone-use-wda
 sh scripts/install.sh
 ```
 
-此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 1 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
+此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 2 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
 
-也可将 `dist/iphone-use-wda-0.1.14-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.2.0-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 每个新对话先初始化
 
@@ -42,11 +42,11 @@ WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动
 
 ## 侧边栏手机屏幕
 
-正常调用 `wda_ready` 后，Codex 可打开关联的 MCP App；也可调用 `wda_screen()` 重新打开。widget 以圆角 iPhone 外壳展示当前手机屏幕，包含细金属边框、黑色玻璃边缘、顶部灵动岛与侧键装饰，没有可操作按钮、状态文字或其他控件。竖屏、横屏及窄侧栏都按原始画面比例缩放，并在设备上下留出更多空间，圆形 cursor 使用实际点击与拖动位置。
+正常调用 `wda_ready` 后，Codex 可打开关联的 MCP App；也可调用 `wda_screen()` 重新打开。widget 以圆角 iPhone 外壳展示当前手机屏幕，包含细金属边框、黑色玻璃边缘、顶部灵动岛与侧键装饰。顶部的胶囊显示机型（如 iPhone 17 Pro Max）和连接状态：Live、已暂停或未连接。底部工具栏有三个供用户点击的按钮：刷新重新连接预览流，主屏幕让手机回到主屏，截图把一张原分辨率截图放进 Mac 剪贴板。它们不是模型的工具；手机正在执行操作时主屏幕按钮提示稍后再试，认证暂停期间主屏幕和截图不可用。竖屏、横屏及窄侧栏都按原始画面比例缩放，圆形 cursor 使用实际点击与拖动位置，界面跟随宿主的深浅色。
 
-首次操作后，屏幕四周的涟漪渐变持续显示，工具调用间隙和准备下一步时不会闪灭；暂时缺帧或隐藏页面也保留该状态。认证暂停、通道断开或换流、关闭 / 重新加载页面后清除。光效表示已开始操作，不推断模型是否正在思考或任务是否已经完成，最终结果仍需验收。外框设计参考 [Apple 官方产品边框](https://developer.apple.com/design/resources/)与社区 [devices.css](https://github.com/picturepan2/devices.css)，以原创 CSS 绘制；顶部灵动岛仅作外观装饰，光晕沿屏幕的圆角轮廓柔和过渡。
+首次操作后，屏幕边缘的彩色光效持续显示，工具调用间隙和准备下一步时不会闪灭；暂时缺帧或隐藏页面也保留该状态。认证暂停、通道断开或换流、关闭 / 重新加载页面后清除。光带沿屏幕的大圆角等宽环绕，由三层静态的蓝、紫、粉、橙光环交替淡入淡出组成，颜色沿边缘缓慢流动，并带一层细颗粒纹理。向内渐隐的柔边在布局变化时烘焙成一张遮罩图，动画只改变透明度，不重绘，也没有实时运行的 blur 滤镜。它表示已开始操作，不推断模型是否正在思考或任务是否已经完成，最终结果仍需验收。外框设计参考 [Apple 官方产品边框](https://developer.apple.com/design/resources/)与社区 [devices.css](https://github.com/picturepan2/devices.css)，以原创 CSS 绘制；顶部灵动岛仅作外观装饰。
 
-画面来自 WDA 独立的 USB MJPEG 通道（默认设备端口 9100），widget 最多每秒获取 5 次最新缓存帧。它不轮询 WDA `/screenshot`、XML 或 XCTest 命令，不新增手机控制请求，不占用操作锁；图像只保留在内存。关闭或隐藏 widget 后停止获取，服务端预览租约在 5 秒后到期。USB / MJPEG 不可用时画面留空，控制任务按实际 WDA 状态继续；不因预览问题循环重启服务。
+画面来自 WDA 独立的 USB MJPEG 通道（默认设备端口 9100），widget 最多每秒获取 4 次最新缓存帧，长时间的手机操作期间照常刷新。预览本身不轮询 WDA `/screenshot`、XML 或 XCTest 命令，不占用操作锁；图像只保留在内存。只有用户点击工具栏时才发出一次对应请求。关闭或隐藏 widget 后停止获取，服务端预览租约在 5 秒后到期。USB / MJPEG 不可用时画面留空，控制任务按实际 WDA 状态继续；不因预览问题循环重启服务。
 
 遇到密码、PIN、验证码或 Face ID 接管时，先调用 `wda_screen(action="pause")` 停止预览并清空画面，然后提示用户在 iPhone 上完成。收到用户明确完成通知后调用 `wda_screen(action="resume")`，再获取一次新观察继续任务。widget 画面是给用户看的实时预览，模型定位仍使用工具实际返回的树 / 图像，最终关键结果仍须验收。接口、生命周期与构建方法见 [屏幕 widget 说明](docs/screen-widget.md)。
 
@@ -55,20 +55,20 @@ WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动
 | MCP tool | 作用 |
 |---|---|
 | `wda_doctor`, `wda_setup`, `wda_ready` | 诊断、后台安装/启动与完整就绪证明 |
-| `wda_observe` | 精简树/原生截图，观察 ID 和 iPhone 点坐标 viewport |
+| `wda_observe` | 紧凑控件树 / 缩放后的截图，观察 ID 和 iPhone 点坐标 viewport |
 | `wda_apps` | 优先查本机安装清单和 36 个已核验别名，必要时查 Apple API；区分商店元数据与安装证据 |
-| `wda_find` | 查询标签、name、value、type 或 predicate，避免为一个按钮读取全树 |
-| `wda_tap` | 唯一目标、viewport 与 hittable 检查，点击一次；expect / observe 按需开启 |
+| `wda_find` | 查询标签、label_contains、name、value、type 或 predicate，返回位置和点击坐标，避免为一个按钮读取全树 |
+| `wda_tap` | selector 经屏幕内与 hittable 检查后点击一次，叠在一处的同名元素自动取最内层；失败时附截图和坐标点，改用 x/y 点击 |
 | `wda_swipe` | 默认一次短拖动；verify=true 才检查进展及尝试备用手势 |
-| `wda_type_text` | 完整 Unicode 原文一次输入；可选精确回读，换行保护、默认不提交 |
+| `wda_type_text` | 完整 Unicode 原文一次给出，长文本分段输入并可续传；不带 selector 时向当前焦点输入；可选精确回读，换行保护、默认不提交 |
 | `wda_launch_app`, `wda_press_button` | bundle ID 激活、Home/音量键；前台验证按需开启 |
 | `wda_wait` | 有界目标等待 |
-| `wda_batch` | 一轮执行已知步骤，预先校验所有参数；错误、不确定或提交时停止 |
+| `wda_batch` | 一轮执行已知步骤，预先校验所有参数；错误、不确定、提交或超出时间预算时停止 |
 | `wda_scroll_find`, `wda_collect_list` | 有界搜索、去重采集与明确覆盖边界 |
-| `wda_metrics` | HTTP/工具耗时汇总，不记录文本、账户数据或图像 |
+| `wda_metrics` | HTTP / 工具耗时、每个工具的返回字节数、两次调用之间的等待；不记录文本、账户数据或图像 |
 | `wda_screen` | 重新打开手机屏幕、认证接管前暂停、用户完成后恢复 |
 
-`wda_screen_frame` 仅向 MCP App 暴露，负责缓存帧和操作指示，不供模型调用。目录共 18 个 tools，模型可用 17 个。
+`wda_screen_frame`（缓存帧和操作指示）与 `wda_screen_action`（工具栏的刷新 / 主屏幕 / 截图）仅向 MCP App 暴露，不供模型调用。目录共 19 个 tools，模型可用 17 个。
 
 例如已观察到目标后，点击并直接取得供下一步决策的页面：
 
@@ -92,7 +92,7 @@ WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动
 }
 ```
 
-整个 MCP 服务常驻，复用 HTTP 连接和 session。XML 默认跳过昂贵 `visible` 属性；点击前仍检查 hittable。`mode:"screenshot"` 不生成 XML，直接返回 MCP 图像。坐标按截图像素/viewport 比例转换，observation_id 可选；提供时检查本 Runtime 的 App / viewport 上下文，不再比较整张截图或强制 30 秒过期。会话首次创建或接管时将 WDA idle / animation 等待预算设置为 0，暖操作不重复配置；同一 WDA 服务的其他客户端可能共享这些设置。
+整个 MCP 服务常驻，复用 HTTP 连接和 session。XML 默认跳过昂贵 `visible` 属性；点击前仍检查 hittable。`mode:"screenshot"` 不生成 XML，截图作为图片随结果返回，已缩放到适合阅读的尺寸：图像像素乘以 `image.pixel_to_point` 得到 iPhone 点。树节点的 `rect` 是 `[x, y, width, height]`，省略的字段表示默认值。observation_id 可选；提供时检查本 Runtime 的 App / viewport 上下文，不再比较整张截图或强制 30 秒过期。会话首次创建或接管时将 WDA idle / animation 等待预算设置为 0，暖操作不重复配置；同一 WDA 服务的其他客户端可能共享这些设置。
 
 ## 遇到过的问题怎么处理
 
@@ -102,11 +102,11 @@ WDA 尚未启动时，连接拒绝、`wda_unreachable` 或 `not_ready` 是启动
 
 输入默认一次写入完整原文，不先试短文本、不逐次回读。需要关键输入验收时用 verify=true；不一致时停止提交。安全输入框、密码或 Face ID 由用户接管。换行需明确多行编辑意图，提交需明确 submit=true；最终仍核对目标与实际发送结果。输入 / 提交响应不确定时先看状态，不自动重放。
 
-历史实测中 83.6% 的业务墙钟时间在 WDA HTTP 请求之外，后续复核指向模型响应链路；一次 5 分钟等待没有依据全部归因模型思考。本插件通过组合工具、精简结果、后台构建减少交互次数；模型服务延迟仍由宿主决定。当前验证结果见 [validation.md](docs/validation.md)，没有重新测量前不承诺整项业务任务的提速百分比。
+历史实测中 83.6% 的业务墙钟时间在 WDA HTTP 请求之外，后续复核指向模型响应链路；一次 5 分钟等待没有依据全部归因模型思考。本插件通过组合工具、精简结果、后台构建减少交互次数；模型服务延迟仍由宿主决定。0.2.0 针对每轮数据量、回合数和超时陷阱的改动与真机数据见 [延迟优化说明](docs/latency-optimization.md)，当前验证结果见 [validation.md](docs/validation.md)；没有用真实模型对照测量前不承诺整项业务任务的提速百分比。
 
 ## 本机数据与恢复
 
-默认状态在 `~/.local/share/iphone-use-wda/`，目录权限 700、配置与截图文件 600；私有设备配置、Xcode 日志、签名构建与证据不进入仓库/源代码包。显式工具截图文件名唯一，最多保留最近 100 张；侧边栏流不落盘，操作指示只保存有界的坐标与短时活动信息；工具计时保留最近 2,000 次请求与 500 次调用。原始 XML/文本不写运行账本。
+默认状态在 `~/.local/share/iphone-use-wda/`，目录权限 700、配置与截图文件 600；私有设备配置、Xcode 日志、签名构建与证据不进入仓库/源代码包。显式工具截图文件名唯一，交给模型的 `.jpg` 与原始 `.png` 各保留最近 100 张；侧边栏流不落盘，操作指示只保存有界的坐标与短时活动信息；工具计时保留最近 2,000 次请求与 500 次调用。原始 XML/文本不写运行账本。
 
 `WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 device_busy，不执行动作。实际写操作断线或超时标记 uncertain，不能盲目重放点击/输入。GET 与已知 POST 元素查询最多重试一次，共用原截止时间；非元素查询遇到 invalid session 可重建会话，旧元素 ID 不跨会话重用。
 
@@ -123,11 +123,18 @@ python3 scripts/package.py
 python3 server/iphone_wda.py --doctor
 python3 server/iphone_wda.py --ready
 python3 scripts/smoke_mcp.py --ready
+python3 scripts/benchmark.py --run
 ```
+
+`benchmark.py --run` 会在真机的“设置”里执行固定任务并回到主屏幕，只输出计数、字节数和耗时；手机锁屏或前台是其他 App 时不执行。
 
 Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊断写 stderr。测试使用合成 UI 和本机 HTTP fixture，涵盖会话恢复、不重放超时操作、坐标过期、遮挡、Unicode 回读、无效滚动和批量中止。真实设备测试另记，不把 mock 测试当作真机任务完成。
 
 技术依据：[Appium WebDriverAgent](https://github.com/appium/WebDriverAgent)、[固定版本源代码](https://github.com/appium/WebDriverAgent/tree/d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6)、[Apple 开发账户说明](https://developer.apple.com/help/account/basics/about-your-developer-account)。
+
+## 0.2.0 延迟优化
+
+观察结果去掉重复字段后约为原来的三分之一；截图缩放成 JPEG 并真正随结果送到模型；长文本分段输入，不再在约 450 字处超时；动作附带的观察等转场结束再读。selector 是首选，但失败一次就改用屏幕坐标：错误结果附带截图和坐标点，输入可先点中输入框再向焦点输入。预览不再被长时间的手机操作冻住，widget 增加机型 / Live 标记和三键工具栏。改动、实测数据和放弃的做法见 [延迟优化说明](docs/latency-optimization.md)。
 
 ## 0.1.5 乐观执行
 

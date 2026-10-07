@@ -19,6 +19,12 @@ from wda_vision_controller import VisualPhoneController
 from test_vision import FakeVisualWDA, png
 
 
+
+def payload(result):
+    """The model-facing data: one JSON text block. A structured copy would hide the image block."""
+    assert "structuredContent" not in result
+    return json.loads(result["content"][0]["text"])
+
 class VisualProtocolTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -57,13 +63,17 @@ class VisualProtocolTests(unittest.TestCase):
         self.assertEqual(response["id"], "visual-call")
         self.assertNotIn("error", response)
         result = response["result"]
-        self.assertEqual(json.loads(result["content"][0]["text"]), result["structuredContent"])
+        payload(result)
         return result
 
     def assert_image(self, result, client):
+        """The screenshot reaches the model as an image block; the native capture stays on disk."""
         self.assertEqual([item["type"] for item in result["content"]], ["text", "image"])
-        self.assertEqual(result["content"][1]["mimeType"], "image/png")
-        self.assertEqual(base64.b64decode(result["content"][1]["data"]), client.screenshot)
+        data = payload(result)
+        image = (data.get("observation") or data.get("error", {}).get("observation") or data)["image"]
+        self.assertEqual(result["content"][1]["mimeType"], image["mimeType"])
+        self.assertEqual(base64.b64decode(result["content"][1]["data"]), Path(image["path"]).read_bytes())
+        self.assertEqual(Path(image["path"]).with_suffix(".png").read_bytes(), client.screenshot)
 
     def test_stdio_initialization_ping_and_closed_visual_catalog(self):
         responses = self.exchange([
@@ -93,7 +103,7 @@ class VisualProtocolTests(unittest.TestCase):
         self.assertEqual(set(ready["inputSchema"]["properties"]), {"recover"})
         self.assertTrue(ready["inputSchema"]["properties"]["recover"]["default"])
         required = {"tap": ["x", "y"], "long_press": ["x", "y"], "swipe": [],
-                    "type_text": ["text"], "launch_app": ["bundle_id"], "press_button": ["name"]}
+                    "type_text": [], "launch_app": ["bundle_id"], "press_button": ["name"]}
         for name, fields in required.items():
             tool = next(tool for tool in tools if tool["name"] == "wda_vision_" + name)
             self.assertEqual(tool["inputSchema"].get("required", []), fields)
@@ -117,7 +127,7 @@ class VisualProtocolTests(unittest.TestCase):
         runtime, client = self.runtime()
         result = self.serve_call(runtime, "wda_vision_ready", {})
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertTrue(data["ready"])
         self.assertEqual(data["state"], "ready")
         self.assertTrue(data["proof"]["screenshot_readable"])
@@ -144,7 +154,7 @@ class VisualProtocolTests(unittest.TestCase):
                 result = self.serve_call(runtime, "wda_vision_" + name,
                                          {**arguments, "observation_id": observed["observation_id"]})
                 self.assertFalse(result["isError"])
-                data = result["structuredContent"]
+                data = payload(result)
                 self.assertTrue(data["action_executed"])
                 self.assertTrue(data["action_complete"])
                 self.assertFalse(data["verified"])
@@ -190,7 +200,7 @@ class VisualProtocolTests(unittest.TestCase):
         result = self.serve_call(runtime, "wda_vision_type_text", {
             "text": "text", "focused_input_confirmed": False, "observe": False})
         self.assertFalse(result["isError"])
-        self.assertTrue(result["structuredContent"]["action_complete"])
+        self.assertTrue(payload(result)["action_complete"])
         self.assertEqual([item["type"] for item in result["content"]], ["text"])
         self.assertEqual([method for method, _, _ in client.calls], ["POST", "POST"])
 
@@ -232,7 +242,7 @@ class VisualProtocolTests(unittest.TestCase):
             {"op": "press_button", "args": {"name": "home"}},
         ]})
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertTrue(data["complete"])
         self.assertEqual(data["completed_steps"], 2)
         self.assert_image(result, client)
@@ -247,7 +257,7 @@ class VisualProtocolTests(unittest.TestCase):
         client.calls.clear()
         result = self.serve_call(runtime, "wda_vision_tap", {"x": 100, "y": 220, "observation_id": observed["observation_id"]})
         self.assertFalse(result["isError"])
-        self.assertTrue(result["structuredContent"]["action_executed"])
+        self.assertTrue(payload(result)["action_executed"])
         self.assert_image(result, client)
         self.assertEqual(client.calls[0][1], "/wda/tap")
         self.assertEqual(len(client.calls), 4)
@@ -261,7 +271,7 @@ class VisualProtocolTests(unittest.TestCase):
             {"op": "press_button", "args": {"name": "home"}},
         ]})
         self.assertTrue(result["isError"])
-        self.assertEqual(result["structuredContent"]["error"]["code"], "action_uncertain")
+        self.assertEqual(payload(result)["error"]["code"], "action_uncertain")
         self.assert_image(result, client)
         self.assertEqual(len(client.actions()), 1)
 
@@ -311,7 +321,7 @@ class VisualProtocolTests(unittest.TestCase):
         client.locked = True
         result = self.serve_call(runtime, "wda_vision_ready", {})
         self.assertTrue(result["isError"])
-        self.assertEqual(result["structuredContent"]["error"]["code"], "phone_locked")
+        self.assertEqual(payload(result)["error"]["code"], "phone_locked")
         self.assertEqual(client.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
         runtime.setup_manager.recover.assert_not_called()
 
@@ -334,7 +344,7 @@ class VisualProtocolTests(unittest.TestCase):
         with patch.object(runtime.phone, "observe", side_effect=fail_once_then_capture):
             result = self.serve_call(runtime, "wda_vision_ready", {})
         self.assertEqual(len(attempts), 2)
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertTrue(data["ready"])
         self.assertTrue(data["recovery"]["session_recreated"])
         self.assertFalse(data["recovery"]["replayed_action"])
@@ -352,7 +362,7 @@ class VisualProtocolTests(unittest.TestCase):
                 client.foreground_error = error
                 result = self.serve_call(runtime, "wda_vision_ready", {})
                 self.assertFalse(result["isError"])
-                data = result["structuredContent"]
+                data = payload(result)
                 self.assertTrue(data["ready"])
                 self.assertFalse(data["proof"]["foreground_resolved"])
                 self.assert_image(result, client)
@@ -368,7 +378,7 @@ class VisualProtocolTests(unittest.TestCase):
         runtime.setup_manager.recover.return_value = {"ok": True, "job_id": "vision-recovery", "recovery": {"state": "queued"}}
         result = self.serve_call(runtime, "wda_vision_ready", {})
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertFalse(data["ready"])
         self.assertEqual(data["state"], "recovering")
         self.assertEqual(data["recovery"]["status_tool"], "wda_vision_setup")
@@ -393,7 +403,7 @@ class VisualProtocolTests(unittest.TestCase):
         client.screenshot_error = WDAError("wda_foreground_unavailable", "Screenshot channel failed")
         result = self.serve_call(runtime, "wda_vision_ready", {"recover": False})
         self.assertFalse(result["isError"])
-        data = result["structuredContent"]
+        data = payload(result)
         self.assertFalse(data["ready"])
         self.assertEqual(data["state"], "recovery_required")
         self.assertEqual(data["reason"], "recovery_disabled")
@@ -408,7 +418,7 @@ class VisualProtocolTests(unittest.TestCase):
         client.screenshot_error = WDAError("wda_foreground_unavailable", "Screenshot channel failed")
         result = self.serve_call(runtime, "wda_vision_tap", {"x": 100, "y": 220, "observation_id": observed["observation_id"]})
         self.assertTrue(result["isError"])
-        data = result["structuredContent"]["error"]
+        data = payload(result)["error"]
         self.assertEqual(data["category"], "channel_runtime")
         self.assertEqual(data["recovery"]["tool"], "wda_vision_ready")
         self.assertEqual(data["recovery"]["arguments"], {"recover": True})
@@ -473,11 +483,29 @@ class VisualProtocolTests(unittest.TestCase):
         for response in responses[:len(cases)]:
             result = response["result"]
             self.assertTrue(result["isError"])
-            data = json.loads(result["content"][0]["text"])
-            self.assertEqual(data, result["structuredContent"])
+            data = payload(result)
             self.assertIn(data["error"]["code"], ("invalid_argument", "unknown_tool"))
         self.assertEqual(responses[-2]["error"]["code"], -32700)
         self.assertEqual(responses[-1]["result"], {})
+
+    def test_type_text_accepts_text_or_a_continuation_but_not_both_or_neither(self):
+        runtime, client = self.runtime()
+        for arguments in ({}, {"observe": False}, {"text": "a", "continue_token": "t"}, {"continue_token": ""}):
+            with self.subTest(arguments=arguments), self.assertRaises(WDAError) as caught:
+                runtime.call("wda_vision_type_text", arguments)
+            self.assertEqual(caught.exception.code, "invalid_argument")
+        self.assertEqual(client.actions(), [])
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_vision_type_text", {"continue_token": "stale"})
+        self.assertEqual(caught.exception.code, "input_continuation_expired")
+
+    def test_results_carry_no_structured_copy_that_could_hide_the_screenshot(self):
+        runtime, client = self.runtime()
+        result = self.serve_call(runtime, "wda_vision_tap", {"x": 10, "y": 20})
+        self.assertEqual(set(result), {"content", "isError"})
+        self.assert_image(result, client)
+        text = result["content"][0]["text"]
+        self.assertEqual(json.dumps(json.loads(text), ensure_ascii=False, separators=(",", ":")), text)
 
 
 if __name__ == "__main__":

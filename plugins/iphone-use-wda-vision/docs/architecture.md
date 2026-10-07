@@ -18,7 +18,7 @@ flowchart LR
 
 ## 截图契约
 
-observe 各读取一次 WDA /screenshot、设备点 viewport 和前台 App，共 3 次 GET。PNG 返回 image.path、width / height、pixel_to_point 与 observation_id。坐标转换为 `x_point = x_pixel × image.pixel_to_point.x`，y 同理；不使用 Mac 坐标或宿主缩略图尺寸。
+observe 各读取一次 WDA /screenshot、设备点 viewport 和前台 App，共 3 次 GET。原始 PNG 在本机缩放成 JPEG 后随结果内联，并返回 image.path、width / height、pixel_to_point 与 observation_id；结果不带 structuredContent，否则宿主可能丢弃图片。坐标转换为 `x_point = x_pixel × pixel_to_point.x`，y 同理；不使用 Mac 坐标或宿主缩略图尺寸。
 
 前台 App 信息是可选提示，最多等待 2 秒；读取失败或返回 local.pid.* 时保留截图与坐标比例，不因此重建通道。
 

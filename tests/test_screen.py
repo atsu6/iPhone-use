@@ -258,6 +258,33 @@ class ScreenHubTests(unittest.TestCase):
             self.assertFalse(self.hub.start()["busy"])
             self.assertEqual(self.hub.start()["events"], [])
 
+    def test_state_file_is_parsed_once_per_change_not_once_per_stream_chunk(self):
+        self.hub.set_paused(False)
+        with patch("wda_screen.json.loads", wraps=json.loads) as parse:
+            for _ in range(200):
+                self.assertFalse(self.hub._paused())
+                self.hub._read_state()
+            self.assertLessEqual(parse.call_count, 1)
+            # Another process pausing for authentication replaces the file and is seen at once.
+            other = ScreenHub(self.directory)
+            self.addCleanup(other.close)
+            other.set_paused(True)
+            self.assertTrue(self.hub._paused())
+            self.assertTrue(self.hub._read_state()["paused"])
+        (self.directory / "screen-state.json").unlink()
+        self.assertFalse(self.hub._paused())
+
+    def test_restart_drops_the_frame_and_announces_a_new_stream(self):
+        self.hub._frame = {"seq": 9, "_jpeg": jpeg(), "mimeType": "image/jpeg", "width": 440, "height": 956}
+        self.hub._seq = 9
+        before = self.hub.start()["stream_id"]
+        self.hub.device = {"model": "iPhone 17 Pro Max"}
+        state = self.hub.restart()
+        self.assertNotEqual(state["stream_id"], before)
+        self.assertEqual((state["frame"], state["frame_available"], self.hub._seq), (None, False, 0))
+        self.assertEqual(state["device"], {"model": "iPhone 17 Pro Max"})
+        self.assertFalse(self.hub.paused())
+
     def test_stream_command_uses_existing_usb_dependencies_and_no_new_install(self):
         (self.directory / "config.json").write_text(json.dumps({"udid": "TEST-DEVICE-1234", "password": "secret"}))
         with patch("wda_screen.shutil.which", return_value="/usr/bin/node"):

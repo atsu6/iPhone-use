@@ -22,15 +22,27 @@ type Preview = {
   busy: boolean;
   paused: boolean;
   events: Gesture[];
+  device?: { model?: string } | null;
 };
+type LiveState = 'connecting' | 'live' | 'paused' | 'offline';
+type ToolName = 'refresh' | 'home' | 'screenshot';
 
 const root = document.getElementById('app')!;
 const device = document.getElementById('device')!;
 const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
+const stage = document.getElementById('stage')!;
+const model = document.getElementById('model')!;
+const liveText = document.getElementById('live-text')!;
+const toast = document.getElementById('toast')!;
+const tools: Record<ToolName, HTMLButtonElement> = {
+  refresh: document.getElementById('tool-refresh') as HTMLButtonElement,
+  home: document.getElementById('tool-home') as HTMLButtonElement,
+  screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
+};
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.14' },
+  { name: 'iPhone WDA Screen', version: '0.2.0' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -52,8 +64,20 @@ let requestedFullscreen = false;
 let connecting: Promise<void> | undefined;
 let suspended = false;
 let lastGoodFrame: { source: string; size: Size } | undefined;
+let acting = false;
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
 const FRAME_INTERVAL = 250;
 const REQUEST_TIMEOUT = 3000;
+// A screenshot or Home may queue behind the phone operation already running.
+const ACTION_TIMEOUT = 12000;
+const LIVE_TEXT: Record<LiveState, string> = { connecting: '连接中', live: 'Live', paused: '已暂停', offline: '未连接' };
+const DONE: Record<ToolName, string> = { refresh: '已刷新连接', home: '已回到主屏幕', screenshot: '截图已复制到剪贴板' };
+const FAILED: Record<string, string> = {
+  device_busy: '手机正在执行操作，请稍后再试',
+  preview_paused: '认证接管期间已暂停',
+  clipboard_unavailable: '截图未能写入剪贴板',
+  wda_unreachable: '未连接到手机',
+};
 
 const validSize = (value: unknown): value is Size => {
   const size = value as Size | undefined;
@@ -64,6 +88,32 @@ const validPoint = (value: unknown): value is Point => {
   const point = value as Point | undefined;
   return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
 };
+
+function syncTools() {
+  const paused = root.dataset.live === 'paused';
+  tools.refresh.disabled = acting;
+  // While the user authenticates on the phone nothing is captured or sent from here.
+  tools.home.disabled = tools.screenshot.disabled = acting || paused;
+}
+
+function setLive(state: LiveState) {
+  if (root.dataset.live === state) return;
+  root.dataset.live = state;
+  liveText.textContent = LIVE_TEXT[state];
+  syncTools();
+}
+
+function notify(text: string, failed = false) {
+  toast.textContent = text;
+  toast.dataset.tone = failed ? 'error' : 'ok';
+  toast.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastTimer = undefined; toast.hidden = true; }, 1800);
+}
+
+function applyTheme(theme: unknown) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+}
 
 function hideCursor() {
   animation?.cancel();
@@ -94,11 +144,22 @@ function retainFrame() {
 
 const visible = () => !disposed && !suspended && !document.hidden;
 
+// The glow's mask: a ring along the screen edge, blurred inward, plus a thin crisp rim. It is a
+// static picture rebuilt only when the layout changes, so the soft falloff costs nothing per frame.
+function glowMask(width: number, height: number, radius: number, band: number) {
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${round(width)}' height='${round(height)}'>`
+    + `<filter id='f' x='-30%' y='-30%' width='160%' height='160%'><feGaussianBlur stdDeviation='${round(band * .28)}'/></filter>`
+    + `<rect width='${round(width)}' height='${round(height)}' rx='${round(radius)}' fill='none' stroke='#fff' stroke-width='${round(band * .9)}' filter='url(#f)'/>`
+    + `<rect x='.75' y='.75' width='${round(width - 1.5)}' height='${round(height - 1.5)}' rx='${round(Math.max(0, radius - .75))}' fill='none' stroke='#fff' stroke-width='1.5'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
 function fitFrame() {
   if (!dimensions) return;
-  const style = getComputedStyle(root);
-  const width = Math.max(0, root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
-  const height = Math.max(0, root.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
+  // The stage is what remains between the status pill and the toolbar.
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
   const shortSide = Math.min(dimensions.width, dimensions.height);
   const bezel = shortSide * .024;
   const outerWidth = dimensions.width + 2 * bezel;
@@ -107,7 +168,10 @@ function fitFrame() {
   device.style.width = `${outerWidth * scale}px`;
   device.style.height = `${outerHeight * scale}px`;
   device.style.setProperty('--bezel', `${bezel * scale}px`);
-  device.style.setProperty('--screen-radius', `${shortSide * .12 * scale}px`);
+  const radius = shortSide * .12 * scale;
+  device.style.setProperty('--screen-radius', `${radius}px`);
+  device.style.setProperty('--glow-mask', glowMask(dimensions.width * scale, dimensions.height * scale,
+    radius, Math.min(bezel * scale * 3.8, radius)));
   device.dataset.orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
 }
 
@@ -168,11 +232,18 @@ function consume(value: unknown) {
     root.dataset.operating = 'false';
     retainFrame();
   }
+  if (typeof preview.device?.model === 'string' && preview.device.model) model.textContent = preview.device.model;
   if (preview.paused === true) {
     clearFrame();
+    setLive('paused');
     return;
   }
-  if (preview.frame_available === false) retainFrame();
+  if (preview.frame_available === false) {
+    retainFrame();
+    setLive('offline');
+  } else if (preview.frame_available === true || preview.frame) {
+    setLive('live');
+  }
   if (validSize(preview.viewport)) viewport = preview.viewport;
   const frame = preview.frame;
   if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq > frameSeq
@@ -237,11 +308,48 @@ async function poll() {
     failures += 1;
     nextDelay = Math.min(2000, 500 * failures);
     retainFrame();
+    if (failures > 1 && root.dataset.live !== 'paused') setLive('offline');
   } finally {
     inFlight = false;
     schedule(nextDelay);
   }
 }
+
+async function act(name: ToolName) {
+  if (acting || disposed || tools[name].disabled) return;
+  acting = true;
+  tools[name].dataset.busy = 'true';
+  syncTools();
+  try {
+    if (!ready) await connect();
+    const result = await app.callServerTool({
+      name: 'wda_screen_action',
+      arguments: { action: name },
+    }, { timeout: ACTION_TIMEOUT });
+    const data = result.structuredContent as (Partial<Preview> & { error?: { code?: string } }) | undefined;
+    if (result.isError || data?.error) {
+      notify(FAILED[data?.error?.code ?? ''] ?? '操作未完成，请重试', true);
+    } else {
+      // A refresh answers with the new stream identity; take the next frame at once.
+      if (name === 'refresh') consume(data);
+      notify(DONE[name]);
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      schedule(0);
+    }
+  } catch {
+    notify('操作未完成，请重试', true);
+  } finally {
+    acting = false;
+    delete tools[name].dataset.busy;
+    syncTools();
+  }
+}
+const toolHandlers = (Object.keys(tools) as ToolName[]).map(name => {
+  const handler = () => { void act(name); };
+  tools[name].addEventListener('click', handler);
+  return [name, handler] as const;
+});
 
 function visibilityChanged() {
   root.dataset.pageVisible = String(visible());
@@ -257,7 +365,7 @@ function visibilityChanged() {
 }
 
 const resizeObserver = new ResizeObserver(fitFrame);
-resizeObserver.observe(root);
+resizeObserver.observe(stage);
 image.onload = () => {
   if (dimensions && image.src) lastGoodFrame = { source: image.src, size: dimensions };
 };
@@ -292,6 +400,10 @@ function dispose() {
   root.dataset.pageVisible = 'false';
   if (timer) clearTimeout(timer);
   timer = undefined;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = undefined;
+  toast.hidden = true;
+  for (const [name, handler] of toolHandlers) tools[name].removeEventListener('click', handler);
   clearFrame();
   resizeObserver.disconnect();
   document.removeEventListener('visibilitychange', documentVisibilityChanged);
@@ -304,6 +416,7 @@ app.ontoolresult = (result) => {
   if (!result.isError) consume(result.structuredContent);
   schedule(0);
 };
+app.onhostcontextchanged = (context) => { applyTheme(context?.theme); };
 app.onteardown = async () => { dispose(); return {}; };
 app.onclose = () => {
   ready = false;
@@ -324,6 +437,7 @@ async function initialize() {
   if (disposed) { await app.close(); return; }
   ready = true;
   const context = app.getHostContext();
+  applyTheme(context?.theme);
   if (!requestedFullscreen && context?.displayMode !== 'fullscreen'
       && context?.availableDisplayModes?.includes('fullscreen')) {
     requestedFullscreen = true;
@@ -332,5 +446,6 @@ async function initialize() {
 }
 
 root.dataset.pageVisible = String(visible());
+syncTools();
 try { await connect(); } catch { retainFrame(); }
 schedule(ready ? 0 : 1000);

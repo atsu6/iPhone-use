@@ -21,7 +21,8 @@ class MockScreen:
     """Memory-only preview double: never captures or connects to a phone."""
     def __init__(self):
         self.events = []
-        self.paused = False
+        self.is_paused = False
+        self.device = None
         self.closed = False
         self.frame_result = {"frame": {"seq": 7, "data": "preview-only",
                                       "mimeType": "image/jpeg", "width": 390, "height": 844},
@@ -33,11 +34,18 @@ class MockScreen:
 
     def start(self):
         self.events.append(("start", {}))
-        return {"frame": None, "events": [], "busy": False, "paused": self.paused}
+        return {"frame": None, "events": [], "busy": False, "paused": self.is_paused}
 
     def set_paused(self, paused):
-        self.paused = paused
+        self.is_paused = paused
         self.events.append(("pause", {"paused": paused}))
+
+    def paused(self):
+        return self.is_paused
+
+    def restart(self):
+        self.events.append(("restart", {}))
+        return {"frame": None, "events": [], "busy": False, "paused": self.is_paused, "stream_id": "restarted"}
 
     def set_viewport(self, viewport):
         self.events.append(("viewport", dict(viewport)))
@@ -102,11 +110,14 @@ class ScreenProtocolTests(unittest.TestCase):
         ])
         self.assertIn("resources", responses[0]["result"]["capabilities"])
         tools = {item["name"]: item for item in responses[1]["result"]["tools"]}
-        self.assertEqual(len(tools), 18)
+        self.assertEqual(len(tools), 19)
         for name in ("wda_ready", "wda_screen"):
             self.assertEqual(tools[name]["_meta"]["ui"]["resourceUri"], SCREEN_URI)
         self.assertEqual(tools["wda_screen"]["_meta"]["openai/ui"]["entrypoints"], [{"type": "thread"}])
-        self.assertEqual(tools["wda_screen_frame"]["_meta"]["ui"]["visibility"], ["app"])
+        for name in ("wda_screen_frame", "wda_screen_action"):
+            self.assertEqual(tools[name]["_meta"]["ui"]["visibility"], ["app"])
+        self.assertEqual(tools["wda_screen_action"]["inputSchema"]["properties"]["action"]["enum"], ["refresh", "home", "screenshot"])
+        self.assertFalse(tools["wda_screen_action"]["annotations"]["destructiveHint"])
         visible = [item for item in tools.values()
                    if item.get("_meta", {}).get("ui", {}).get("visibility") != ["app"]]
         self.assertEqual(len(visible), 17)
@@ -257,7 +268,7 @@ class ScreenProtocolTests(unittest.TestCase):
                 with self.assertRaises(WDAError) as caught:
                     runtime.call(name, args)
                 self.assertEqual(caught.exception.code, code)
-                self.assertTrue(screen.paused)
+                self.assertTrue(screen.is_paused)
                 self.assertEqual(client.actions(), [])
                 self.assertEqual(screen.events[-1], ("end", {"token": "activity-token"}))
 
@@ -282,8 +293,135 @@ class ScreenProtocolTests(unittest.TestCase):
         with self.assertRaises(WDAError) as caught:
             runtime.call("wda_type_text",{"selector":{"label":"Target"},"text":"never typed"})
         self.assertEqual(caught.exception.code,"not_editable")
-        self.assertFalse(screen.paused)
+        self.assertFalse(screen.is_paused)
         self.assertEqual(client.actions(),[])
+
+    def toolbar(self, runtime):
+        """Route the toolbar's own short-lived connection to a synthetic phone."""
+        phone = FakeWDA()
+        phone.close = Mock()
+        patcher = patch("iphone_wda.WDAClient", return_value=phone)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return phone
+
+    def test_toolbar_home_is_one_sessionless_request_under_the_operation_lock(self):
+        runtime, client, screen = self.runtime()
+        phone = self.toolbar(runtime)
+        runtime.phone.pending_input = {"token": "t"}
+        before = runtime.phone.accepted_actions
+        result = runtime.call("wda_screen_action", {"action": "home"})
+        self.assertEqual(result, {"ok": True, "action": "home"})
+        self.assertEqual(phone.calls, [("POST", "/wda/homescreen", {})])
+        phone.close.assert_called_once_with()
+        # The model's own connection and session are untouched; its stale focus is forgotten.
+        self.assertEqual(client.calls, [])
+        self.assertIsNone(client.session_id)
+        self.assertEqual(runtime.phone.accepted_actions, before + 1)
+        self.assertIsNone(runtime.phone.pending_input)
+
+    def test_toolbar_home_reports_busy_instead_of_interleaving_with_a_running_tool(self):
+        runtime, client, screen = self.runtime()
+        phone = self.toolbar(runtime)
+        with (Path(self.directory.name) / "operation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(WDAError) as caught:
+                runtime.call("wda_screen_action", {"action": "home"})
+            # Refreshing the preview never needs the phone lock.
+            self.assertTrue(runtime.call("wda_screen_action", {"action": "refresh"})["ok"])
+        self.assertEqual(caught.exception.code, "device_busy")
+        self.assertFalse(caught.exception.details["action_executed"])
+        self.assertEqual(phone.actions(), [])
+
+    def test_toolbar_refresh_restarts_only_the_preview_and_reports_service_state(self):
+        runtime, client, screen = self.runtime()
+        phone = self.toolbar(runtime)
+        result = runtime.call("wda_screen_action", {"action": "refresh"})
+        self.assertEqual((result["ok"], result["service_ready"], result["stream_id"]), (True, True, "restarted"))
+        self.assertEqual([kind for kind, _ in screen.events], ["restart"])
+        self.assertEqual(phone.calls, [("GET", "/status", None)])
+        self.assertEqual(client.calls, [])
+        phone.status_ready = False
+        self.assertFalse(runtime.call("wda_screen_action", {"action": "refresh"})["service_ready"])
+
+    def test_toolbar_screenshot_copies_the_native_capture_and_leaves_no_file(self):
+        runtime, client, screen = self.runtime()
+        phone = self.toolbar(runtime)
+        copied = []
+
+        def run(command, **options):
+            copied.append((command, Path(command[-1]).read_bytes(), Path(command[-1]).stat().st_mode & 0o777))
+            return Mock(returncode=0)
+
+        with patch("iphone_wda.subprocess.run", side_effect=run):
+            result = runtime.call("wda_screen_action", {"action": "screenshot"})
+        self.assertEqual(result, {"ok": True, "action": "screenshot", "copied": True, "width": 1, "height": 1})
+        command, data, mode = copied[0]
+        self.assertEqual((data, mode), (phone.screenshot, 0o600))
+        self.assertEqual(command[0], "/usr/bin/osascript")
+        # The file path is an argument of the script, not part of its text.
+        self.assertFalse(any(self.directory.name in part for part in command[:-1]))
+        self.assertFalse(Path(command[-1]).exists())
+        self.assertEqual(phone.calls, [("GET", "/screenshot", None)])
+        self.assertFalse(list((Path(self.directory.name)).glob("**/*.png")))
+        with patch("iphone_wda.subprocess.run", return_value=Mock(returncode=1)), self.assertRaises(WDAError) as caught:
+            runtime.call("wda_screen_action", {"action": "screenshot"})
+        self.assertEqual(caught.exception.code, "clipboard_unavailable")
+        self.assertFalse(list((Path(self.directory.name)).glob(".clipboard-*")))
+
+    def test_toolbar_never_captures_or_acts_during_authentication_pause(self):
+        runtime, client, screen = self.runtime()
+        phone = self.toolbar(runtime)
+        screen.is_paused = True
+        for action in ("home", "screenshot"):
+            with self.subTest(action=action), self.assertRaises(WDAError) as caught:
+                runtime.call("wda_screen_action", {"action": action})
+            self.assertEqual(caught.exception.code, "preview_paused")
+        self.assertEqual(phone.calls, [])
+        self.assertTrue(runtime.call("wda_screen_action", {"action": "refresh"})["paused"])
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_screen_action", {"action": "tap"})
+        self.assertEqual(caught.exception.code, "invalid_argument")
+
+    def test_toolbar_results_are_structured_for_the_app_and_answered_off_the_tool_queue(self):
+        runtime, client, screen = self.runtime()
+        self.toolbar(runtime)
+        result = self.call_over_stdio(runtime, "wda_screen_action", {"action": "home"})
+        self.assertEqual(result["structuredContent"], {"ok": True, "action": "home"})
+        screen.is_paused = True
+        refused = self.call_over_stdio(runtime, "wda_screen_action", {"action": "home"})
+        self.assertTrue(refused["isError"])
+        self.assertEqual(refused["structuredContent"]["error"]["code"], "preview_paused")
+        self.assertEqual(len(runtime.responses), 0)
+
+    def test_header_gets_only_the_model_name_looked_up_once(self):
+        runtime, client, screen = self.runtime()
+        (Path(self.directory.name) / "config.json").write_text(json.dumps({"udid": "00008150-TESTTESTTEST", "team_id": "TEAM"}))
+        found = {"ok": True, "devices": [{"udid": "other", "name": "Someone's iPad", "model": "iPad Air"},
+                                         {"udid": "00008150-TESTTESTTEST", "name": "Private Phone Name", "model": "iPhone 17 Pro Max"}]}
+        with patch.object(runtime.setup_manager, "discover", return_value=found) as discover:
+            runtime.call("wda_screen", {})
+            runtime._device_lookup.join(timeout=5)
+            runtime.call("wda_screen_frame", {})
+        self.assertEqual(screen.device, {"model": "iPhone 17 Pro Max"})
+        discover.assert_called_once_with()
+        cached = json.loads((Path(self.directory.name) / "device.json").read_text())
+        self.assertEqual(cached, {"udid": "00008150-TESTTESTTEST", "model": "iPhone 17 Pro Max"})
+        self.assertEqual((Path(self.directory.name) / "device.json").stat().st_mode & 0o777, 0o600)
+        again, _, later = self.runtime()
+        with patch.object(again.setup_manager, "discover") as discover:
+            again.call("wda_screen", {})
+            again._device_lookup.join(timeout=5)
+        discover.assert_not_called()
+        self.assertEqual(later.device, {"model": "iPhone 17 Pro Max"})
+
+    def test_unconfigured_runtime_never_looks_for_a_device(self):
+        runtime, client, screen = self.runtime()
+        with patch.object(runtime.setup_manager, "discover") as discover:
+            runtime.call("wda_screen_frame", {})
+            runtime._device_lookup.join(timeout=5)
+        discover.assert_not_called()
+        self.assertIsNone(screen.device)
 
     def test_runtime_close_releases_preview_and_transport(self):
         runtime, client, screen = self.runtime()

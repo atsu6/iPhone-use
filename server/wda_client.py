@@ -6,6 +6,13 @@ import socket
 import time
 from urllib.parse import urlsplit
 
+# One element query answers with the fields target selection needs, so it replaces
+# separate rect and type reads. Both keys are handled by the pinned WDA's settings.
+ELEMENT_RESPONSE_ATTRIBUTES = "type,label,rect,enabled,attribute/name,attribute/value"
+SESSION_SETTINGS = {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0,
+                    "shouldUseCompactResponses": False,
+                    "elementResponseAttributes": ELEMENT_RESPONSE_ATTRIBUTES}
+
 
 class WDAError(Exception):
     def __init__(self, code, message, uncertain=False, details=None):
@@ -69,7 +76,7 @@ class WDAClient:
     def _request_once(self, method, path, payload, budget, readonly):
         started = time.monotonic()
         deadline = started + budget
-        status, code = None, None
+        status, code, received = None, None, 0
         try:
             if self.connection is None:
                 self.connection = http.client.HTTPConnection(self.host, self.port, timeout=budget)
@@ -102,6 +109,7 @@ class WDAClient:
                 chunks.append(chunk)
                 size += len(chunk)
             raw = b"".join(chunks)
+            received = len(raw)
             # Python 3.9's read1 leaves fp open when Content-Length reaches zero.
             # Mark the completed response closed so HTTPConnection can reuse its socket.
             response.close()
@@ -142,7 +150,8 @@ class WDAClient:
                 if idx < len(parts):
                     parts[idx] = ":id"
                 endpoint = "/".join(parts)
-            self.records.append({"method": method, "endpoint": endpoint, "seconds": round(time.monotonic()-started, 4), "status": status, "error": code})
+            self.records.append({"method": method, "endpoint": endpoint, "seconds": round(time.monotonic()-started, 4),
+                                 "status": status, "error": code, "bytes": received})
 
     def ensure_session(self, timeout=None):
         deadline = time.monotonic() + (30 if timeout is None else timeout)
@@ -164,8 +173,7 @@ class WDAClient:
             self._settings_session_id, self._settings_error = self.session_id, None
             try:
                 self.request("POST", f"/session/{self.session_id}/appium/settings", {
-                    "settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}},
-                    timeout=self.remaining(deadline))
+                    "settings": dict(SESSION_SETTINGS)}, timeout=self.remaining(deadline))
             except WDAError as exc:
                 exc.details.update({"operation": "session_settings", "session_created": created,
                                     "session_available": exc.code != "invalid session id",
@@ -195,11 +203,21 @@ class WDAClient:
                         continue
                 raise
 
+    def reapply_settings(self):
+        """Send the session settings again before the next command."""
+        self._settings_session_id, self._settings_error = None, None
+
+    def clear_metrics(self):
+        self.records.clear()
+
     def metrics(self):
         endpoints = collections.defaultdict(list)
         for record in self.records:
-            endpoints[record["endpoint"]].append(record["seconds"])
+            endpoints[record["endpoint"]].append(record)
         return {"retained_requests": len(self.records), "http_seconds": round(sum(r["seconds"] for r in self.records),4),
+                "http_bytes": sum(r["bytes"] for r in self.records),
                 "errors": sum(bool(r["error"]) for r in self.records),
-                "endpoints": {k: {"count": len(v), "seconds": round(sum(v),4), "max_seconds": max(v)} for k,v in endpoints.items()},
-                "measurement": "Transport time only; model, host scheduling and user wait are outside this process."}
+                "endpoints": {k: {"count": len(v), "seconds": round(sum(r["seconds"] for r in v),4),
+                                  "max_seconds": max(r["seconds"] for r in v), "bytes": sum(r["bytes"] for r in v)}
+                              for k,v in endpoints.items()},
+                "measurement": "Transport time and response bytes only; model, host scheduling and user wait are outside this process."}

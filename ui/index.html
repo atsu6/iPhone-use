@@ -7,20 +7,38 @@
   <style>/*__STYLE__*/</style>
 </head>
 <body>
-  <main id="app" data-frame-seq="0" data-busy="false" data-operating="false" aria-label="iPhone 实时屏幕">
-    <div id="device" data-orientation="portrait" hidden>
-      <div class="side-button action-button" aria-hidden="true"></div>
-      <div class="side-button volume-up" aria-hidden="true"></div>
-      <div class="side-button volume-down" aria-hidden="true"></div>
-      <div class="side-button power-button" aria-hidden="true"></div>
-      <div class="receiver" aria-hidden="true"></div>
-      <div id="screen" hidden>
-        <div class="edge-glow" aria-hidden="true"></div>
-        <img id="image" alt="iPhone 实时屏幕" draggable="false">
-        <div class="dynamic-island" aria-hidden="true"></div>
-        <div id="cursor" aria-hidden="true" hidden></div>
+  <main id="app" data-frame-seq="0" data-busy="false" data-operating="false" data-live="connecting" aria-label="iPhone 实时屏幕">
+    <header id="status">
+      <span id="model">iPhone</span>
+      <span id="live"><i class="dot" aria-hidden="true"></i><span id="live-text">连接中</span></span>
+    </header>
+    <div id="stage">
+      <div id="device" data-orientation="portrait" hidden>
+        <div class="side-button action-button" aria-hidden="true"></div>
+        <div class="side-button volume-up" aria-hidden="true"></div>
+        <div class="side-button volume-down" aria-hidden="true"></div>
+        <div class="side-button power-button" aria-hidden="true"></div>
+        <div class="receiver" aria-hidden="true"></div>
+        <div id="screen" hidden>
+          <img id="image" alt="iPhone 实时屏幕" draggable="false">
+          <div class="glow" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="dynamic-island" aria-hidden="true"></div>
+          <div id="cursor" aria-hidden="true" hidden></div>
+        </div>
       </div>
     </div>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+    <nav id="toolbar" aria-label="手机工具">
+      <button id="tool-refresh" type="button" aria-label="刷新连接" title="刷新连接">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></svg>
+      </button>
+      <button id="tool-home" type="button" aria-label="回到主屏幕" title="回到主屏幕">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 11.2 12 5l7.5 6.2"/><path d="M6.5 10v8.5h11V10"/><path d="M10.2 18.5v-4.3h3.6v4.3"/></svg>
+      </button>
+      <button id="tool-screenshot" type="button" aria-label="截图到剪贴板" title="截图到剪贴板">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5v-2a2 2 0 0 1 2-2h2M15.5 4.5h2a2 2 0 0 1 2 2v2M19.5 15.5v2a2 2 0 0 1-2 2h-2M8.5 19.5h-2a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.1"/></svg>
+      </button>
+    </nav>
   </main>
   <script type="module">/*__SCRIPT__*/</script>
 </body>

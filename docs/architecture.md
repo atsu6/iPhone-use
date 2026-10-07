@@ -22,27 +22,27 @@ WDA 使用 XCUITest 在手机端读取控件与注入交互。相比镜像路径
 | `wda_doctor` | 探测设备、Xcode、签名 / 构建环境、连接状态 | 按实际缺项诊断，不把缺少工具当 App 不支持。 |
 | `wda_setup` | discover / fetch / configure / build / start / stop / status | 构建、Runner 运行和 USB 转发分层检查；长操作 status 跟踪，不重复启动。 |
 | `wda_ready` | WDA 状态、会话、真实前台、有效视口与当前观察验收 | 一次失效前台读取重试；持续通道故障可恢复已核验归属的服务。READY 表示通道可用，App 登录与业务结果独立验证。 |
-| `wda_observe` | tree / screenshot / both，当前设备视口与观察 ID | 默认最多 100 个节点、过滤视口外节点、跳过昂贵 visible 属性；截断和无标签需截图。 |
+| `wda_observe` | tree / screenshot / both，当前设备视口与观察 ID | 默认最多 100 个紧凑节点、过滤视口外节点、跳过昂贵 visible 属性；截图缩放后随结果内联；截断和无标签需截图。 |
 | `wda_apps` | 已选设备安装列表、本地核验别名、Apple Search 元数据 | 返回来源 / 发布者 / 核验时间；商店存在不表示本机已安装，失败是明确工具错误。 |
 | `wda_find` / `wda_wait` | 精确查询与有界等待目标 selector | 唯一目标与当前页面语义；通用标签不代表正确页面。 |
-| `wda_tap` | selector 点击或设备点点击 | 唯一性 / hittable / bounds 保留；ID 可选，仅检查 App / viewport。expect 按需。 |
+| `wda_tap` | selector 点击或设备点点击 | hittable / bounds 保留；叠在一处或仅一个在屏幕内的同名匹配自动确定，分开的多个匹配报错并列出候选。selector 失败时附截图与坐标点，下一步改用坐标。ID 可选，仅检查 App / viewport。 |
 | `wda_swipe` | 默认一次短拖动 | 默认不读取 XML 验证，verify=true 才检查位移并允许最多 2 次尝试。无进展不证明空列表 / 到底。 |
-| `wda_type_text` | 一次输入完整文本 | 默认不回读、无换行、无 submit；verify=true 精确回读，不一致时不提交。安全字段由用户接管。 |
+| `wda_type_text` | 输入完整文本，长文本分段并可续传 | 默认不回读、无换行、无 submit；verify=true 精确回读，不一致时不提交。不带 selector 时向当前焦点输入。安全字段由用户接管。 |
 | `wda_press_button` / `wda_launch_app` | 支持的系统按钮与 App 启动 | Home 用专用 homescreen；默认不轮询前台，verify=true 才核验。 |
-| `wda_batch` | 最多 20 步的已知短路径 | 顺序执行，failed / uncertain 停止；不能预测未知页面或盲批发送。 |
+| `wda_batch` | 最多 20 步的已知短路径 | 顺序执行，failed / uncertain、长文本未输完或达到时间预算时停止；不能预测未知页面或盲批发送。 |
 | `wda_scroll_find` | 最多 10 次 swipe 查找目标 | 返回找到 / 未找到及边界，不无限滚动。 |
 | `wda_collect_list` | 默认 Cell / 6 页、最多 10 页的列表采集与去重 | complete 始终 false；end_selector 的可点击终点证据不代替条数 / 金额对账。 |
-| `wda_metrics` | 请求、工具、动作 / 观察计时 | 分清 HTTP 与端到端成本，不替代交付验收。 |
+| `wda_metrics` | 请求与工具计时、返回字节数、调用间等待 | 分清 HTTP、上下文体积与模型 / 宿主等待，不替代交付验收。 |
 
 这里只描述使用契约；实际可用参数以 MCP schema 为准。插件不暴露通用 raw HTTP、任意代码执行或绕过控制检查的工具。
 
-输入对象保持封闭，未知字段在手机动作前拒绝，并附 `argument_path/unknown_fields/allowed_fields/action_executed=false`。selector 可组合 label/name/value/type/enabled；enabled 接受布尔值或树中的精确 true/false 字符串，rect/visible/in_viewport 是观察元数据。predicate 仍单独使用。精确文本由插件编码为 NSPredicate 字面量，换行等控制字符使用 Unicode 转义，保留引号、反斜线及实际字符串；不让模型删掉真实标签来规避编码错误。
+输入对象保持封闭，未知字段在手机动作前拒绝，并附 `argument_path/unknown_fields/allowed_fields/action_executed=false`。selector 可组合 label/label_contains/name/value/type/enabled，并可用 index 在多个匹配中选一个；enabled 接受布尔值或精确 true/false 字符串，rect/visible/in_viewport 是观察元数据。predicate 仍单独使用（可带 index）。精确文本由插件编码为 NSPredicate 字面量，换行等控制字符使用 Unicode 转义，保留引号、反斜线及实际字符串；不让模型删掉真实标签来规避编码错误。
 
 ## 观察与动作约束
 
-观察由 WDA 的 source / screenshot 和设备 window size 形成；screenshot 模式跳过 source。返回坐标单位为设备点，截图像素可能具有不同缩放。坐标和自选滚动区域的 observation_id 可选；提供时检查同 Runtime、真实前台 App 与 viewport，不再强制 30 秒过期或全页像素 / 内容指纹一致。时间、数字、输入光标或轮播刷新不会阻断动作。App 切换、接管和旋转后根据下一步需要获取当前状态；同一 App 的页面变化不由 ID 保证，调用方根据已知路径与下一步观察决定。
+观察由 WDA 的 source / screenshot 形成；screenshot 模式跳过 source。页面源码的根节点自带前台 App 的 bundle ID 和屏幕尺寸，一次读取即可得到三者；根节点尺寸与已知视口不一致或缺少 bundle ID 时再读取 window size / activeAppInfo。面向模型的结果是一个紧凑 JSON 文本块，截图作为图片块内联，不附带 structuredContent（宿主可能因此丢弃图片）。返回坐标单位为设备点；截图已缩放，`image.pixel_to_point` 给出像素到点的精确比例。坐标和自选滚动区域的 observation_id 可选；提供时检查同 Runtime、真实前台 App 与 viewport，不再强制 30 秒过期或全页像素 / 内容指纹一致。时间、数字、输入光标或轮播刷新不会阻断动作。App 切换、接管和旋转后根据下一步需要获取当前状态；同一 App 的页面变化不由 ID 保证，调用方根据已知路径与下一步观察决定。
 
-独立 wda_observe 使用 mode=tree/screenshot/both；动作输出使用 observe=none/tree/screenshot/both，默认 none。普通动作只执行一次并返回 verified=false、verification_deferred=true，不触发独立核验或 batch 停止；action_complete=true 只表示命令处理完成。已知连续步骤直接 batch；下一步需要新页面时，在动作里要求 tree/both，用同一份结果同时计划下一步并判断前一步效果。最终关键动作用 expect / verify=true 或一次终态读取验收。
+独立 wda_observe 使用 mode=tree/screenshot/both；动作输出使用 observe=none/tree/screenshot/both，默认 none。普通动作只执行一次并返回 verified=false、verification_deferred=true，不触发独立核验或 batch 停止；action_complete=true 只表示命令处理完成。已知连续步骤直接 batch；下一步需要新页面时，在动作里要求 tree/both，用同一份结果同时计划下一步并判断前一步效果。最终关键动作用 expect / verify=true 或一次终态读取验收。动作附带的树读取会先让 WDA 等动画结束（有上限，读完恢复为不等待），避免读到转场中两页混合的树。selector 没有带来动作时不再建议换写法重试：错误结果附带当前截图和坐标点，下一次调用按坐标完成。
 
 默认 swipe 只读取 viewport 并执行一次短手势；显式 observe 会增加所请求的页面读取。verify=true 才读取前后树、检查原生 Alert / Sheet 与 viewport、比较目标区域的稳定 name / label 锚点位移，并允许一个备用手势；原位数字 / value 刷新不算进展。上下文改变时停止备用手势，自绘列表无稳定锚点时可能无法验证。no_scroll_progress 附已执行证据和所选观察，但不证明无持仓 / 无数据 / 已完整采集。collect_list 每次只滑一次，直接采集新页面，再按目标行 type / name / label / rect 判断重复页；忽略 value 和其他控件刷新，标签全换的虚拟化页也纳入，不用备用手势跳页。复用完整树与已知 viewport；scroll_find 复用已找到的元素结果。
 
@@ -68,7 +68,7 @@ mutation 超时后可能已经作用于手机；先用只读新观察核对状�
 
 ## 安装与运行数据
 
-MCP 服务采用 Python 标准库的 stdio JSON-RPC 和持久 HTTP 客户端，不需要 Appium server；Node 工具只负责 USB 转发。源码与插件分发包只含通用代码、skills 和合成评测。用户设备 / 团队配置、WDA checkout、构建产物、Runner 及转发进程状态与截图默认位于 `~/.local/share/iphone-use-wda`，排除 Git。设备选择与签名不硬编码作者配置，本机端口默认 18100、设备端口 8100，USB 转发只绑定本机。
+MCP 服务采用 Python 标准库的 stdio JSON-RPC 和持久 HTTP 客户端，不需要 Appium server；Node 工具只负责 USB 转发。读取线程直接应答预览帧、工具栏、ping 和目录请求，手机工具在一个工作线程里按到达顺序逐个执行。源码与插件分发包只含通用代码、skills 和合成评测。用户设备 / 团队配置、WDA checkout、构建产物、Runner 及转发进程状态与截图默认位于 `~/.local/share/iphone-use-wda`，排除 Git。设备选择与签名不硬编码作者配置，本机端口默认 18100、设备端口 8100，USB 转发只绑定本机。
 
 观察返回 `nodes/viewport/image.path/observation_id`，动作返回的观察嵌套于 `observation`。截图唯一命名，默认保留最近 100 张；XML 与完整动作轨迹不会自动持久保存。当前 MCP 进程的 metrics 最多保留 2000 条 HTTP、500 条工具记录，仅含时间 / endpoint / 错误等运行信息；重启后重置，不存文本与业务值。完整任务审计需要单独保留必要本机证据，不能只靠 metrics 还原手机业务状态。
 

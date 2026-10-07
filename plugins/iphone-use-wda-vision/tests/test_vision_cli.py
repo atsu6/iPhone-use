@@ -133,7 +133,7 @@ class VisualCLITests(unittest.TestCase):
             observed = self.read_process_line(process)
             ident = observed["observation_id"]
             self.assertTrue(ident)
-            self.assertEqual(Path(observed["image"]["path"]).read_bytes(), fixture.client.screenshot)
+            self.assertEqual(Path(observed["image"]["path"]).with_suffix(".png").read_bytes(), fixture.client.screenshot)
 
             # The very next command uses an ID learned from this live process.
             process.stdin.write(json.dumps({"tool": "wda_vision_tap", "arguments": {
@@ -272,7 +272,7 @@ class VisualArtifactAndEnvelopeTests(unittest.TestCase):
         image = Path(observed["image"]["path"])
         self.assertTrue(image.name.startswith("vision-"))
         self.assertTrue(image.is_file())
-        self.assertEqual(image.read_bytes(), self.client.screenshot)
+        self.assertEqual(image.with_suffix(".png").read_bytes(), self.client.screenshot)
         self.assertEqual(len(list(artifacts.glob("vision-*.png"))), 100)
         self.assertFalse(old_vision[0].exists())
         self.assertFalse(old_vision[1].exists())
@@ -294,7 +294,7 @@ class VisualArtifactAndEnvelopeTests(unittest.TestCase):
         self.assertIsNone(error.as_dict()["action_executed"])
         self.assertFalse(error.as_dict()["action_complete"])
         self.assertTrue(error.as_dict()["visual_verification_required"])
-        self.assertEqual(Path(error.as_dict()["observation"]["image"]["path"]).read_bytes(), self.client.screenshot)
+        self.assertEqual(Path(error.as_dict()["observation"]["image"]["path"]).with_suffix(".png").read_bytes(), self.client.screenshot)
         self.assertFalse(error.as_dict()["recovery"]["replay_action"])
         self.assertEqual(len(self.client.actions()), 1)
 

@@ -87,7 +87,7 @@ class ReadinessCLITests(unittest.TestCase):
         content = [{"type": "text", "text": json.dumps(data)}]
         if image:
             content.append({"type": "image", "data": "test-image", "mimeType": "image/png"})
-        child = FakeChild({"isError": error, "structuredContent": data, "content": content})
+        child = FakeChild({"isError": error, "content": content})
         output = io.StringIO()
         with patch.object(smoke.subprocess, "Popen", return_value=child) as launch, \
                 patch.object(sys, "argv", ["smoke_mcp.py", "--ready"]), contextlib.redirect_stdout(output):

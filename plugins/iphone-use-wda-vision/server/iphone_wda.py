@@ -17,7 +17,7 @@ from wda_vision_controller import VisualPhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
 
-VERSION="0.1.3"
+VERSION="0.2.0"
 TOOL_PREFIX="wda_vision_"
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
@@ -51,7 +51,7 @@ SCHEMAS={
  "tap":obj(POINTS,("x","y")),
  "long_press":obj({**POINTS,"duration":num(.1,2)},("x","y")),
  "swipe":obj({"observation_id":ID,"direction":string("Finger movement. Up usually reveals later rows; visually verify direction and actual progress.",enum=["up","down","left","right"]),"region":REGION,"observe":AFTER}),
- "type_text":obj({"text":string("Original Unicode text to enter into the visually confirmed focused input; no automatic replace or submit.",max_length=10000),"observation_id":ID,"focused_input_confirmed":{"type":"boolean","description":"Optional legacy parameter, no confirmation gate. Choose the input from the viewed screen. Authentication belongs to the user."},"allow_newlines":BOOL,"multiline_confirmed":BOOL,"observe":AFTER},("text",)),
+ "type_text":obj({"text":string("Original Unicode text to enter into the visually confirmed focused input; no automatic replace or submit. Required unless continue_token is given.",max_length=10000),"observation_id":ID,"focused_input_confirmed":{"type":"boolean","description":"Optional legacy parameter, no confirmation gate. Choose the input from the viewed screen. Authentication belongs to the user."},"allow_newlines":BOOL,"multiline_confirmed":BOOL,"observe":AFTER,"continue_token":string("Token from a result with input_complete=false. Pass it instead of text to type the rest of that text.",max_length=64)}),
  "press_button":obj({"name":string(enum=["home","volumeup","volumedown"]),"observation_id":ID,"observe":AFTER},("name",)),
  "launch_app":obj({"bundle_id":string(),"observation_id":ID,"observe":AFTER},("bundle_id",)),
  "wait":obj({"seconds":num(0,3)}),
@@ -66,11 +66,11 @@ DESCRIPTIONS={
  "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and WDA health. Use only for setup or an actual channel problem.",
  "setup":"Manage WDA setup/signing/build/start/recovery. Reuse an already healthy service and effective build. Status returns jobs as an array; service.ready tells whether to check READY without waiting for a long-lived Runner to succeed.",
  "ready":"Check status, unlock, session and one screenshot without XML. Normally recover=true. Inspect the returned screenshot and reuse it for the first action; no second observe is needed just to begin.",
- "observe":"Return one native iPhone screenshot plus viewport, pixel conversion and optional reference ID. Foreground app metadata is optional and never blocks a usable screenshot. No image hashes, TTL or repeated foreground/viewport checks. Reuse the latest already viewed screenshot for subsequent decisions.",
+ "observe":"Return one iPhone screenshot as an image, scaled for reading, plus viewport, pixel conversion and optional reference ID: image pixel x * pixel_to_point.x and y * pixel_to_point.y give iPhone points. Inspect the image before choosing coordinates; a changed image alone does not verify task progress. Foreground app metadata is optional and never blocks a usable screenshot. No image hashes, TTL or repeated foreground/viewport checks. Reuse the latest already viewed screenshot for subsequent decisions.",
  "tap":"Tap screenshot-derived iPhone point x/y directly; no pre-action screenshot, hash or required ID. Returns the result screenshot by default; observe=false skips intermediate output.",
  "long_press":"Long-press a point already identified in a viewed screenshot. Optional ID is metadata only. Return screenshot by default; observe=false permits known compound actions.",
  "swipe":"Perform one drag in a visually selected list region; no hidden XML, progress scan, pre-action capture or forced per-gesture model round trip. Use a known batch for several gestures when appropriate and inspect its final screenshot.",
- "type_text":"Type original Unicode into the intended focused input without redundant confirmation parameters or pre-action reads. No XML locator, automatic replacement or submit. Newlines require explicit allow_newlines because Return may submit. Authentication belongs to the user.",
+ "type_text":"Type original Unicode into the intended focused input without redundant confirmation parameters or pre-action reads. No XML locator, automatic replacement or submit. Send the whole text in one call: long text is typed in bounded requests, and a result with input_complete=false returns a continue_token to pass instead of text in the next call. Newlines require explicit allow_newlines because Return may submit. Authentication belongs to the user.",
  "press_button":"Home or volume directly; no prior screenshot/ID needed for a fixed system button. Return screenshot by default, with foreground metadata when available; no repeated foreground polling.",
  "launch_app":"Activate a known bundle ID once directly, with no prior screenshot/ID or forced foreground polling. Return the result screenshot by default; inspect loading or prompts only when needed.",
  "wait":"Wait for the supplied short duration and return a screenshot; use only for an actual visible loading condition, never to align clocks or pass a freshness gate.",
@@ -118,6 +118,9 @@ def validate(value,schema,path="arguments"):
 
 def validate_semantics(name,args):
     if name=="type_text":
+        if ("continue_token" in args)==("text" in args):
+            raise WDAError("invalid_argument","type_text needs text, or continue_token from an unfinished input, not both.",details={"action_executed":False})
+        if "continue_token" in args:return
         if any(ord(c)<32 and c not in ("\n","\r") or ord(c)==127 for c in args["text"]):
             raise WDAError("invalid_argument","Control characters are not allowed in text.")
         if any(c in args["text"] for c in ("\n","\r")) and not args.get("allow_newlines",False):
@@ -284,14 +287,18 @@ class Runtime:
 
 
 def result_content(data):
-    content=[{"type":"text","text":json.dumps(data,ensure_ascii=False,allow_nan=False)}]
-    # Direct image content supports visual inspection without another file-tool round trip.
+    """One compact JSON text block plus the screenshot as an image block.
+
+    structuredContent is left out on purpose: a host that receives it may give the model
+    only that object and drop every content block, so the screenshot would never be seen.
+    """
+    content=[{"type":"text","text":json.dumps(data,ensure_ascii=False,allow_nan=False,separators=(",",":"))}]
     image=data.get("image") or data.get("observation",{}).get("image")
     if not image and isinstance(data.get("error"),dict):image=data["error"].get("observation",{}).get("image")
     if not image and "error" not in data and data.get("results"):
         last=data["results"][-1];image=last.get("image") or last.get("observation",{}).get("image")
-    if image and Path(image["path"]).is_file():content.append({"type":"image","data":base64.b64encode(Path(image["path"]).read_bytes()).decode(),"mimeType":"image/png"})
-    return {"content":content,"structuredContent":data,"isError":"error" in data}
+    if image and Path(image["path"]).is_file():content.append({"type":"image","data":base64.b64encode(Path(image["path"]).read_bytes()).decode(),"mimeType":image.get("mimeType","image/png")})
+    return {"content":content,"isError":"error" in data}
 
 
 def serve(runtime):

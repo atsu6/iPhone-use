@@ -24,11 +24,17 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   const calls = [];
   const lifecycle = [];
   const requestOptions = [];
-  let styleReads = 0;
+  let layoutReads = 0;
   let imageWrites = 0;
-  const elements = Object.fromEntries(['app', 'device', 'screen', 'image', 'cursor'].map(id => [id, {
+  const ids = ['app', 'device', 'screen', 'image', 'cursor', 'stage', 'model', 'live-text', 'toast',
+    'tool-refresh', 'tool-home', 'tool-screenshot'];
+  const elements = Object.fromEntries(ids.map(id => [id, {
     style: { setProperty(name, value) { this[name] = value; } }, dataset: {},
-    hidden: ['device', 'screen', 'cursor'].includes(id), clientWidth: 400, clientHeight: 800,
+    hidden: ['device', 'screen', 'cursor', 'toast'].includes(id), clientWidth: 400, clientHeight: 800,
+    disabled: false, textContent: '', handlers: new Map(),
+    addEventListener(name, fn) { this.handlers.set(name, fn); },
+    removeEventListener(name) { this.handlers.delete(name); },
+    click() { this.handlers.get('click')?.(); },
     removeAttribute(name) { delete this[name]; },
     animate(frames, options) {
       const animation = { frames, options, cancelled: false, cancel() { this.cancelled = true; } };
@@ -36,6 +42,10 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
       return animation;
     },
   }]));
+  // The stage is the area left between the status pill and the toolbar; reading it is a layout read.
+  const stageSize = { width: 376, height: 776 };
+  Object.defineProperty(elements.stage, 'clientWidth', { configurable: true, get: () => { layoutReads++; return stageSize.width; } });
+  Object.defineProperty(elements.stage, 'clientHeight', { configurable: true, get: () => stageSize.height });
   let imageSource;
   Object.defineProperty(elements.image, 'src', {
     configurable: true, get: () => imageSource, set: value => { imageSource = value; imageWrites++; },
@@ -55,6 +65,7 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   }
   const document = {
     hidden: false,
+    documentElement: { dataset: {} },
     getElementById: id => elements[id],
     addEventListener: (name, fn) => listeners.set(name, fn),
     removeEventListener: name => listeners.delete(name),
@@ -63,7 +74,6 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
     MockApp, document,
     matchMedia: () => ({ matches: reducedMotion }),
     performance: { now: () => now },
-    getComputedStyle: () => { styleReads++; return { paddingLeft: '12px', paddingRight: '12px', paddingTop: '12px', paddingBottom: '12px' }; },
     ResizeObserver: class { constructor(callback) { this.callback = callback; resize = this; } observe() {} disconnect() { this.disconnected = true; } },
     window: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) },
     setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay, due: now + delay }); return id; },
@@ -71,8 +81,8 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   });
   return {
     app: instance, calls, lifecycle, elements, document, timers, resize,
-    requestOptions,
-    get styleReads() { return styleReads; },
+    requestOptions, stageSize,
+    get layoutReads() { return layoutReads; },
     get imageWrites() { return imageWrites; },
     visibility(hidden) { document.hidden = hidden; listeners.get('visibilitychange')?.(); },
     event(name, value = {}) { listeners.get(name)?.(value); },
@@ -112,6 +122,12 @@ test('preserves full frame aspect ratio and maps gestures using the point viewpo
   assert.ok(Math.abs((width - 2 * bezel) / (height - 2 * bezel) - .5) < 1e-8);
   assert.ok(height <= 776);
   assert.equal(h.elements.device.dataset.orientation, 'portrait');
+  // The edge light is masked by one picture with the screen's own size and corner radius.
+  const mask = decodeURIComponent(h.elements.device.style['--glow-mask']);
+  const screenWidth = Math.round((width - 2 * bezel) * 100) / 100;
+  assert.ok(mask.startsWith('url("data:image/svg+xml,<svg'));
+  assert.ok(mask.includes(`width='${screenWidth}'`) && mask.includes(`rx='${Math.round(parseFloat(h.elements.device.style['--screen-radius']) * 100) / 100}'`));
+  assert.ok(mask.includes('feGaussianBlur'));
   assert.equal(h.elements.image.src, 'data:image/png;base64,test-image-only');
   assert.equal(h.elements.cursor.style.left, '25%');
   assert.equal(h.elements.cursor.style.top, '25%');
@@ -164,8 +180,8 @@ test('fits the entire chassis in narrow and landscape panels while preserving im
   const h = await harness();
   let seq = 0;
   for (const [panelWidth, panelHeight, imageWidth, imageHeight] of [[170, 450, 440, 956], [900, 270, 956, 440], [310, 140, 440, 956]]) {
-    h.elements.app.clientWidth = panelWidth;
-    h.elements.app.clientHeight = panelHeight;
+    h.stageSize.width = panelWidth - 24;
+    h.stageSize.height = panelHeight - 24;
     h.app.ontoolresult({ structuredContent: preview({ frame: { ...frame(++seq), width: imageWidth, height: imageHeight } }) });
     h.resize.callback();
     const bezel = parseFloat(h.elements.device.style['--bezel']);
@@ -311,12 +327,12 @@ test('an initial host handshake failure retries instead of permanently disposing
 test('same-size frames avoid repeated layout reads and duplicate sequences avoid image writes', async () => {
   const h = await harness();
   for (let seq = 1; seq <= 30; seq++) h.app.ontoolresult({ structuredContent: preview({ frame: frame(seq) }) });
-  assert.equal(h.styleReads, 1);
+  assert.equal(h.layoutReads, 1);
   assert.equal(h.imageWrites, 30);
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(30) }) });
   assert.equal(h.imageWrites, 30);
   h.resize.callback();
-  assert.equal(h.styleReads, 2);
+  assert.equal(h.layoutReads, 2);
 });
 
 test('decode failure restores the last loaded image, while authentication pause erases its backup', async () => {
@@ -362,4 +378,104 @@ test('a frame requested before authentication pause cannot restore cleared pixel
   resolve({ structuredContent: preview({ frame: frame(6), paused: false }) });
   await flush();
   assert.equal(h.elements.screen.hidden, false);
+});
+
+test('status pill names the phone model and follows the stream state', async () => {
+  const h = await harness();
+  assert.equal(h.elements.app.dataset.live, undefined);
+  assert.equal(h.elements.model.textContent, '');
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(1), frame_available: true, device: { model: 'iPhone 17 Pro Max' } }) });
+  assert.equal(h.elements.model.textContent, 'iPhone 17 Pro Max');
+  assert.equal(h.elements.app.dataset.live, 'live');
+  assert.equal(h.elements['live-text'].textContent, 'Live');
+  h.app.ontoolresult({ structuredContent: preview({ frame_available: false, device: null }) });
+  assert.equal(h.elements.app.dataset.live, 'offline');
+  assert.equal(h.elements.model.textContent, 'iPhone 17 Pro Max');
+  h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
+  assert.equal(h.elements.app.dataset.live, 'paused');
+  assert.equal(h.elements['live-text'].textContent, '已暂停');
+  assert.equal(h.elements['tool-home'].disabled, true);
+  assert.equal(h.elements['tool-screenshot'].disabled, true);
+  assert.equal(h.elements['tool-refresh'].disabled, false);
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(2), frame_available: true }) });
+  assert.equal(h.elements.app.dataset.live, 'live');
+  assert.equal(h.elements['tool-home'].disabled, false);
+});
+
+test('toolbar sends exactly one app-only action and reports its outcome', async () => {
+  let release;
+  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+    ? new Promise(resolve => { release = resolve; })
+    : Promise.resolve({ structuredContent: preview() }) });
+  h.elements['tool-home'].click();
+  h.elements['tool-screenshot'].click();
+  await flush();
+  const actions = h.calls.filter(call => call.name === 'wda_screen_action');
+  assert.equal(JSON.stringify(actions), '[{"name":"wda_screen_action","arguments":{"action":"home"}}]');
+  assert.equal(h.requestOptions[h.calls.indexOf(actions[0])].timeout, 12000);
+  assert.equal(h.elements['tool-home'].dataset.busy, 'true');
+  assert.ok(['tool-refresh', 'tool-home', 'tool-screenshot'].every(id => h.elements[id].disabled));
+  release({ structuredContent: { ok: true, action: 'home' } });
+  await flush();
+  assert.equal(h.elements.toast.textContent, '已回到主屏幕');
+  assert.equal(h.elements.toast.hidden, false);
+  assert.equal(h.elements.toast.dataset.tone, 'ok');
+  assert.equal(h.elements['tool-home'].dataset.busy, undefined);
+  assert.ok(['tool-refresh', 'tool-home', 'tool-screenshot'].every(id => !h.elements[id].disabled));
+});
+
+test('toolbar failures name the reason without changing the preview', async () => {
+  const replies = [
+    { isError: true, structuredContent: { error: { code: 'device_busy' } } },
+    { isError: true, structuredContent: { error: { code: 'something_new' } } },
+    { structuredContent: { ok: true, action: 'screenshot', copied: true } },
+  ];
+  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+    ? (replies.length ? Promise.resolve(replies.shift()) : Promise.reject(new Error('lost')))
+    : Promise.resolve({ structuredContent: preview() }) });
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(4), frame_available: true }) });
+  for (const [expected, tone] of [['手机正在执行操作，请稍后再试', 'error'], ['操作未完成，请重试', 'error'],
+    ['截图已复制到剪贴板', 'ok'], ['操作未完成，请重试', 'error']]) {
+    h.elements['tool-screenshot'].click();
+    await flush();
+    assert.equal(h.elements.toast.textContent, expected);
+    assert.equal(h.elements.toast.dataset.tone, tone);
+  }
+  assert.equal(h.elements.app.dataset.frameSeq, '4');
+  assert.equal(h.elements.device.hidden, false);
+});
+
+test('refresh adopts the new stream and asks for a frame at once', async () => {
+  const h = await harness({ reply: params => Promise.resolve(params.name === 'wda_screen_action'
+    ? { structuredContent: { ok: true, action: 'refresh', service_ready: true, ...preview({ stream_id: 'next', frame_available: false }) } }
+    : { structuredContent: preview({ stream_id: 'first' }) }) });
+  h.app.ontoolresult({ structuredContent: preview({ stream_id: 'first', frame: frame(9), frame_available: true }) });
+  assert.equal(h.elements.app.dataset.frameSeq, '9');
+  h.elements['tool-refresh'].click();
+  await flush();
+  assert.equal(h.elements.toast.textContent, '已刷新连接');
+  assert.equal([...h.timers.values()].some(timer => timer.delay === 0), true);
+  await h.tick();
+  const polls = h.calls.filter(call => call.name === 'wda_screen_frame');
+  assert.equal(polls.at(-1).arguments.after_seq, 0);
+  // The last pixels stay until the new stream delivers its first frame.
+  assert.equal(h.elements.device.hidden, false);
+});
+
+test('host theme is applied and followed, and teardown releases the toolbar', async () => {
+  const h = await harness({ context: { displayMode: 'fullscreen', availableDisplayModes: ['fullscreen'], theme: 'dark' } });
+  assert.equal(h.document.documentElement.dataset.theme, 'dark');
+  h.app.onhostcontextchanged({ theme: 'light' });
+  assert.equal(h.document.documentElement.dataset.theme, 'light');
+  h.app.onhostcontextchanged({ theme: 'sepia' });
+  assert.equal(h.document.documentElement.dataset.theme, 'light');
+  h.elements['tool-home'].click();
+  await flush();
+  await h.app.onteardown();
+  assert.equal(h.elements.toast.hidden, true);
+  assert.equal(h.elements['tool-home'].handlers.size, 0);
+  const before = h.calls.length;
+  h.elements['tool-home'].click();
+  await flush();
+  assert.equal(h.calls.length, before);
 });

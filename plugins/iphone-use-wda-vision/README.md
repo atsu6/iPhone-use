@@ -2,7 +2,7 @@
 
 给 Codex 的本地 iPhone 视觉操作插件。默认读取 WDA 原生截图，由模型从画面选择目标并执行坐标操作。效率优先：直接使用已经看过的截图，操作后返回的截图可以继续指导下一步；无需在每次动作前重复观察。
 
-从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.1.3**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
+从 `iphone-use-wda` **0.1.4** 复制出的独立插件，当前版本 **0.2.0**。保留 WDA 安装、签名、USB 转发、会话复用、操作锁和通道恢复逻辑，提供 `wda_vision_` 工具与 2 个视觉 skills。
 
 **运行条件：macOS、完整 Xcode、USB 连接的真实 iPhone、Python 3.9+、Node.js 20.19+/22.12+/24+ 和 npm 10+。** 不需要 Appium Server。WDA 固定为 16.14.0 / `d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6`。
 
@@ -23,14 +23,14 @@ sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-打包输出为 `dist/iphone-use-wda-vision-0.1.3-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
+打包输出为 `dist/iphone-use-wda-vision-0.2.0-source.zip`。当前验证记录见 [validation.md](docs/validation.md)。
 
 ## 开始操作
 
 已有 WDA 配置时调用 `wda_vision_ready`，默认 `recover=true`。直接查看 READY 返回的截图，无需紧接着再调用 observe。首次配置使用 **iphone-wda-vision-setup**；健康的现有配置、构建和会话直接复用。
 
 1. 看 READY、observe 或前一步操作返回的截图，辨认 App、页面及目标。
-2. 按 `image.pixel_to_point` 将图像像素转换为 iPhone 点坐标。
+2. 截图已缩放到适合阅读的尺寸并随结果以图片返回；按 `pixel_to_point` 将图像像素转换为 iPhone 点坐标。
 3. 执行操作，看返回截图确认结果并选择下一步；已知的连续步骤可以 batch。
 
 ```json
