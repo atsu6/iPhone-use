@@ -19,3 +19,7 @@ config.local.json
 
 # Local experiments are excluded from Git and release packages.
 /plugins/
+
+# Development notes and evaluation cases are maintained locally only.
+/docs/
+/evals/

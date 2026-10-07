@@ -1,5 +1,12 @@
 # 更新记录
 
+## 0.3.4 — 2026-10-08
+
+- `docs/` 与 `evals/` 改为本地维护，移出 Git 与发布包；必要屏幕操作说明移入技能 references。
+- 区分源码包与安装包，安装排除根 Python 测试、CI 和开发基准 / 冒烟脚本；完整保留 widget 源码、构建配置、依赖锁文件、测试和已构建页面。
+- 中英文 README 明确手机端 WDA 前置安装要求，补充签名 / 安装 / 启动步骤、官方指引及 Appium / WebDriverAgent 致谢。
+- widget 背景增加很浅的静态灰色点阵，以单个 CSS 径向渐变按 20px 间距平铺；不增加 DOM 节点、动画或 JavaScript 绘制循环。
+
 ## 0.3.3 — 2026-10-08
 
 - 插件简介改为英文「Let Codex control your iPhone」，表达让 Codex 操作用户自己的 iPhone。
@@ -66,7 +73,7 @@
 
 ## 0.2.0 — 2026-10-07
 
-延迟优化：减少每轮进入模型上下文的数据、完成一步所需的回合数，并去掉会卡住任务的超时。细节与实测见 [延迟优化说明](docs/latency-optimization.md)。
+延迟优化：减少每轮进入模型上下文的数据、完成一步所需的回合数，并去掉会卡住任务的超时。细节与实测记录在本地开发资料中。
 
 - **观察结果紧凑化。** 节点去掉 `XCUIElementType` 前缀，name / value 与文字相同时不重复，默认值省略，`rect` 为整数 `[x, y, width, height]`；同一 99 节点页面从 18,424 降到 6,868 字节。`wda_find`、`scroll_find`、`collect_list` 使用同一格式，不再返回元素 ID。这是输出格式变化，依赖旧字段的脚本需要调整。
 - **截图真正到达模型。** 面向模型的结果只返回一个紧凑 JSON 文本块和图片块，不再附带 `structuredContent`：Codex 在有结构化内容时会丢弃图片块。截图先用系统 `sips` 缩到 722×1568 级别的 JPEG，返回精确的 `image.pixel_to_point`，原始 PNG 保留在同名 `.png`。

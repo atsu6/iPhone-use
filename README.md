@@ -6,6 +6,8 @@
 
 iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
 
+**使用前，需要先在你自己的 iPhone 上安装、签名并启动 WDA Runner。** WDA 是运行在手机上的执行服务；下面的提示词和 setup 流程可以让 Codex 协助完成首次安装，已有健康的 WDA 可直接复用。
+
 ## 用一段提示词让 Codex 安装
 
 将下面这段话复制到本机 Codex：
@@ -44,6 +46,20 @@ https://github.com/zhongerxin/iPhone-use
 | Node.js 20.19+、22.12+ 或 24+，npm 10+ | USB 转发与屏幕流；支持范围以项目 engines 和 doctor 检查为准 |
 
 Xcode 需要支持手机当前的 iOS 版本。无需越狱，也无需单独启动 Appium Server。WDA 固定使用已验证的 16.14.0 提交，下载、依赖安装、签名和构建由 setup 流程管理。
+
+### 先在自己的 iPhone 上安装并启动 WDA
+
+手机端使用 [Appium 维护的 WebDriverAgent](https://github.com/appium/WebDriverAgent)。首次使用时，须通过 Xcode 用你自己的 Apple 账号与开发团队签名、安装并启动 `WebDriverAgentRunner`。
+
+推荐使用上面的安装提示词和下面的 `iphone-use-setup` 流程：Codex 获取本项目固定版本的 WDA，配置你的设备和签名，再完成构建、部署与启动；需要你完成 Apple 登录、设备信任、开发者模式或解锁时，会提示具体步骤。
+
+如需在 Xcode 手动处理：
+
+1. 用 USB 连接自己的 iPhone，信任这台 Mac，按系统要求开启开发者模式，并在 Xcode 中配置自己的 Apple 账号。
+2. 打开获取的 WDA 源码中的 `WebDriverAgent.xcodeproj`，选择 `WebDriverAgentRunner` scheme 和自己的 iPhone；在 Runner target 的 **Signing & Capabilities** 中选择自己的 Team 与可签名的 Bundle Identifier。
+3. 使用 **Product → Test** 构建、安装并运行 WDA Runner，按手机上的实际提示完成信任。运行测试会启动 WDA 服务；安装后仍需要该服务处于运行状态。
+
+安装插件并完成 USB 连接配置后，以 `wda_ready` 返回 `ready=true` 为准，再开始手机任务。设备与签名要求可参考 [Appium 真机准备说明](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)。
 
 ### 安装插件
 
@@ -91,7 +107,7 @@ sh scripts/install.sh
 
 输入与提交分开，工具默认不提交文字。模型需要核对关键页面、接收人、数量和最终结果。密码、验证码、Face ID 等认证交给用户完成，接管期间可以暂停预览。
 
-屏幕预览在同一聊天中复用已有 widget。底部提供刷新、主屏幕和截图按钮；无图像时显示黑色屏幕的 iPhone 外壳及“未连接”，锁屏时提示等待解锁。预览供用户观看，模型定位仍以工具返回的实际图像或控件为依据。
+屏幕预览在同一聊天中复用已有 widget。底部提供刷新、主屏幕和截图按钮；无图像时保留黑色屏幕的 iPhone 外壳，屏幕内仅显示对应状态图标，顶部显示连接或暂停状态。预览供用户观看，模型定位仍以工具返回的实际图像或控件为依据。
 
 ## 技术亮点
 
@@ -103,7 +119,7 @@ sh scripts/install.sh
 - **明确失败语义。** 多进程共享操作锁；动作超时或断线可能标记不确定，先读实际状态，避免盲目重放点击、输入或提交。
 - **实时预览与暂停恢复。** 屏幕流不落盘；区分锁屏与主动暂停，解锁后的 READY 可恢复锁屏预览，刷新可主动重连。
 
-这些优化主要减少重复请求与模型往返，完整任务速度仍取决于 App、USB / WDA 状态和模型响应。工程回归与真机验收分别记录在 [验证记录](docs/validation.md)。
+这些优化主要减少重复请求与模型往返，完整任务速度仍取决于 App、USB / WDA 状态和模型响应。工程回归与真机验收分别记录在本地开发资料中。
 
 ## 工具概览
 
@@ -145,14 +161,19 @@ sh scripts/check.sh
 python3 scripts/package.py
 ```
 
-构建结果是自包含屏幕 HTML，源代码包位于 `dist/iphone-use-<版本>-source.zip`。安装和普通使用不需要重新构建 UI。
+构建结果是自包含屏幕 HTML，源代码包位于 `dist/iphone-use-<版本>-source.zip`。安装和普通使用不需要重新构建 UI。安装后的插件仍完整保留 widget 的源码、样式、构建脚本、配置、依赖锁文件和测试，便于本地维护。
 
-- [运行架构](docs/architecture.md)
-- [屏幕 widget](docs/screen-widget.md)
-- [延迟优化](docs/latency-optimization.md)
-- [历史问题与处理](docs/problem-mapping.md)
+`docs/` 与 `evals/` 只在本地维护，不纳入 Git、源代码包或插件安装目录。插件需要的操作说明保留在 `skills/` 与其 `references/` 中。仓库和源代码包保留开发检查与测试；安装目录不复制根目录的 Python 测试、CI 工作流和开发基准 / 冒烟脚本，widget 的构建与验证工具则随插件保留。
+
+- [屏幕预览与恢复](skills/iphone-use/references/screen.md)
 - [App 标识参考](skills/iphone-use/references/apps.md)
 - [安装与连接故障排查](skills/iphone-use-setup/references/troubleshooting.md)
 - [更新记录](CHANGELOG.md)
+
+## 依赖与致谢
+
+本项目依赖 [Appium](https://github.com/appium/appium) 生态与 [WebDriverAgent](https://github.com/appium/WebDriverAgent)：WDA 提供手机端的自动化执行服务，[appium-ios-device](https://github.com/appium/appium-ios-device) 提供 USB 设备通信、端口转发与屏幕流连接能力。iPhone Use 在这些基础上提供 Codex 插件、MCP 工具、安装引导与屏幕 widget，无需单独运行 Appium Server。
+
+感谢 Appium、WebDriverAgent 及相关项目的维护者和贡献者，让真实 iPhone 的自动化操作成为可能。
 
 MIT License。第三方组件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
