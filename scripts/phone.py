@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from iphone_wda import Runtime, SCHEMAS
+from iphone_use import Runtime, SCHEMAS
 from wda_client import WDAError
 
 

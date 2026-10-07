@@ -148,7 +148,7 @@ def main():
     if not 1 <= args.pages <= 20 or not 1 <= args.characters <= 10000:
         parser.error("--pages must be 1..20 and --characters 1..10000")
     sys.path.insert(0, str(Path(args.server_dir).resolve()))
-    module = importlib.import_module("iphone_wda")
+    module = importlib.import_module("iphone_use")
     runtime = module.Runtime(args.state_dir, args.url)
     try:
         try:

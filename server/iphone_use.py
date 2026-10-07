@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free local MCP stdio entrypoint for iPhone Use WDA."""
+"""Dependency-free local MCP stdio entrypoint for iPhone Use."""
 import argparse
 import base64
 import collections
@@ -19,17 +19,17 @@ import threading
 import time
 from wda_client import WDAClient, WDAError
 from wda_controller import CALL_BUDGET, PhoneController, TYPING_FREQUENCY
-from wda_setup import SetupManager
+from wda_setup import SetupManager, state_directory
 from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.2.7"
-SCREEN_URI="ui://iphone-use-wda/phone-0.2.7.html"
+VERSION="0.3.0"
+SCREEN_URI="ui://iphone-use/phone-0.3.0.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
 # ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
 # including after the MCP process reconnects; no device identifiers are needed.
-SCREEN_SESSION_ID="iphone-use-wda-screen"
+SCREEN_SESSION_ID="iphone-use-screen"
 SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 # Seconds WDA may wait for animations to end before a post-action tree read; WDA_SETTLE_SECONDS overrides it.
@@ -96,7 +96,7 @@ SCHEMAS["screen_action"]=obj({"action":string("refresh reconnects the preview st
 APP_TOOLS=("screen_frame","screen_action")
 DESCRIPTIONS={
  "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and WDA health without changing the phone. Start here for setup.",
- "setup":"Initialize/start WDA when READY is unreachable or not_ready: status first, reuse an active start/recovery job, or start once with the existing config/build. Poll its job until service.ready=true, then READY again. Missing config/source/build uses iphone-wda-setup. No blanket reinstall or extra approval for authorized startup; honor no-restart instructions. Never uninstalls apps.",
+ "setup":"Initialize/start WDA when READY is unreachable or not_ready: status first, reuse an active start/recovery job, or start once with the existing config/build. Poll its job until service.ready=true, then READY again. Missing config/source/build uses iphone-use-setup. No blanket reinstall or extra approval for authorized startup; honor no-restart instructions. Never uninstalls apps.",
  "ready":"First phone task in a new chat: initialize with READY (recover=true or omitted); only ready=true permits phone tasks. Reuse this chat's healthy channel afterward. wda_unreachable/not_ready is a setup branch, not final task failure: setup(status), reuse an active job or start once, then READY again. recover=true handles owned runtime faults; it does not cold-start a stopped service. For state=recovering/recovery_required follow guidance. Never replay phone actions.",
  "observe":"Fresh phone controls and/or a screenshot, with the iPhone point viewport and an observation_id. Nodes: type without the XCUIElementType prefix; rect=[x,y,width,height] in points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. The screenshot is scaled for reading: image pixels x image.pixel_to_point [x,y] = points.",
  "find":"Query selector fields or a WDA predicate directly without a whole tree. Returns matches in tree order with index, type, texts and rect; this tool's selector documents the fields every selector accepts.",
@@ -255,7 +255,7 @@ def setting(name,default,low,high):
 
 class Runtime:
     def __init__(self,state_dir=None,base_url=None):
-        root=state_dir or os.environ.get("WDA_STATE_DIR") or str(Path.home()/".local/share/iphone-use-wda")
+        root=state_directory(state_dir)
         self.state_dir=Path(root).expanduser().resolve();self.state_dir.mkdir(mode=0o700,parents=True,exist_ok=True);self.state_dir.chmod(0o700)
         # Configuration is private runtime data, never a project file.
         configured_url=None
@@ -297,7 +297,7 @@ class Runtime:
         with lock_path.open("a") as lock:
             lock_path.chmod(0o600)
             try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:raise WDAError("device_busy","Another iPhone WDA operation is running. Wait for it to finish before continuing; no action was executed.")
+            except BlockingIOError:raise WDAError("device_busy","Another iPhone Use operation is running. Wait for it to finish before continuing; no action was executed.")
             try:
                 if cache_path.is_file() and hasattr(self.client,"session_id"):
                     try:
@@ -453,7 +453,7 @@ class Runtime:
                 # Keep the failure truthful, but give the next read-only diagnostic.
                 original.details.update(ready=False,action_executed=False,initialization_required=True,
                     recovery={"next_tool":"wda_setup","next_arguments":{"action":"status"},"replay_action":False,
-                              "next_step":"Continue initialization; do not end the phone task solely because WDA is not started. Inspect configured/jobs/service: reuse an active start/recovery job, or start once from the existing configuration/build if permitted, then verify READY. Missing prerequisites use iphone-wda-setup. Honor explicit no-restart or read-only instructions."})
+                              "next_step":"Continue initialization; do not end the phone task solely because WDA is not started. Inspect configured/jobs/service: reuse an active start/recovery job, or start once from the existing configuration/build if permitted, then verify READY. Missing prerequisites use iphone-use-setup. Honor explicit no-restart or read-only instructions."})
             raise original
         info=dict(recovery.get("recovery") or {})
         job_id=recovery.get("job_id") or info.get("job_id")
@@ -579,12 +579,12 @@ def tool_result(runtime,params):
         return result
     except WDAError as exc:return result_content({"error":exc.as_dict()},structured=name=="wda_screen_action")
     except Exception as exc:
-        print("iphone-use-wda tool failure: "+type(exc).__name__,file=sys.stderr)
+        print("iphone-use tool failure: "+type(exc).__name__,file=sys.stderr)
         return result_content({"error":{"code":"internal_error","message":"Local tool failed; inspect setup status or local stderr.","uncertain":True}})
 
 
 INSTRUCTIONS=(
- "Read iphone-wda-setup before setup and iphone-wda-use for tasks. First phone task in a new chat: wda_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
+ "Read iphone-use-setup before setup and iphone-use for tasks. First phone task in a new chat: wda_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
  "If READY fails with wda_unreachable/not_ready, continue initialization rather than end the task: wda_setup(action=status), reuse an active start/recovery job or start once from the existing config/build, poll that job until service.ready=true, then READY again. Missing config/source/build uses the setup skill. "
  "recover=true is runtime recovery, not cold startup; for state=recovering follow its setup job until the service is ready, then READY again. Honor explicit diagnostic/no-start/no-restart instructions. "
  "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use wda_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
@@ -638,11 +638,11 @@ def serve(runtime):
                 method=request["method"]
                 if method=="initialize":
                     offered=params.get("protocolVersion")
-                    result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":INSTRUCTIONS}
+                    result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False}},"serverInfo":{"name":"iphone-use","version":VERSION},"instructions":INSTRUCTIONS}
                 elif method=="ping":result={}
                 elif method=="tools/list":result={"tools":TOOLS}
                 elif method=="resources/list":
-                    result={"resources":[{"uri":SCREEN_URI,"name":"iPhone WDA Screen","title":"手机屏幕","mimeType":"text/html;profile=mcp-app","_meta":SCREEN_META}]}
+                    result={"resources":[{"uri":SCREEN_URI,"name":"iPhone Use Screen","title":"手机屏幕","mimeType":"text/html;profile=mcp-app","_meta":SCREEN_META}]}
                 elif method=="resources/read":
                     if params.get("uri")!=SCREEN_URI:raise WDAError("invalid_argument","Unknown screen resource URI.")
                     html=(Path(__file__).resolve().parents[1]/"assets/phone-screen.html").read_text()

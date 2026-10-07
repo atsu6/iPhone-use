@@ -32,7 +32,19 @@ WDA_COMMIT = "d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6"
 WDA_VERSION = "16.14.0"
 WDA_REPOSITORY = "https://github.com/appium/WebDriverAgent.git"
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_STATE = Path.home() / ".local/share/iphone-use-wda"
+DEFAULT_STATE = Path.home() / ".local/share/iphone-use"
+
+
+def state_directory(explicit=None):
+    """Prefer the new identity while reusing an existing installation's state."""
+    configured = explicit or os.environ.get("IPHONE_USE_STATE_DIR") or os.environ.get("WDA_STATE_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    current = Path.home() / ".local/share/iphone-use"
+    previous = Path.home() / ".local/share/iphone-use-wda"
+    if not current.exists() and (previous / "config.json").is_file():
+        return previous
+    return current
 ACTIVE_STATES = {"queued", "running"}
 RECOVERY_COOLDOWN_SECONDS = 120
 PID_PUBLICATION_GRACE_SECONDS = 5
@@ -123,8 +135,8 @@ def _diagnose(text):
 
 
 class SetupManager:
-    def __init__(self, state_dir: Path = DEFAULT_STATE, base_url="http://127.0.0.1:18100"):
-        self.state_dir = Path(state_dir).expanduser().resolve()
+    def __init__(self, state_dir: Path = None, base_url="http://127.0.0.1:18100"):
+        self.state_dir = state_directory(state_dir).resolve()
         if self.state_dir == PLUGIN_ROOT or PLUGIN_ROOT in self.state_dir.parents:
             raise ValueError("Runtime state must be outside the plugin checkout.")
         if any((ancestor / ".git").exists() for ancestor in (self.state_dir, *self.state_dir.parents)):
@@ -838,7 +850,7 @@ def _worker(state_dir, job_id, owner_token, base_url):
 
 def main():
     parser = argparse.ArgumentParser(description="Manage pinned WDA without arbitrary shell commands.")
-    parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--base-url", default="http://127.0.0.1:18100")
     parser.add_argument("--worker", nargs=3, metavar=("STATE_DIR", "JOB_ID", "OWNER_TOKEN"), help=argparse.SUPPRESS)
     parser.add_argument("action", nargs="?", choices=["doctor", "discover", "fetch", "configure", "build", "start", "stop", "status"], default="status")

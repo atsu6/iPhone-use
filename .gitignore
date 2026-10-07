@@ -16,3 +16,6 @@ WebDriverAgent/
 .env.*
 config.local.json
 *.jsonl
+
+# Local experiments are excluded from Git and release packages.
+/plugins/

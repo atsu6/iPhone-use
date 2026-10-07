@@ -10,7 +10,7 @@ widget 顶部与机型状态胶囊之间留白 28px；浅色主题的面板底�
 
 ## 打开与工具边界
 
-`wda_ready` 和 `wda_screen` 的 `_meta.ui.resourceUri` 关联同一个 `ui://` 资源。两者成功返回的工具结果都带稳定的 `_meta["openai/widgetSessionId"]="iphone-use-wda-screen"`，让支持此机制的 Codex 在同一聊天内复用已有面板，而非每次调用新开标签。setup 本身不关联 UI；重跑 setup 后的 READY，以及预览的 open / pause / resume 均使用同一会话标识，MCP 重连后也保持一致。标识不含设备或聊天数据；宿主按 host、聊天、server 与资源隔离，不复用其他聊天的面板。失败的工具结果不创建新 UI 会话。
+`wda_ready` 和 `wda_screen` 的 `_meta.ui.resourceUri` 关联同一个 `ui://` 资源。两者成功返回的工具结果都带稳定的 `_meta["openai/widgetSessionId"]="iphone-use-screen"`，让支持此机制的 Codex 在同一聊天内复用已有面板，而非每次调用新开标签。setup 本身不关联 UI；重跑 setup 后的 READY，以及预览的 open / pause / resume 均使用同一会话标识，MCP 重连后也保持一致。标识不含设备或聊天数据；宿主按 host、聊天、server 与资源隔离，不复用其他聊天的面板。失败的工具结果不创建新 UI 会话。
 
 资源使用 `text/html;profile=mcp-app`，声明可用 fullscreen 模式和 preferredDisplayMode；App 连接后在宿主支持时请求该模式。实际展示位置和默认打开行为由宿主决定，资源声明不是宿主已经渲染的证明。面板已打开时直接继续 setup 或手机任务，不为刷新再打开一份；需要重新打开已关闭的面板时用 `wda_screen()`，不必重复 READY。
 
@@ -55,7 +55,7 @@ widget 顶部与机型状态胶囊之间留白 28px；浅色主题的面板底�
 
 看到真实密码、PIN、验证码或 Face ID 提示后，先 `wda_screen(action="pause")`，再必须调用宿主提问功能提示用户在手机上完成，首个选项固定「已完成继续」，并停止手机动作、观察和截图。暂停状态不会因重新打开预览或调用 READY 自动解除。可以整理已有结果，但不能轮询接管期间的画面。
 
-只有用户实际选择「已完成继续」或明确通知完成后，才 `wda_screen(action="resume")`，获取一次新观察，按当前位置继续剩余工作。用户接管可能改变页面或完成提交，不沿用旧坐标和观察 ID，也不重放已完成操作。完整规则见 [认证接管](../skills/iphone-wda-use/references/authentication.md)。
+只有用户实际选择「已完成继续」或明确通知完成后，才 `wda_screen(action="resume")`，获取一次新观察，按当前位置继续剩余工作。用户接管可能改变页面或完成提交，不沿用旧坐标和观察 ID，也不重放已完成操作。完整规则见 [认证接管](../skills/iphone-use/references/authentication.md)。
 
 widget 提供用户预览；模型不能把未返回给自己的缓存流当作观察证据。未知页面仍按下一步需要使用 `wda_observe` 或动作的 `observe` 输出，最终关键结果仍以实际返回的图像 / 树 / 记录验收，不增加每步验证。
 

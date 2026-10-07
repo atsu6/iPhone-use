@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-import iphone_wda
+import iphone_use
 from wda_controller import PhoneController
 from test_controller import FakeWDA, node
 
@@ -21,7 +21,7 @@ class BenchmarkTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.runtime = iphone_wda.Runtime(self.directory.name)
+        self.runtime = iphone_use.Runtime(self.directory.name)
         self.addCleanup(self.runtime.close)
         self.client = FakeWDA()
         self.client.close = lambda: None
@@ -33,9 +33,9 @@ class BenchmarkTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_fixed_tasks_report_sizes_and_timings_without_page_content(self):
-        result = benchmark.Benchmark(self.runtime, iphone_wda).run(pages=3, characters=450, collect_pages=2)
+        result = benchmark.Benchmark(self.runtime, iphone_use).run(pages=3, characters=450, collect_pages=2)
         self.assertTrue(result["complete"])
-        self.assertEqual(result["plugin_version"], iphone_wda.VERSION)
+        self.assertEqual(result["plugin_version"], iphone_use.VERSION)
         tasks = {task["task"]: task for task in result["tasks"]}
         self.assertEqual(list(tasks), ["ready", "open_app_read_page", "scroll_3_pages", "collect_list",
                                        "type_450_characters", "screenshot"])
@@ -54,14 +54,14 @@ class BenchmarkTests(unittest.TestCase):
 
     def test_unfinished_long_input_is_continued_inside_the_task(self):
         self.runtime.phone.call_budget = 0
-        result = benchmark.Benchmark(self.runtime, iphone_wda).run(pages=1, characters=450, collect_pages=1)
+        result = benchmark.Benchmark(self.runtime, iphone_use).run(pages=1, characters=450, collect_pages=1)
         task = next(task for task in result["tasks"] if task["task"] == "type_450_characters")
         self.assertTrue(task["exact_readback"])
         self.assertEqual(task["calls"], 4)
 
     def test_not_ready_phone_is_left_alone(self):
         self.client.locked = True
-        result = benchmark.Benchmark(self.runtime, iphone_wda).run()
+        result = benchmark.Benchmark(self.runtime, iphone_use).run()
         self.assertFalse(result["complete"])
         self.assertEqual([task["task"] for task in result["tasks"]], ["ready"])
         self.assertEqual(self.client.actions(), [])

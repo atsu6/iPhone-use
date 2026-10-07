@@ -68,7 +68,7 @@ mutation 超时后可能已经作用于手机；先用只读新观察核对状�
 
 ## 安装与运行数据
 
-MCP 服务采用 Python 标准库的 stdio JSON-RPC 和持久 HTTP 客户端，不需要 Appium server；Node 工具只负责 USB 转发。读取线程直接应答预览帧、工具栏、ping 和目录请求，手机工具在一个工作线程里按到达顺序逐个执行。源码与插件分发包只含通用代码、skills 和合成评测。用户设备 / 团队配置、WDA checkout、构建产物、Runner 及转发进程状态与截图默认位于 `~/.local/share/iphone-use-wda`，排除 Git。设备选择与签名不硬编码作者配置，本机端口默认 18100、设备端口 8100，USB 转发只绑定本机。
+MCP 服务采用 Python 标准库的 stdio JSON-RPC 和持久 HTTP 客户端，不需要 Appium server；Node 工具只负责 USB 转发。读取线程直接应答预览帧、工具栏、ping 和目录请求，手机工具在一个工作线程里按到达顺序逐个执行。源码与插件分发包只含通用代码、skills 和合成评测。用户设备 / 团队配置、WDA checkout、构建产物、Runner 及转发进程状态与截图默认位于 `~/.local/share/iphone-use`，排除 Git。设备选择与签名不硬编码作者配置，本机端口默认 18100、设备端口 8100，USB 转发只绑定本机。
 
 观察返回 `nodes/viewport/image.path/observation_id`，动作返回的观察嵌套于 `observation`。截图唯一命名，默认保留最近 100 张；XML 与完整动作轨迹不会自动持久保存。当前 MCP 进程的 metrics 最多保留 2000 条 HTTP、500 条工具记录，仅含时间 / endpoint / 错误等运行信息；重启后重置，不存文本与业务值。完整任务审计需要单独保留必要本机证据，不能只靠 metrics 还原手机业务状态。
 

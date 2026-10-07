@@ -164,7 +164,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("budget", result["warnings"][0])
 
     def test_failed_explicit_lookup_is_mcp_error_but_empty_success_is_not(self):
-        from iphone_wda import result_content
+        from iphone_use import result_content
         missing = self.catalog.lookup("招商银行", source="installed")
         self.assertFalse(missing["ok"])
         self.assertTrue(result_content(missing)["isError"])

@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--ready',action='store_true',help='Verify an already-running real WDA; reads phone source and screenshot.');args=parser.parse_args()
-    child=subprocess.Popen([sys.executable,str(ROOT/'server/iphone_wda.py')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None,text=True)
+    child=subprocess.Popen([sys.executable,str(ROOT/'server/iphone_use.py')],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None,text=True)
     counter=0;records=[]
     def rpc(method,params):
         nonlocal counter
@@ -23,7 +23,7 @@ def main():
         records.append({'method':method,'seconds':round(time.monotonic()-started,3)})
         return response['result']
     try:
-        init=rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'iphone-wda-smoke','version':'1.0'}})
+        init=rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'iphone-use-smoke','version':'1.0'}})
         child.stdin.write(json.dumps({'jsonrpc':'2.0','method':'notifications/initialized'})+'\n');child.stdin.flush()
         catalog=rpc('tools/list',{})
         rpc('ping',{})

@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import Runtime
+from iphone_use import Runtime
 from wda_client import WDAError
 from wda_controller import PhoneController
 from wda_screen import ScreenHub
@@ -72,7 +72,7 @@ class PreviewRecoveryTests(unittest.TestCase):
                 self.assertTrue(self.runtime.call("wda_screen", {})["paused"])
                 probe = FakeWDA()
                 probe.close = Mock()
-                with patch("iphone_wda.WDAClient", return_value=probe):
+                with patch("iphone_use.WDAClient", return_value=probe):
                     self.assertFalse(self.runtime.screen_action("refresh")["paused"])
                 self.assertEqual(probe.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
                 self.assertFalse(self.runtime.call("wda_screen", {"action": "resume"})["paused"])
@@ -119,7 +119,7 @@ class PreviewRecoveryTests(unittest.TestCase):
                             self.other.set_paused(True)
                     return request(method, path, payload)
                 probe.request = checked
-                with patch("iphone_wda.WDAClient", return_value=probe):
+                with patch("iphone_use.WDAClient", return_value=probe):
                     result = self.runtime.screen_action("refresh")
                 self.assertEqual(result["paused"], condition != "unlocked")
                 self.assertEqual(probe.actions(), [])

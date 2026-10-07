@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_wda import BATCH_OPS, Runtime, SCHEMAS, TOOLS, validate, validate_semantics
+from iphone_use import BATCH_OPS, Runtime, SCHEMAS, TOOLS, validate, validate_semantics
 from wda_client import WDAError
 
 
