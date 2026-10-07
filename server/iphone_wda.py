@@ -16,8 +16,11 @@ from wda_client import WDAClient, WDAError
 from wda_controller import PhoneController
 from wda_setup import SetupManager
 from wda_apps import AppCatalog
+from wda_screen import ScreenHub
 
-VERSION="0.1.6"
+VERSION="0.1.7"
+SCREEN_URI="ui://iphone-use-wda/phone-0.1.7.html"
+SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
 
 
@@ -72,6 +75,8 @@ SCHEMAS={
 BATCH_OPS=["tap","swipe","type_text","launch_app","press_button","wait","observe","scroll_find"]
 SCHEMAS["batch"]=obj({"steps":{"type":"array","minItems":1,"maxItems":20,"items":{"oneOf":[obj({"op":{"type":"string","const":op},"args":SCHEMAS[op]},("op","args")) for op in BATCH_OPS]}}},("steps",))
 SCHEMAS["ready"]["examples"]=[{"recover":True,"screenshot":False}]
+SCHEMAS["screen"]=obj({"action":string("Default open displays the live iPhone sidebar. Pause before password/Face ID takeover; resume only after the user confirms completion.",enum=["open","pause","resume"])})
+SCHEMAS["screen_frame"]=obj({"after_seq":num(0,9007199254740991,"integer"),"last_event_id":num(0,9007199254740991,"integer")})
 DESCRIPTIONS={
  "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and WDA health without changing the phone. Start here for setup.",
  "setup":"Manage WDA checkout, explicit signing config, nonblocking build/run jobs and loopback USB forwarding. Read iphone-wda-setup skill. Never uninstalls apps.",
@@ -91,6 +96,9 @@ DESCRIPTIONS={
 }
 DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
 READS={"doctor","observe","find","wait","metrics","apps"}
+READS.update(("screen","screen_frame"))
+DESCRIPTIONS["screen"]="Open the live iPhone screen in the Codex side panel. No phone actions or UI controls. Pause the preview before password/Face ID user takeover; resume after explicit completion. READY also opens this view by default."
+DESCRIPTIONS["screen_frame"]="App-only cached live preview and action cursor events. Never reads XML, starts sessions or occupies the phone operation lock."
 
 
 def published_schema(name):
@@ -111,6 +119,14 @@ def published_schema(name):
 
 TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
         "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
+for tool in TOOLS:
+    if tool["name"] in ("wda_ready","wda_screen"):
+        tool["_meta"]={"ui":{"resourceUri":SCREEN_URI}}
+    if tool["name"]=="wda_screen":
+        tool.update(title="手机屏幕")
+        tool["_meta"]["openai/ui"]={"entrypoints":[{"type":"thread"}]}
+        tool["annotations"].update(readOnlyHint=False,destructiveHint=False,idempotentHint=True)
+    if tool["name"]=="wda_screen_frame":tool["_meta"]={"ui":{"visibility":["app"]}}
 
 
 def validate(value,schema,path="arguments"):
@@ -177,12 +193,21 @@ class Runtime:
         self.phone=PhoneController(self.client,self.state_dir)
         self.setup_manager=SetupManager(self.state_dir,self.base_url)
         self.apps=AppCatalog(self.state_dir,self.setup_manager)
+        self.screen=ScreenHub(self.state_dir)
+        self.phone.screen=self.screen
 
     def call(self,name,args):
         # WDA has one active session. Serialize independent Codex MCP processes
         # sharing this runtime, and share only this plugin's session identity.
         if not isinstance(name,str) or not name.startswith("wda_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown WDA tool.")
         validate(args,SCHEMAS[name[4:]]);validate_semantics(name[4:],args)
+        # Cached preview polling does not share the WDA action/session lock.
+        if name=="wda_screen_frame":return self.screen.frame(**args)
+        if name=="wda_screen":
+            action=args.get("action","open")
+            if action=="pause":self.screen.set_paused(True)
+            elif action=="resume":self.screen.set_paused(False)
+            return self.screen.start()
         lock_path=self.state_dir/"operation.lock"
         cache_path=self.state_dir/"session.json"
         with lock_path.open("a") as lock:
@@ -280,8 +305,11 @@ class Runtime:
     def _call(self,name,args):
         if not isinstance(name,str) or not name.startswith("wda_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown WDA tool.")
         op=name[4:];validate(args,SCHEMAS[op]);validate_semantics(op,args)
-        start=time.monotonic();error=None
+        start=time.monotonic();error=None;activity=None
         try:
+            if op not in ("doctor","apps","setup","metrics"):
+                try:activity=self.screen.begin(op)
+                except Exception:pass
             if op=="doctor":return self.setup_manager.doctor()
             if op=="apps":return self.apps.lookup(**args)
             if op=="setup":
@@ -299,6 +327,8 @@ class Runtime:
                     self.client=WDAClient(self.base_url);self.phone.client=self.client
                 return result
             if op=="ready":
+                try:self.screen.start()
+                except Exception:pass
                 return self.ready(**args)
             if op=="metrics":
                 records=self.phone.tool_records
@@ -308,15 +338,22 @@ class Runtime:
             return getattr(self.phone,op)(**args)
         except WDAError as exc:
             error=exc.code
+            if exc.code=="phone_locked" or (exc.code=="not_editable" and exc.details.get("secure_field")):
+                try:self.screen.set_paused(True)
+                except Exception:pass
             if op in READS:
                 exc.details.setdefault("action_executed",False)
             if self.channel_fault(exc):
                 exc.details.update(category="channel_runtime",recovery={"tool":"wda_ready","arguments":{"screenshot":False},"replay_action":False})
             raise
         except (ValueError,TypeError) as exc:error="invalid_argument";raise WDAError(error,str(exc)) from exc
-        finally:self.phone.tool_records.append({"tool":name,"seconds":round(time.monotonic()-start,4),"error":error})
+        finally:
+            if activity is not None:
+                try:self.screen.end(activity)
+                except Exception:pass
+            self.phone.tool_records.append({"tool":name,"seconds":round(time.monotonic()-start,4),"error":error})
 
-    def close(self):self.client.close()
+    def close(self):self.screen.close();self.client.close()
 
 
 def result_content(data):
@@ -345,13 +382,20 @@ def serve(runtime):
             method=request["method"]
             if method=="initialize":
                 offered=params.get("protocolVersion")
-                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"Read iphone-wda-setup before setup and iphone-wda-use for tasks. Normal startup uses wda_ready with recover=true or omitted; only ready=true permits tasks. Reuse READY's observation. For recovering follow its setup job until service is ready, then READY again; respect explicit no-restart instructions. Resolve unknown bundle IDs with wda_apps. Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. Chain known steps in batch; explicit expect/verify opts into checking key outcomes. Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. Standalone observation uses mode, mutation output uses observe. For passwords or Face ID ask the user to authenticate on iPhone, pause phone calls, then resume remaining work from fresh state after confirmation. Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
+                result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False}},"serverInfo":{"name":"iphone-use-wda","version":VERSION},"instructions":"The live iPhone screen opens in the side panel with READY; use wda_screen to reopen it. Before password/Face ID takeover call wda_screen(action=pause); after user confirmation call resume, then continue. Widget frames are display context, never substitute for a model observation or final verification. Read iphone-wda-setup before setup and iphone-wda-use for tasks. Normal startup uses wda_ready with recover=true or omitted; only ready=true permits tasks. Reuse READY's observation. For recovering follow its setup job until service is ready, then READY again; respect explicit no-restart instructions. Resolve unknown bundle IDs with wda_apps. Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. Chain known steps in batch; explicit expect/verify opts into checking key outcomes. Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. Standalone observation uses mode, mutation output uses observe. For passwords or Face ID ask the user to authenticate on iPhone, pause phone calls, then resume remaining work from fresh state after confirmation. Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."}
             elif method=="ping":result={}
             elif method=="tools/list":result={"tools":TOOLS}
+            elif method=="resources/list":
+                result={"resources":[{"uri":SCREEN_URI,"name":"iPhone WDA Screen","title":"手机屏幕","mimeType":"text/html;profile=mcp-app","_meta":SCREEN_META}]}
+            elif method=="resources/read":
+                if params.get("uri")!=SCREEN_URI:raise WDAError("invalid_argument","Unknown screen resource URI.")
+                html=(Path(__file__).resolve().parents[1]/"assets/phone-screen.html").read_text()
+                result={"contents":[{"uri":SCREEN_URI,"mimeType":"text/html;profile=mcp-app","text":html,"_meta":SCREEN_META}]}
             elif method=="tools/call":
                 try:
                     args=params.get("arguments",{})
-                    result=result_content(runtime.call(params.get("name"),args))
+                    data=runtime.call(params.get("name"),args)
+                    result={"content":[],"structuredContent":data,"isError":False} if params.get("name")=="wda_screen_frame" else result_content(data)
                 except WDAError as exc:result=result_content({"error":exc.as_dict()})
                 except Exception as exc:
                     print("iphone-use-wda tool failure: "+type(exc).__name__,file=sys.stderr)

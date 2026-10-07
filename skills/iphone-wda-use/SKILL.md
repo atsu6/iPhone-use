@@ -1,6 +1,6 @@
 ---
 name: iphone-wda-use
-description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集及密码或 Face ID 认证接管。
+description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认乐观执行导航、点击、输入和滚动，在下一步观察时顺带判断进度，只对关键最终结果显式验收；指导 App 查找、列表采集、默认手机屏幕侧边栏及密码或 Face ID 认证接管。
 ---
 
 # 用 WDA 完成 iPhone 任务
@@ -17,15 +17,23 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认�
 - `ready=false, state="recovering"`：按 recovery 的 job_id 和 status 参数查询同一工作。从返回的 `jobs` 数组找到该工作，recovery_phase=serving 后重验 READY；长期 Runner 可以保持 running，不等 succeeded，不重复 start。
 - `ready=false, state="recovery_required", reason="recovery_disabled"`：仅在用户指令允许恢复时按 next_tool / next_arguments 调用 recover=true；明确禁止重启则保留限制并报告阻塞。
 
+READY 关联只有手机屏幕的侧边栏 widget，宿主支持时默认打开。已有 READY 通道而屏幕未显示、用户关闭后要重新打开时，调用一次 `wda_screen()`；不要为打开画面重复 READY。widget 没有按钮或其他 UI，无需操作它来控制手机。
+
 后两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
-App 实际要求密码、PIN、验证码或 Face ID / Touch ID 时，按 [认证接管与恢复](references/authentication.md) 请用户在 iPhone 上完成并回复“继续”。保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到完成通知后获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
+App 实际要求密码、PIN、验证码或 Face ID / Touch ID 时，按 [认证接管与恢复](references/authentication.md)，先调用 `wda_screen(action="pause")` 停止预览并清空画面，再请用户在 iPhone 上完成并回复“继续”；保留当前页面、任务进度和待继续步骤，接管期间暂停该 iPhone 的动作、读取和截图；不索取凭据，不循环认证按钮、Home、launch 或重启 WDA。收到用户明确完成通知后先调用 `wda_screen(action="resume")`，再获取一次新观察，同时准备下一步和判断用户是否已完成后续操作。App 认证不需要重启通道；手机真正锁屏或通道失效才恢复 READY。
 
 ## 按下一步需要选择观察
 
 已知唯一语义目标和已知导航路径使用默认 `observe="none"`，可以连续执行或合并为 batch。下一步需要辨认未知页面、选区域或读取内容时，在本次动作直接设置 `observe="tree" / "screenshot" / "both"`，用返回的嵌套 `observation` 同时规划下一步和顺带判断上一动作。不要先用 none，再专门 observe 作验证而增加一个模型回合。独立读取用 `wda_observe(mode=...)`，不要混用 mode 与 observe。
 
 树提供 `nodes`、iPhone 点坐标的 `viewport` 和 `observation_id`。保持 `include_invisible=false`、`max_nodes=100`、`expensive_visibility=false`；只查一个目标用 `wda_find` / `wda_wait`，不重复获取整树。自绘内容、遮挡或缺失标签需要视觉判断时才取截图。screenshot 跳过 XML；both 同时提供树和图。树截断或 `in_viewport=true` 不能证明内容全量或目标未被遮挡。截图来自 WDA `/screenshot`；若 App 出现分享浮层，处理当前状态，不循环重复同一路径截图。
+
+## 屏幕预览与操作指示
+
+widget 通过独立 USB MJPEG 通道显示最新手机画面，界面最多每秒读取 5 次服务端缓存，不轮询截图或 XML，也不占手机操作锁。不要在模型循环中调用 `wda_screen_frame`；这是仅对 App 暴露的内部工具。不要为刷新预览另写轮询代码、每步打开 widget 或添加 screenshot / observe 调用。
+
+AI 操作时边缘渐变光效表示短时活动，圆形 cursor 标记实际点击位置或拖动路径，二者都不证明动作成功。widget 画面不会自动成为模型观察；定位未知页面或读取内容时仍按下一步需要请求工具树 / 图像，最终关键操作按实际结果验收。预览不可用或留空时根据 WDA 工具的真实状态继续，不为画面问题反复恢复控制通道。widget 隐藏 / 关闭后停止轮询，预览租约 5 秒到期；认证暂停会停止采集并清空画面，恢复必须等用户明确确认。
 
 ## App 与常规动作
 

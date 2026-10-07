@@ -137,7 +137,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(responses[1]["result"], {})
         tools = responses[2]["result"]["tools"]
         names = [tool["name"] for tool in tools]
-        self.assertEqual(len(names), 16)
+        self.assertEqual(len(names), 18)
         self.assertEqual(len(names), len(set(names)))
         for name in ("wda_ready", "wda_setup", "wda_observe", "wda_tap", "wda_type_text", "wda_batch", "wda_collect_list", "wda_apps"):
             self.assertIn(name, names)

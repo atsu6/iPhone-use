@@ -1,5 +1,17 @@
 # 验证记录
 
+## 0.1.7 的手机屏幕 widget
+
+日期：2026-10-07（Asia/Shanghai）。普通版 273 项 Python 测试、8 项界面 DOM 测试和独立视觉版 126 项回归全部通过。UI 严格 TypeScript 检查、独立 HTML 构建、Node 语法和 manifest 检查通过。CI 同时重建 HTML 并核对已提交的产物，避免 UI 源码与安装包分离。
+
+新增验证覆盖有界 JPEG 解析、HTTP chunked 流解码、缓存帧和序号、服务重启后的序号复位、仅终止自己创建的 USB 子进程、预览租约、跨进程认证暂停、坐标映射、实际动作事件、隐藏时停止轮询、断连清除旧画面、协议资源读取和 App 专用工具可见范围。控制器测试证明预览不新增 WDA 观察或动作请求；这不代表真机视频编码没有设备开销。
+
+0.1.7 安装缓存的真实 stdio initialize / tools/list / ping 通过，目录共 18 个工具。新启动的 Codex 模型实际枚举到 17 个普通工具，包含 `wda_screen`，不包含 App 专用 `wda_screen_frame`；batch 的 8 类 op 保持完整。一次原生 `wda_metrics` 调用成功，retained_requests=0、http_seconds=0。
+
+在 Codex 内置浏览器中，使用官方 AppBridge 与合成 PNG 驱动实际安装包 HTML 完成渲染检查：一个图像、零文字与操作控件、完整纵横比、连续缓存帧更新、渐变边缘光效及拖动圆形 cursor 均可见。该测试不是 Codex MCP Apps 侧边栏宿主验收，也不是真实 iPhone 视频；合成图片和渲染截图不进入发布包。
+
+现场设备检查显示 iPhone connection_state=unavailable，WDA 服务未运行。真机 MJPEG 流、Codex 侧边栏默认打开及实际设备动作与 cursor 同步仍待 USB 连接并解锁后验证。当前聊天保留原 0.1.6 的工具快照；需重新连接聊天加载新 UI 资源和工具，不能用 CLI 的新绑定宣称当前侧边栏已经打开。
+
 ## 0.1.6 的工具加载修复
 
 日期：2026-10-07（Asia/Shanghai）。普通版 244 项自动测试和独立视觉版 126 项回归全部通过，普通 manifest、2 skills、16 tools 与 Node 语法检查通过。新增回归覆盖全部公开 schema 的 5,000-byte 预算、batch 引用闭合与展开后的参数合同等价、宿主支持字段归一后的 8 类步骤完整性，以及标准 MCP 注册入口、路径空格和安装失败处理。

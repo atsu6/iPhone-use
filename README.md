@@ -1,6 +1,6 @@
 # iPhone Use WDA
 
-给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。
+给 Codex 的本地 iPhone 操作插件：安装并诊断 WebDriverAgent（WDA），直接读取手机控件、操作 App，把常见连续动作合成一次 MCP 调用。普通步骤默认乐观执行，在准备下一步时顺便确认前一步，最终关键结果再验收。使用时侧边栏展示手机屏幕，操作期间显示边缘渐变光效与圆形点击 / 拖动指示。
 
 另有独立的[截图视觉版插件](plugins/iphone-use-wda-vision/README.md)，基于 v0.1.4 复制，默认用截图确定并核验每次操作；XML 仅作为页面数据读取的可选工具。两版可共享已有 WDA 配置和运行通道。
 
@@ -14,9 +14,9 @@ cd iPhone-use-wda
 sh scripts/install.sh
 ```
 
-此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills 与完整 16 个 tools。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
+此仓库为私有，需要先获得访问权限。脚本验证并暂存插件，通过 Codex CLI 注册本地 marketplace、安装 skills，并以同名 `iphone_wda` 注册标准 MCP；重新连接聊天即可加载 2 个 skills、17 个模型工具与 1 个仅供屏幕 widget 使用的工具。标准配置优先于插件的同名注册，只有一套工具名称，不受插件工具共享说明预算的裁剪。
 
-也可将 `dist/iphone-use-wda-0.1.6-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
+也可将 `dist/iphone-use-wda-0.1.7-source.zip` 作为源代码包保存。运行 `python3 scripts/package.py` 生成；包内包含便携 `plugin.json`/`mcp.json` 和 Codex 兼容 manifest。
 
 ## 第一次让自己的 iPhone 达到 READY
 
@@ -28,9 +28,17 @@ sh scripts/install.sh
 4. `wda_setup(action="configure", udid="自己的设备标识", team_id="自己的10位TeamID", bundle_id="com.example.iphonewda.WebDriverAgentRunner")` 保存本机配置。已有相同版本且无跟踪修改的 WDA 可传 `source_dir` 复用。
 5. `build` 签名构建，成功后 `start` 运行 WDA 并建立 `127.0.0.1:18100 → iPhone:8100` USB 转发。两个操作都返回后台 job，不占住 MCP 等待整次编译。
 6. 若 iOS 要求，在“设置 → 通用 → VPN 与设备管理”信任自己的开发者证书，解锁并保持手机唤醒。
-7. 正常任务用 `wda_ready(recover=true)`（或省略 recover），同时核验 status.ready、可用 session、viewport、控件树与截图。检查手机解锁状态；镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务。
+7. 正常任务用 `wda_ready(recover=true)`（或省略 recover），同时核验 status.ready、可用 session、viewport、控件树与截图。检查手机解锁状态；镜像占用导致空控件树时拒绝就绪。成功返回 `ready:true` 才进入操作任务；READY 同时关联手机屏幕 widget，宿主支持时默认打开侧边栏。
 
 安装遇到免费账户 App 名额、签名过期、证书未信任、手机锁定、USB 断开时，setup skill 给出与实际错误对应的步骤。需要用户本人完成的登录、Face ID 与信任不会由 WDA 代替。工具不自动卸载其他 App。
+
+## 侧边栏手机屏幕
+
+正常调用 `wda_ready` 后，Codex 可打开关联的 MCP App；也可调用 `wda_screen()` 重新打开。widget 只显示当前手机屏幕，没有按钮、状态文字或其他控件。屏幕保持原始比例，AI 操作期间边缘显示涟漪渐变光效，实际点击与拖动位置用圆形 cursor 示意；这只是操作指示，不是成功验收。
+
+画面来自 WDA 独立的 USB MJPEG 通道（默认设备端口 9100），widget 最多每秒获取 5 次最新缓存帧。它不轮询 WDA `/screenshot`、XML 或 XCTest 命令，不新增手机控制请求，不占用操作锁；图像只保留在内存。关闭或隐藏 widget 后停止获取，服务端预览租约在 5 秒后到期。USB / MJPEG 不可用时画面留空，控制任务按实际 WDA 状态继续；不因预览问题循环重启服务。
+
+遇到密码、PIN、验证码或 Face ID 接管时，先调用 `wda_screen(action="pause")` 停止预览并清空画面，然后提示用户在 iPhone 上完成。收到用户明确完成通知后调用 `wda_screen(action="resume")`，再获取一次新观察继续任务。widget 画面是给用户看的实时预览，模型定位仍使用工具实际返回的树 / 图像，最终关键结果仍须验收。接口、生命周期与构建方法见 [屏幕 widget 说明](docs/screen-widget.md)。
 
 ## 直接操作，减少模型往返
 
@@ -48,6 +56,9 @@ sh scripts/install.sh
 | `wda_batch` | 一轮执行已知步骤，预先校验所有参数；错误、不确定或提交时停止 |
 | `wda_scroll_find`, `wda_collect_list` | 有界搜索、去重采集与明确覆盖边界 |
 | `wda_metrics` | HTTP/工具耗时汇总，不记录文本、账户数据或图像 |
+| `wda_screen` | 重新打开手机屏幕、认证接管前暂停、用户完成后恢复 |
+
+`wda_screen_frame` 仅向 MCP App 暴露，负责缓存帧和操作指示，不供模型调用。目录共 18 个 tools，模型可用 17 个。
 
 例如已观察到目标后，点击并直接取得供下一步决策的页面：
 
@@ -85,7 +96,7 @@ sh scripts/install.sh
 
 ## 本机数据与恢复
 
-默认状态在 `~/.local/share/iphone-use-wda/`，目录权限 700、配置与截图文件 600；私有设备配置、Xcode 日志、签名构建与证据不进入仓库/源代码包。截图文件名唯一，最多保留最近 100 张；工具计时保留最近 2,000 次请求与 500 次调用。原始 XML/文本不写运行账本。
+默认状态在 `~/.local/share/iphone-use-wda/`，目录权限 700、配置与截图文件 600；私有设备配置、Xcode 日志、签名构建与证据不进入仓库/源代码包。显式工具截图文件名唯一，最多保留最近 100 张；侧边栏流不落盘，操作指示只保存有界的坐标与短时活动信息；工具计时保留最近 2,000 次请求与 500 次调用。原始 XML/文本不写运行账本。
 
 `WDA_STATE_DIR` 可指定外部运行目录，`WDA_URL` 可指定本机 HTTP 地址。默认配置端口 18100，支持 configure 的 local_port/device_port；远程地址被拒绝。同一运行目录的多个 MCP 进程共享 session，并通过操作锁避免并发抢占；忙时返回 device_busy，不执行动作。实际写操作断线或超时标记 uncertain，不能盲目重放点击/输入。GET 与已知 POST 元素查询最多重试一次，共用原截止时间；非元素查询遇到 invalid session 可重建会话，旧元素 ID 不跨会话重用。
 
@@ -96,6 +107,7 @@ sh scripts/install.sh
 ## 开发与验证
 
 ```sh
+(cd ui && npm ci && npm run build && npm test)
 sh scripts/check.sh
 python3 scripts/package.py
 python3 server/iphone_wda.py --doctor
@@ -114,6 +126,10 @@ Python MCP 使用标准库实现换行 JSON-RPC；stdout 仅输出协议，诊�
 ## 0.1.6 完整工具绑定
 
 Codex 插件 MCP 工具存在共享 64KB 说明预算，工具目录完整不代表模型收到完整绑定；大 schema 也可能被压缩成缺少参数的描述。安装脚本自动注册同名标准 MCP，工具名保持不变。batch 发布 schema 提取公共 selector / observe 引用，低于宿主默认 5KB 压缩门槛，8 种步骤的 op / args 全部保留，运行时仍按原闭集严格校验。加载原因与验证方法见 [工具绑定审计](docs/tool-loading-audit.md)。
+
+## 0.1.7 屏幕 widget
+
+增加与 READY 关联的 MCP App 和 `wda_screen`：在支持的宿主中默认打开手机屏幕侧边栏，以独立 USB MJPEG 流显示最新画面，保持原有乐观执行与操作速度。点击 / 拖动使用实际请求坐标显示，边缘光效表示短时操作活动。认证接管暂停并清空预览，用户确认后再恢复；App 专用帧工具对模型隐藏。
 
 ## 历史行为（0.1.1–0.1.4；当前默认以 0.1.5 为准）
 

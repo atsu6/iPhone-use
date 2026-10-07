@@ -96,8 +96,23 @@ class PhoneController:
         self.snapshots=collections.OrderedDict()
         self.tool_records=collections.deque(maxlen=500)
         self.accepted_actions=0
+        self.screen=None
+        self._screen_viewport=None
+        self._screen_targets={}
+
+    def screen_event(self,kind,**kwargs):
+        # Display telemetry must never change, retry or delay a phone action
+        # with extra WDA requests. No selector, input text or app data is sent.
+        if self.screen is not None:
+            try:self.screen.gesture(kind,viewport=self._screen_viewport,**kwargs)
+            except Exception:pass
 
     def post(self,path,payload,timeout=None,session=True):
+        if path=="/wda/tap":self.screen_event("tap",point={"x":payload["x"],"y":payload["y"]})
+        elif path.endswith("/click") and path[:-6] in self._screen_targets:
+            self.screen_event("tap",point=self._screen_targets[path[:-6]])
+        elif path=="/wda/dragfromtoforduration":
+            self.screen_event("drag",**{"from_point":{"x":payload["fromX"],"y":payload["fromY"]},"to_point":{"x":payload["toX"],"y":payload["toY"]},"duration_ms":max(300,min(3000,int((payload.get("duration",0)+.35)*1000)))})
         result=self.client.session("POST",path,payload,timeout=timeout) if session else self.client.request("POST",path,payload,timeout=timeout)
         self.accepted_actions+=1
         return result
@@ -107,6 +122,10 @@ class PhoneController:
         if not isinstance(v,dict):
             fail("invalid_response", "Missing viewport.")
         finite(v.get("width"),"width",1,10000);finite(v.get("height"),"height",1,10000)
+        if self.screen is not None and v!=self._screen_viewport:
+            self._screen_viewport={"width":v["width"],"height":v["height"]}
+            try:self.screen.set_viewport(self._screen_viewport)
+            except Exception:pass
         return {"width":v["width"],"height":v["height"],"units":"iPhone points"}
 
     def active_app(self,timeout=None):
@@ -255,7 +274,10 @@ class PhoneController:
         if editable:
             kind=self.client.session("GET",path+"/attribute/type")
             if kind not in ("XCUIElementTypeTextField","XCUIElementTypeSearchField","XCUIElementTypeTextView"):
-                fail("not_editable","Select a readable text/search field or text view. Ask the user to handle secure fields.")
+                fail("not_editable","Select a readable text/search field or text view. Ask the user to handle secure fields.",secure_field=kind=="XCUIElementTypeSecureTextField")
+        if self.screen is not None:
+            if len(self._screen_targets)>=32:self._screen_targets.clear()
+            self._screen_targets[path]={"x":cx,"y":cy}
         return (path,kind) if editable and with_kind else path
 
     def wait(self,selector,timeout_seconds=6):
@@ -462,6 +484,7 @@ class PhoneController:
             if attempt==0:
                 self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
             else:
+                self.screen_event("drag",**{"from_point":{"x":points[0],"y":points[1]},"to_point":{"x":points[2],"y":points[3]},"duration_ms":450})
                 self.post("/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
             if not verify:
                 result=self.after(expect,observe,max_nodes=_max_nodes)
