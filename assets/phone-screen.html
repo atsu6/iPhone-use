@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>iPhone 屏幕</title>
-  <style>:root{color-scheme:light dark;background:transparent;--canvas:#f8f8f8;--text:#0d0d0d;--muted:#6e6e80;--surface:#0000000a;--surface-hover:#00000014;--line:#0000001a;--accent:#10a37f;--warn:#b7791f;--toast:#202123f2;--toast-text:#fff}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--canvas:transparent;--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}}
-:root[data-theme="dark"]{--canvas:transparent;--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}
+  <style>:root{color-scheme:light dark;background:transparent;--canvas:#f8f8f8;--text:#0d0d0d;--muted:#6e6e80;--surface:#fff;--surface-hover:#00000014;--line:#ebebeb;--control-shadow:0 2px 12px #00000008;--accent:#10a37f;--warn:#b7791f;--toast:#202123f2;--toast-text:#fff}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--canvas:transparent;--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--control-shadow:none;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}}
+:root[data-theme="dark"]{--canvas:transparent;--text:#ececf1;--muted:#a1a1aa;--surface:#ffffff0f;--surface-hover:#ffffff1f;--line:#ffffff1f;--control-shadow:none;--accent:#19c37d;--warn:#e0a84a;--toast:#ececf1f5;--toast-text:#0d0d0d}
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
 #app{position:relative;width:100%;height:100vh;height:100dvh;display:flex;flex-direction:column;align-items:center;gap:12px;padding:28px 16px 16px;overflow:hidden;background:var(--canvas);color:var(--text);font:500 12px/1 ui-sans-serif,-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-#status{flex:none;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:28px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);letter-spacing:.01em;white-space:nowrap;user-select:none}
+#status{flex:none;display:inline-flex;align-items:center;gap:8px;max-width:100%;height:28px;padding:0 12px;border:.5px solid var(--line);border-radius:999px;background:var(--surface);box-shadow:var(--control-shadow);letter-spacing:.01em;white-space:nowrap;user-select:none}
 #model{overflow:hidden;text-overflow:ellipsis;font-weight:600}
 #live{flex:none;display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
 .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55}
@@ -18,7 +18,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent
 #app[data-live="live"] .dot{opacity:1;animation:live-pulse 2.4s ease-in-out infinite}
 #app[data-live="paused"] #live{color:var(--warn)}
 #stage{flex:1 1 auto;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
-#toolbar{flex:none;display:inline-flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+#toolbar{flex:none;display:inline-flex;align-items:center;gap:2px;padding:4px;border:.5px solid var(--line);border-radius:999px;background:var(--surface);box-shadow:var(--control-shadow)}
 #toolbar button{appearance:none;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--text);cursor:pointer;transition:background-color .15s ease,transform .1s ease,opacity .15s ease}
 #toolbar button:hover{background:var(--surface-hover)}
 #toolbar button:active{transform:scale(.94)}
