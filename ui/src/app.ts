@@ -25,11 +25,12 @@ type Preview = {
 };
 
 const root = document.getElementById('app')!;
+const device = document.getElementById('device')!;
 const screen = document.getElementById('screen')!;
 const image = document.getElementById('image')! as HTMLImageElement;
 const cursor = document.getElementById('cursor')!;
 const app = new App(
-  { name: 'iPhone WDA Screen', version: '0.1.10' },
+  { name: 'iPhone WDA Screen', version: '0.1.11' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -66,14 +67,16 @@ function hideCursor() {
   cursor.hidden = true;
 }
 
-function clearFrame() {
+function clearFrame(resetOperating = true) {
   hideCursor();
   image.removeAttribute('src');
+  device.hidden = true;
   screen.hidden = true;
   dimensions = undefined;
   frameSeq = 0;
   root.dataset.frameSeq = '0';
   root.dataset.busy = 'false';
+  if (resetOperating) root.dataset.operating = 'false';
 }
 
 function fitFrame() {
@@ -81,9 +84,16 @@ function fitFrame() {
   const style = getComputedStyle(root);
   const width = Math.max(0, root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
   const height = Math.max(0, root.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
-  const scale = Math.min(width / dimensions.width, height / dimensions.height);
-  screen.style.width = `${dimensions.width * scale}px`;
-  screen.style.height = `${dimensions.height * scale}px`;
+  const shortSide = Math.min(dimensions.width, dimensions.height);
+  const bezel = shortSide * .024;
+  const outerWidth = dimensions.width + 2 * bezel;
+  const outerHeight = dimensions.height + 2 * bezel;
+  const scale = Math.min(width / outerWidth, height / outerHeight);
+  device.style.width = `${outerWidth * scale}px`;
+  device.style.height = `${outerHeight * scale}px`;
+  device.style.setProperty('--bezel', `${bezel * scale}px`);
+  device.style.setProperty('--screen-radius', `${shortSide * .12 * scale}px`);
+  device.dataset.orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
 }
 
 function pointStyle(point: Point, size: Size) {
@@ -139,7 +149,8 @@ function consume(value: unknown) {
     clearFrame();
     return;
   }
-  if (preview.frame_available === false) clearFrame();
+  // A temporary frame gap does not end an operation; pause/connection resets do.
+  if (preview.frame_available === false) clearFrame(false);
   if (validSize(preview.viewport)) viewport = preview.viewport;
   const frame = preview.frame;
   if (frame && validSize(frame) && Number.isInteger(frame.seq) && frame.seq >= frameSeq
@@ -150,16 +161,22 @@ function consume(value: unknown) {
     dimensions = { width: frame.width, height: frame.height };
     fitFrame();
     image.src = `data:${frame.mimeType};base64,${frame.data}`;
+    device.hidden = false;
     screen.hidden = false;
   }
   if (typeof preview.busy === 'boolean') root.dataset.busy = String(preview.busy);
+  // Keep the edge light on between tools and while the model plans its next action.
+  if (preview.busy === true) root.dataset.operating = 'true';
   if (Array.isArray(preview.events)) {
     for (const gesture of preview.events) {
       if (!Number.isInteger(gesture.id) || gesture.id <= eventId) continue;
       eventId = gesture.id;
       const age = (preview.server_time || Date.now()) - gesture.at;
       if (Number.isFinite(age) && age >= -1000 && age <= 2500
-          && (gesture.kind === 'tap' || gesture.kind === 'drag')) showGesture(gesture);
+          && (gesture.kind === 'tap' || gesture.kind === 'drag')) {
+        root.dataset.operating = 'true';
+        showGesture(gesture);
+      }
     }
   }
 }
@@ -208,7 +225,7 @@ function visibilityChanged() {
 
 const resizeObserver = new ResizeObserver(fitFrame);
 resizeObserver.observe(root);
-image.onerror = clearFrame;
+image.onerror = () => clearFrame();
 document.addEventListener('visibilitychange', visibilityChanged);
 
 function dispose() {

@@ -7,11 +7,18 @@
   <style>/*__STYLE__*/</style>
 </head>
 <body>
-  <main id="app" data-frame-seq="0" data-busy="false" aria-label="iPhone 实时屏幕">
-    <div id="screen" hidden>
-      <div class="edge-glow" aria-hidden="true"></div>
-      <img id="image" alt="iPhone 实时屏幕" draggable="false">
-      <div id="cursor" aria-hidden="true" hidden></div>
+  <main id="app" data-frame-seq="0" data-busy="false" data-operating="false" aria-label="iPhone 实时屏幕">
+    <div id="device" data-orientation="portrait" hidden>
+      <div class="side-button action-button" aria-hidden="true"></div>
+      <div class="side-button volume-up" aria-hidden="true"></div>
+      <div class="side-button volume-down" aria-hidden="true"></div>
+      <div class="side-button power-button" aria-hidden="true"></div>
+      <div class="receiver" aria-hidden="true"></div>
+      <div id="screen" hidden>
+        <div class="edge-glow" aria-hidden="true"></div>
+        <img id="image" alt="iPhone 实时屏幕" draggable="false">
+        <div id="cursor" aria-hidden="true" hidden></div>
+      </div>
     </div>
   </main>
   <script type="module">/*__SCRIPT__*/</script>

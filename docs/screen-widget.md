@@ -1,6 +1,8 @@
-# 手机屏幕侧边栏（0.1.10）
+# 手机屏幕侧边栏（0.1.11）
 
-普通 WDA 插件增加 MCP App，使用时在 Codex 侧边栏展示手机屏幕。界面只有按原始比例缩放的屏幕、从四边向内渐隐的蓝紫柔光及短时涟漪，以及点击 / 拖动圆形 cursor；没有按钮、文字状态、输入框或操作面板。光效表示工具正在操作或刚操作完，cursor 表示实际动作坐标；它们不是成功证明。
+普通 WDA 插件提供 MCP App，使用时在 Codex 侧边栏展示手机屏幕。界面以圆角 iPhone 外壳包围完整画面，包含细金属边框、黑色玻璃边缘、边框内的听筒与侧键装饰；屏幕内保留从四边向内渐隐的蓝紫柔光、缓慢涟漪及点击 / 拖动圆形 cursor。没有可操作按钮、文字状态、输入框或操作面板，也不在真实像素上添加模拟灵动岛或 Home 条。
+
+首次收到操作活动或有效的新手势后，光效持续显示，工具调用间隙与准备下一步时不闪灭。暂时缺帧和隐藏页面保留这一状态；认证暂停、连接断开、新流替换旧流、页面销毁或重新加载时清除。它表示操作已经开始，不能证明模型正在思考、仍在执行或整项任务已经完成；cursor 只表示实际动作坐标。最终关键结果仍按实际返回证据验收。
 
 ## 打开与工具边界
 
@@ -22,7 +24,9 @@
 4. 它不轮询 `/screenshot`、`/source` 或 session，不新增 XML / 截图 / XCTest 操作请求，不持有手机操作锁。预览不可用时留空，不自动触发控制通道恢复。
 5. App 隐藏、关闭或销毁后停止轮询。服务端 5 秒预览租约到期后关闭 USB worker；认证暂停会停止采集并清空画面，不能等租约到期才暂停认证预览。
 
-实际点击和拖动的 cursor 使用控制器已有的执行坐标与视口事件，不为获得坐标另发 WDA 查询。视口到界面按比例映射，屏幕旋转后使用新帧尺寸；支持减少动态效果的系统偏好。短时活动光效不尝试推断模型是否仍在思考。
+实际点击和拖动的 cursor 使用控制器已有的执行坐标与视口事件，不为获得坐标另发 WDA 查询。视口到内部屏幕按比例映射，外壳不会引入坐标偏移；外壳与画面一起适应竖屏、横屏和窄侧栏，旋转后使用新帧尺寸。支持减少动态效果的系统偏好。
+
+持续光效只由页面记住“本次已开始操作”，不延长服务端短时活动的有效期，不增加手机读取、帧轮询频率或控制请求。当前没有整项任务完成事件，模型准备下一步时光效继续，直到上述暂停、断开或页面结束条件发生；不能把光效消失或保留当作任务完成依据。
 
 ## 更新后仍空白
 
@@ -56,5 +60,7 @@ HTML 自包含官方 MCP Apps SDK，不依赖 CDN、外部字体或远程资源�
 - [MCP Apps SDK v1.7.5](https://github.com/modelcontextprotocol/ext-apps/tree/v1.7.5)：App bridge、工具 / 资源关联、App 工具可见范围和生命周期。
 - [MCP Apps 规范](https://github.com/modelcontextprotocol/ext-apps/blob/v1.7.5/specification/2026-01-26/apps.mdx)：`ui.resourceUri`、`ui.visibility` 和 UI 资源格式。宿主显示偏好是扩展提示，以实际支持为准。
 - [固定 WDA 源码](https://github.com/appium/WebDriverAgent/tree/d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6)：独立 MJPEG 服务和 XCTest 控制通道。
+- [Apple Design Resources](https://developer.apple.com/design/resources/)：官方 Product Bezels 作为外框形态参考，不打包 Apple 图形素材。
+- [picturepan2/devices.css](https://github.com/picturepan2/devices.css)：MIT 开源项目，纯 CSS 设备框结构作为社区实现参考。此处外壳为原创 CSS，没有引入项目代码或新依赖。
 
 本插件只复用渐变、涟漪与圆形指示的视觉语言，不包含 OpenAI 图形素材。第三方 SDK 和浏览器依赖许可保留在 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。

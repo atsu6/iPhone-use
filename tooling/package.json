@@ -1,6 +1,6 @@
 {
   "name": "iphone-use-wda-usb-forward",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "description": "Loopback-only USB forwarding for a pinned WebDriverAgent runtime",

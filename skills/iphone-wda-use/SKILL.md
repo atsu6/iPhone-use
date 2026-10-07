@@ -17,7 +17,7 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone，默认�
 - `ready=false, state="recovering"`：按 recovery 的 job_id 和 status 参数查询同一工作。从返回的 `jobs` 数组找到该工作，recovery_phase=serving 后重验 READY；长期 Runner 可以保持 running，不等 succeeded，不重复 start。
 - `ready=false, state="recovery_required", reason="recovery_disabled"`：仅在用户指令允许恢复时按 next_tool / next_arguments 调用 recover=true；明确禁止重启则保留限制并报告阻塞。
 
-READY 关联只有手机屏幕的侧边栏 widget，宿主支持时默认打开。已有 READY 通道而屏幕未显示、用户关闭后要重新打开时，调用一次 `wda_screen()`；不要为打开画面重复 READY。widget 没有按钮或其他 UI，无需操作它来控制手机。
+READY 关联以圆角 iPhone 外壳展示手机屏幕的侧边栏 widget，宿主支持时默认打开。已有 READY 通道而屏幕未显示、用户关闭后要重新打开时，调用一次 `wda_screen()`；不要为打开画面重复 READY。外壳和侧键仅作装饰，widget 没有可操作按钮或其他控件，无需操作它来控制手机。
 
 后两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
@@ -33,7 +33,9 @@ App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要�
 
 widget 通过独立 USB MJPEG 通道显示最新手机画面，界面最多每秒读取 5 次服务端缓存，不轮询截图或 XML，也不占手机操作锁。不要在模型循环中调用 `wda_screen_frame`；这是仅对 App 暴露的内部工具。不要为刷新预览另写轮询代码、每步打开 widget 或添加 screenshot / observe 调用。
 
-AI 操作时边缘渐变光效表示短时活动，圆形 cursor 标记实际点击位置或拖动路径，二者都不证明动作成功。widget 画面不会自动成为模型观察；定位未知页面或读取内容时仍按下一步需要请求工具树 / 图像，最终关键操作按实际结果验收。预览不可用或留空时根据 WDA 工具的真实状态继续，不为画面问题反复恢复控制通道。widget 隐藏 / 关闭后停止轮询，预览租约 5 秒到期；认证暂停会停止采集并清空画面，恢复必须等用户明确确认。 更新插件后，已有聊天可能仍运行旧 MCP 进程和旧页面；重连聊天并重新打开 widget 加载新版，不能靠重复 READY 刷新缓存。`paused=true` 的空白是接管暂停，只有用户确认完成后才 resume。其他空白按 [屏幕通道说明](../../docs/screen-widget.md) 排查，不能据此认定控制通道失败。
+首次操作后边缘渐变持续显示，工具调用间隙和准备下一步时不闪灭；暂时缺帧或隐藏页面保留状态，认证暂停、断开 / 换流、关闭 / 重新加载后清除。光效仅表示已开始操作，不推断模型当前活动或整项任务是否完成；圆形 cursor 标记实际点击位置或拖动路径，二者都不证明动作成功。widget 画面不会自动成为模型观察；定位未知页面或读取内容时仍按下一步需要请求工具树 / 图像，最终关键操作按实际结果验收。不要为保持光效额外操作手机或刷新预览。
+
+预览不可用或留空时根据 WDA 工具的真实状态继续，不为画面问题反复恢复控制通道。widget 隐藏 / 关闭后停止轮询，预览租约 5 秒到期；认证暂停会停止采集并清空画面，恢复必须等用户明确确认。更新插件后，已有聊天可能仍运行旧 MCP 进程和旧页面；重连聊天并重新打开 widget 加载新版，不能靠重复 READY 刷新缓存。`paused=true` 的空白是接管暂停，只有用户确认完成后才 resume。其他空白按 [屏幕通道说明](../../docs/screen-widget.md) 排查，不能据此认定控制通道失败。
 
 ## App 与常规动作
 

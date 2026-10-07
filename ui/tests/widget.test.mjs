@@ -23,8 +23,9 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   const listeners = new Map();
   const calls = [];
   const lifecycle = [];
-  const elements = Object.fromEntries(['app', 'screen', 'image', 'cursor'].map(id => [id, {
-    style: {}, dataset: {}, hidden: id === 'screen' || id === 'cursor', clientWidth: 400, clientHeight: 800,
+  const elements = Object.fromEntries(['app', 'device', 'screen', 'image', 'cursor'].map(id => [id, {
+    style: { setProperty(name, value) { this[name] = value; } }, dataset: {},
+    hidden: ['device', 'screen', 'cursor'].includes(id), clientWidth: 400, clientHeight: 800,
     removeAttribute(name) { delete this[name]; },
     animate(frames, options) {
       const animation = { frames, options, cancelled: false, cancel() { this.cancelled = true; } };
@@ -87,9 +88,15 @@ test('preserves full frame aspect ratio and maps gestures using the point viewpo
     events: [{ id: 1, kind: 'tap', at: 1000, point: { x: 100, y: 200 }, viewport: { width: 400, height: 800 } }] }) });
   assert.equal(h.elements.app.dataset.frameSeq, '12');
   assert.equal(h.elements.app.dataset.busy, 'true');
+  assert.equal(h.elements.device.hidden, false);
   assert.equal(h.elements.screen.hidden, false);
-  assert.equal(h.elements.screen.style.width, '376px');
-  assert.equal(h.elements.screen.style.height, '752px');
+  const bezel = parseFloat(h.elements.device.style['--bezel']);
+  const width = parseFloat(h.elements.device.style.width);
+  const height = parseFloat(h.elements.device.style.height);
+  assert.ok(Math.abs(width - 376) < 1e-8);
+  assert.ok(Math.abs((width - 2 * bezel) / (height - 2 * bezel) - .5) < 1e-8);
+  assert.ok(height <= 776);
+  assert.equal(h.elements.device.dataset.orientation, 'portrait');
   assert.equal(h.elements.image.src, 'data:image/png;base64,test-image-only');
   assert.equal(h.elements.cursor.style.left, '25%');
   assert.equal(h.elements.cursor.style.top, '25%');
@@ -110,6 +117,51 @@ test('omitted frames preserve the displayed image and acknowledgements advance o
   assert.equal(h.elements.image.src, 'data:image/png;base64,test-image-only');
   await h.tick();
   assert.equal(JSON.stringify(h.calls[0].arguments), '{"after_seq":7,"last_event_id":3}');
+});
+
+test('operation glow survives tool gaps, hidden panels and temporary missing frames', async () => {
+  const h = await harness();
+  h.app.ontoolresult({ structuredContent: preview({ stream_id: 'one', frame: frame(), frame_available: true }) });
+  assert.equal(h.elements.app.dataset.operating, 'false');
+  h.app.ontoolresult({ structuredContent: preview({ busy: true }) });
+  for (let i = 0; i < 50; i++) h.app.ontoolresult({ structuredContent: preview({ busy: false }) });
+  assert.equal(h.elements.app.dataset.busy, 'false');
+  assert.equal(h.elements.app.dataset.operating, 'true');
+  h.visibility(true);
+  h.visibility(false);
+  assert.equal(h.elements.app.dataset.operating, 'true');
+  h.app.ontoolresult({ structuredContent: preview({ frame_available: false }) });
+  assert.equal(h.elements.device.hidden, true);
+  assert.equal(h.elements.app.dataset.operating, 'true');
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(2), frame_available: true }) });
+  assert.equal(h.elements.device.hidden, false);
+  assert.equal(h.elements.app.dataset.operating, 'true');
+  h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
+  assert.equal(h.elements.app.dataset.operating, 'false');
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(3), busy: false }) });
+  assert.equal(h.elements.app.dataset.operating, 'false');
+  h.app.ontoolresult({ structuredContent: preview({ busy: true }) });
+  h.app.ontoolresult({ structuredContent: preview({ stream_id: 'two', frame: frame(), busy: false }) });
+  assert.equal(h.elements.app.dataset.operating, 'false');
+});
+
+test('fits the entire chassis in narrow and landscape panels while preserving image coordinates', async () => {
+  const h = await harness();
+  for (const [panelWidth, panelHeight, imageWidth, imageHeight] of [[170, 450, 440, 956], [900, 270, 956, 440], [310, 140, 440, 956]]) {
+    h.elements.app.clientWidth = panelWidth;
+    h.elements.app.clientHeight = panelHeight;
+    h.app.ontoolresult({ structuredContent: preview({ frame: { ...frame(), width: imageWidth, height: imageHeight } }) });
+    h.resize.callback();
+    const bezel = parseFloat(h.elements.device.style['--bezel']);
+    const width = parseFloat(h.elements.device.style.width);
+    const height = parseFloat(h.elements.device.style.height);
+    assert.ok(width <= panelWidth - 24 + 1e-8);
+    assert.ok(height <= panelHeight - 24 + 1e-8);
+    assert.ok(Math.abs((width - 2 * bezel) / (height - 2 * bezel) - imageWidth / imageHeight) < 1e-8);
+    assert.equal(h.elements.device.dataset.orientation, imageWidth > imageHeight ? 'landscape' : 'portrait');
+    assert.equal(h.elements.screen.style.width, undefined);
+    assert.equal(h.elements.screen.style.height, undefined);
+  }
 });
 
 test('a hidden panel stops polling, and slow calls never overlap', async () => {
@@ -137,6 +189,8 @@ test('paused clears the screen, errors back off silently, teardown cancels work'
   assert.equal(h.elements.screen.hidden, true);
   assert.equal(h.elements.image.src, undefined);
   assert.equal(h.elements.app.dataset.busy, 'false');
+  assert.equal(h.elements.device.hidden, true);
+  assert.equal(h.elements.app.dataset.operating, 'false');
   await h.tick();
   assert.equal([...h.timers.values()][0].delay, 500);
   await h.tick();
@@ -180,5 +234,6 @@ test('a broken MCP connection clears a previously visible phone frame', async ()
   assert.equal(h.elements.screen.hidden, true);
   assert.equal(h.elements.image.src, undefined);
   assert.equal(h.elements.app.dataset.busy, 'false');
+  assert.equal(h.elements.app.dataset.operating, 'false');
   assert.equal([...h.timers.values()][0].delay, 500);
 });
