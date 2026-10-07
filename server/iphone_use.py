@@ -24,8 +24,8 @@ from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.3.0"
-SCREEN_URI="ui://iphone-use/phone-0.3.0.html"
+VERSION="0.3.2"
+SCREEN_URI="ui://iphone-use/phone-0.3.2.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
 # ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
 # including after the MCP process reconnects; no device identifiers are needed.
