@@ -249,9 +249,10 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(WDAError) as caught:
             runtime.call("wda_swipe", {"direction": "up", "observe": "none", "verify": True})
         self.assertEqual(caught.exception.code, "no_scroll_progress")
-        self.assertEqual(caught.exception.details["attempts"], 2)
+        self.assertEqual(caught.exception.details["attempts"], 1)
         self.assertTrue(caught.exception.details["action_executed"])
-        self.assertEqual(client.swipe_count, 2)
+        self.assertEqual(client.swipe_count, 1)
+        self.assertIn("image", caught.exception.details["observation"])
 
     def test_unknown_argument_reports_allowed_fields_without_device_access(self):
         runtime, client = self.runtime()
@@ -278,6 +279,18 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(result["content"][1]["mimeType"], "image/png")
         import base64
         self.assertEqual(base64.b64decode(result["content"][1]["data"]), client.screenshot)
+
+    def test_scroll_search_returns_model_image_before_a_second_gesture(self):
+        runtime, client = self.runtime()
+        client.elements.clear()
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("wda_scroll_find", {"selector": {"label": "Missing"}, "max_swipes": 10})
+        result = result_content({"error": caught.exception.as_dict()})
+        self.assertTrue(result["isError"])
+        self.assertEqual(payload(result)["error"]["swipes"], 1)
+        self.assertTrue(payload(result)["error"]["recovery"]["visual_check_required"])
+        self.assertEqual([block["type"] for block in result["content"]], ["text", "image"])
+        self.assertEqual(client.swipe_count, 1)
 
     def test_batch_continues_optimistic_navigation_and_input_without_readback(self):
         runtime, client = self.runtime()
@@ -308,7 +321,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertEqual(result["error"]["code"], "no_scroll_progress")
         self.assertTrue(result["error"]["action_executed"])
-        self.assertEqual(client.swipe_count, 2)
+        self.assertEqual(client.swipe_count, 1)
+        self.assertEqual([block["type"] for block in result_content(result)["content"]], ["text", "image"])
         self.assertFalse(any(path == "/wda/homescreen" for _, path, _ in client.actions()))
 
     def test_batch_stops_after_uncertain_action_and_never_replays_it(self):

@@ -135,6 +135,8 @@ There are 17 model tools and 2 additional widget-only tools.
 
 The `wda_*` tool names describe the underlying transport; the plugin, skills, and MCP service use the iPhone Use identity.
 
+Abnormal UI states return a screenshot for the model to inspect before choosing another action. Scroll search performs at most one swipe per call and stops if the target remains unreachable; occlusion, unproven scroll progress, input mismatch, and failed page expectations use the same fallback. Existing screenshots are reused, without automatic extra gestures or action replay.
+
 ## Runtime data and updates
 
 New installations use `~/.local/share/iphone-use/`. Set `IPHONE_USE_STATE_DIR` for another external directory; `WDA_STATE_DIR` remains supported. If the new default directory does not exist, an existing older configuration directory is reused so device configuration and builds are retained.

@@ -9,7 +9,7 @@
 - schema / 参数错误：按 argument_path、unknown_fields、allowed_fields 修正一次调用。action_executed=false 表示动作未发出，MCP 绑定仍不可用时可用代码入口；不要自动忽略未知参数。
 - `device_busy`：另一操作持有共享锁，等待它结束，不另建 Runtime 配置或 state directory 绕过锁。
 - `stale_observation`：提供的 ID 不属于当前 Runtime，或 App / 视口上下文已改变。用下一步所需的新信息定位，不为整图哈希、文本数字刷新或固定 30 秒期限增加读图；ID 是可选上下文，不是每个坐标动作的必填许可。
-- selector 或焦点失败（`no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`search_exhausted`、`no_focused_field`）：先查看已附截图再用可见目标坐标继续；没有可用图片才补一张 screenshot。`tap_point` / candidates 不证明目标未被遮挡，先关闭可见浮层。输入先点可见输入框再 type_text；焦点仍失败不能原样重复旧坐标和输入。不换标签写法重试，不先重读树。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
+- 界面异常统一先看截图：selector / 焦点失败、滚动后找不到可点击目标、无进展、区域被挡、滚动上下文改变、输入不符或预期页面未出现。先查看结果里已附截图，缺图才补一次 screenshot，再选择可见目标、处理浮层或决定是否继续滚动；不先重读树、换标签或原样重试。`tap_point` / candidates 不证明未被遮挡；输入先点可见输入框再 type_text，焦点仍失败须重新选点。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
 - `input_continuation_expired`：长文本续传已失效，本次没有输入任何内容。读取字段实际文字，用 `replace=false` 只补缺少的部分。
 - `occluded_target` / `offscreen_target`：目标点击没有执行，不能推断未执行点击打开了浮层。`occluded_target` 按附带截图判断：目标可见就按 `tap_point` 用坐标点击，确有遮挡先处理遮挡；`offscreen_target` 先向目标滑动。自绘半屏面板可能没有原生 Alert / Sheet 节点，按真实截图判断。
 - 显式验收的 `postcondition_failed`：动作已接收但验收条件未满足，查看实际状态再决定剩余步骤，不因验收失败自动重放动作。
@@ -78,7 +78,9 @@ finally:
 
 显式 `verify=true` 才检查滚动进展、原生浮层和变化上下文；需要调试时在该次调用选 tree / both，复用返回观察，不重复另读。进展以列表几何变化判断，数字或轮播文本刷新不应单独作为滚动成功 / 拒绝动作的依据。原生浮层的验证保护不能识别所有自绘面板，明确遮挡后按真实状态选区域或关闭面板。
 
-`no_scroll_progress` 表示验证未证明移动，不证明空列表或到底；检查入口、边界、浮层及自绘内容，不盲目增加尝试次数。`scroll_context_changed` 表示手势后上下文变化，处理返回新状态再继续；已执行部分不能当作未执行而重放。
+`verify=true` 发现第一次手势无进展就附截图停止，不自动换手势；旧参数 `max_attempts=2` 仍可传入但不导致自动重试。`scroll_find` 每次最多滑一次，仍找不到可点击目标就先返回截图；遮挡和歧义在滑动前即停止。先实际查看图片再判断继续、区域、方向和目标，不直接增加 `max_swipes` 重跑。
+
+`no_scroll_progress` 不证明空列表或到底；异常结果即使请求 none/tree 也附截图，检查入口、边界、浮层及自绘内容。`scroll_context_changed` 表示手势后上下文变化，先看截图再处理；已执行部分不能当作未执行而重放。截图读取失败保留原错误与执行证据，并提示单独取图，不自行继续动作。
 
 batch 可连续执行普通 unverified 导航和输入；明确 error、uncertain 或未验收的 submit 才停止，按 completed_steps / stopped_at 继续剩余步骤。launch 默认只激活一次；显式 verify=true / expect 才有界等前台 / 页面。关键验收失败先看实际状态，不自动再次 activate。
 

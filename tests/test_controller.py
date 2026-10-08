@@ -451,15 +451,13 @@ class ControllerTests(unittest.TestCase):
                     self.assertFalse(error.details["recovery"]["replay_action"])
                     self.assertEqual(self.client.swipe_count, 1)
                     self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
-                    if mode == "none":
-                        self.assertNotIn("observation", error.details)
-                    else:
-                        observed = error.details["observation"]
-                        self.assertIn(observed["observation_id"], self.phone.snapshots)
-                        self.assertEqual("image" in observed, mode in ("screenshot", "both"))
-                        self.assertEqual("nodes" in observed, mode in ("tree", "both"))
-                        if "nodes" in observed:
-                            self.assertTrue(any(n["type"] == "Alert" for n in observed["nodes"]))
+                    observed = error.details["observation"]
+                    self.assertIn(observed["observation_id"], self.phone.snapshots)
+                    self.assertIn("image", observed)
+                    self.assertEqual("nodes" in observed, mode in ("tree", "both"))
+                    self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+                    if "nodes" in observed:
+                        self.assertTrue(any(n["type"] == "Alert" for n in observed["nodes"]))
 
     def test_modal_disappearance_or_geometry_change_stops_intentional_modal_scroll(self):
         area = {"x": 70, "y": 250, "width": 200, "height": 250}
@@ -493,16 +491,17 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(error.details["observation"]["viewport"], {**self.client.size, "units": "iPhone points"})
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
 
-    def test_modal_during_fallback_reports_two_executed_gestures_and_stops(self):
+    def test_no_progress_stops_before_unseen_fallback_can_open_a_modal(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 1")],
                                     [node("Row 1"), node("", kind="Alert", y=80)]]
-        error = self.assert_code("scroll_context_changed", lambda: self.phone.swipe(verify=True, observe="none"))
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, max_attempts=2, observe="none"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["verified"])
-        self.assertEqual(error.details["attempts"], 2)
-        self.assertEqual(error.details["reasons"], ["modal_changed"])
-        self.assertEqual(self.client.swipe_count, 2)
-        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
+        self.assertEqual(error.details["attempts"], 1)
+        self.assertIn("image", error.details["observation"])
+        self.assertTrue(error.details["recovery"]["visual_check_required"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
 
     def test_default_swipe_does_not_probe_modal_after_accepted_gesture(self):
         self.client.source_pages = [[node("Row 1")], [node("Row 1"), node("", kind="Alert", y=80)]]
@@ -649,7 +648,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_launch_deadline_crossing_never_sends_negative_timeout(self):
         # The deadline may pass between reads: use one remaining-time sample.
-        with patch("wda_controller.time.monotonic", side_effect=[100,104.99,105.01,105.02]), \
+        with patch("wda_controller.time.monotonic", side_effect=[100,104.99,105.01,105.02,105.02,105.02]), \
                 patch("wda_controller.time.sleep"), \
                 patch.object(self.phone,"active_app",return_value="com.example.previous") as active:
             error=self.assert_code("postcondition_failed",lambda:self.phone.launch_app("com.example.requested", verify=True, observe="none"))
@@ -882,7 +881,10 @@ class ControllerTests(unittest.TestCase):
 
     def test_input_mismatch_does_not_submit_or_retype(self):
         self.client.input_override = "你好 ?"
-        self.assert_code("input_mismatch", lambda: self.phone.type_text({"label": "Target"}, "你好 👋", submit=True, observe="none", verify=True))
+        error = self.assert_code("input_mismatch", lambda: self.phone.type_text({"label": "Target"}, "你好 👋", submit=True, observe="none", verify=True))
+        self.assertIn("image", error.details["observation"])
+        self.assertTrue(error.details["recovery"]["visual_check_required"])
+        self.assertTrue(error.details["action_executed"])
         paths = [call[1] for call in self.client.actions()]
         self.assertNotIn("/wda/keys", paths)
         self.assertEqual(paths.count("/element/target/value"), 1)
@@ -951,14 +953,17 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(error.details["changed"])
         self.assertEqual(self.client.swipe_count, 1)
 
-    def test_no_scroll_progress_tries_only_two_distinct_strategies(self):
-        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="tree"))
-        self.assertEqual(error.details["attempts"], 2)
-        self.assertEqual([call[1] for call in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
+    def test_no_scroll_progress_returns_a_screenshot_before_an_alternate_gesture(self):
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, max_attempts=2, observe="tree"))
+        self.assertEqual(error.details["attempts"], 1)
+        self.assertEqual([call[1] for call in self.client.actions()], ["/wda/dragfromtoforduration"])
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["verified"])
         self.assertFalse(error.details["changed"])
         self.assertEqual(error.details["observation"]["nodes"][0]["label"], "Row 1")
+        self.assertIn("image", error.details["observation"])
+        self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 2)
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
         self.assertFalse(error.details["recovery"]["same_gesture_retry"])
         self.assertFalse(error.details["recovery"]["end_of_list_proven"])
 
@@ -980,12 +985,13 @@ class ControllerTests(unittest.TestCase):
                     self.assertEqual("nodes" in observed, mode in ("tree", "both"))
                 self.assertEqual(sum(path.startswith("/source") for _, path, _ in self.client.calls), 2)
 
-    def test_no_progress_with_observe_none_still_executes_bounded_verification(self):
+    def test_no_progress_with_observe_none_still_returns_visual_fallback(self):
         error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="none"))
-        self.assertNotIn("observation", error.details)
+        self.assertIn("image", error.details["observation"])
+        self.assertNotIn("nodes", error.details["observation"])
         self.assertTrue(error.details["action_executed"])
-        self.assertEqual(error.details["attempts"], 2)
-        self.assertEqual(self.client.swipe_count, 2)
+        self.assertEqual(error.details["attempts"], 1)
+        self.assertEqual(self.client.swipe_count, 1)
 
     def test_post_swipe_tree_failure_preserves_accepted_gesture_without_retry(self):
         baseline = self.client.source()
@@ -1033,7 +1039,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.phone.accepted_actions, 0)
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
 
-    def test_uncertain_fallback_preserves_known_first_gesture_without_third_attempt(self):
+    def test_unseen_native_fallback_is_not_sent_even_if_it_would_time_out(self):
         original = self.client.session
 
         def session(method, path, payload=None, timeout=None):
@@ -1043,13 +1049,14 @@ class ControllerTests(unittest.TestCase):
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "session", side_effect=session):
-            error = self.assert_code("action_uncertain", lambda: self.phone.swipe(verify=True))
-        self.assertTrue(error.uncertain)
+            error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, max_attempts=2))
+        self.assertFalse(error.uncertain)
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
         self.assertEqual(self.phone.accepted_actions, 1)
         self.assertEqual(self.client.swipe_count, 1)
-        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration", "/wda/swipe"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/dragfromtoforduration"])
+        self.assertIn("image", error.details["observation"])
 
     def test_no_progress_returns_requested_screenshot_for_inspection(self):
         error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="both", max_attempts=1))
@@ -1088,12 +1095,16 @@ class ControllerTests(unittest.TestCase):
         self.assert_code("invalid_selector", lambda: self.phone.find({"label": "a\x00b"}))
         self.assertEqual(self.client.calls, [])
 
-    def test_native_fallback_can_verify_progress(self):
+    def test_another_swipe_requires_a_new_call_after_visual_fallback(self):
         self.client.source_pages = [[node("Row 1", y=350)], [node("Row 1", y=350)], [node("Row 1", y=300), node("Row 2", y=350)]]
+        error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="tree"))
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertIn("image", error.details["observation"])
         result = self.phone.swipe(verify=True, observe="tree")
         self.assertTrue(result["verified"])
-        self.assertEqual(result["attempts"], 2)
-        self.assertEqual(result["strategy"], "native_swipe")
+        self.assertEqual(result["attempts"], 1)
+        self.assertEqual(result["strategy"], "short_drag")
+        self.assertEqual(self.client.swipe_count, 2)
         self.assertEqual(result["observation"]["nodes"][-1]["label"], "Row 2")
 
     def test_wait_caps_each_transport_request_at_two_seconds(self):
@@ -1123,10 +1134,11 @@ class ControllerTests(unittest.TestCase):
 
     def test_zero_wait_performs_only_one_short_probe(self):
         self.client.elements.clear()
-        with patch("wda_controller.time.monotonic", side_effect=[100.0, 100.0]):
+        with patch("wda_controller.time.monotonic", return_value=100.0):
             error = self.assert_code("postcondition_failed", lambda: self.phone.wait({"label": "Missing"}, timeout_seconds=0))
         self.assertEqual(error.details["polls"], 1)
-        self.assertEqual(self.client.timeouts, [("POST", "/elements", 0.5)])
+        self.assertEqual([call for call in self.client.timeouts if call[1] == "/elements"], [("POST", "/elements", 0.5)])
+        self.assertIn("image", error.details["observation"])
 
     def test_batch_continues_routine_actions_with_deferred_verification(self):
         result = self.phone.batch([
@@ -1253,6 +1265,98 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.client.swipe_count, 1)
         self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
 
+    def test_scroll_find_returns_screen_after_one_unresolved_swipe_even_with_large_budget(self):
+        self.client.elements.clear()
+        error = self.assert_code("search_exhausted", lambda: self.phone.scroll_find({"label": "Missing"}, max_swipes=10))
+        self.assertEqual(error.details["swipes"], 1)
+        self.assertEqual(error.details["max_swipes"], 10)
+        self.assertEqual(error.details["stop_reason"], "visual_check_required")
+        self.assertTrue(error.details["recovery"]["visual_check_required"])
+        self.assertTrue(error.details["action_executed"])
+        self.assertFalse(error.details["action_complete"])
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual(sum(path == "/elements" for _, path, _ in self.client.calls), 2)
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+        self.assertFalse(any(path.startswith("/source") for _, path, _ in self.client.calls))
+
+    def test_scroll_find_does_not_swipe_a_target_covered_by_a_popup(self):
+        self.client.elements[0]["hittable"] = False
+        error = self.assert_code("occluded_target", lambda: self.phone.scroll_find({"label": "Target"}, max_swipes=10))
+        self.assertEqual(error.details["swipes"], 0)
+        self.assertFalse(error.details["action_executed"])
+        self.assertIn("image", error.details["observation"])
+        self.assertEqual(self.client.actions(), [])
+
+    def test_scroll_find_stops_when_the_target_remains_offscreen_after_one_swipe(self):
+        self.client.elements[0]["rect"]["y"] = 900
+        error = self.assert_code("offscreen_target", lambda: self.phone.scroll_find({"label": "Target"}, max_swipes=5))
+        self.assertEqual(error.details["swipes"], 1)
+        self.assertTrue(error.details["action_executed"])
+        self.assertIn("image", error.details["observation"])
+        self.assertEqual(self.client.swipe_count, 1)
+
+    def test_scroll_find_zero_budget_returns_screen_without_a_gesture(self):
+        self.client.elements.clear()
+        error = self.assert_code("search_exhausted", lambda: self.phone.scroll_find({"label": "Missing"}, max_swipes=0))
+        self.assertEqual(error.details["swipes"], 0)
+        self.assertFalse(error.details["action_executed"])
+        self.assertIn("image", error.details["observation"])
+        self.assertEqual(self.client.actions(), [])
+
+    def test_nested_page_expectation_failure_captures_once_and_stops_batch(self):
+        clock = iter([100] * 4)
+        with patch("wda_controller.time.monotonic", side_effect=lambda: next(clock, 120)):
+            result = self.phone.batch([
+                {"op": "tap", "args": {"x": 100, "y": 200, "expect": {"label": "Missing"}}},
+                {"op": "press_button", "args": {"name": "home"}},
+            ])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["error"]["code"], "postcondition_failed")
+        self.assertTrue(result["error"]["action_executed"])
+        self.assertIn("image", result["error"]["observation"])
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/tap"])
+
+    def test_screenshot_failure_keeps_original_ui_error_and_does_not_retry(self):
+        original = self.client.request
+        def request(method, path, payload=None, timeout=None):
+            if path == "/screenshot":
+                self.client.calls.append((method, path, payload))
+                raise WDAError("wda_unreachable", "Screenshot disconnected")
+            return original(method, path, payload, timeout)
+        self.client.elements.clear()
+        with patch.object(self.client, "request", side_effect=request):
+            error = self.assert_code("search_exhausted", lambda: self.phone.scroll_find({"label": "Missing"}, max_swipes=10))
+        self.assertTrue(error.details["action_executed"])
+        self.assertEqual(error.details["observation_error"]["code"], "wda_unreachable")
+        self.assertEqual(error.details["recovery"]["next_arguments"], {"mode": "screenshot"})
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+
+    def test_wda_click_state_error_returns_screen_without_repeating_the_click(self):
+        self.client.click_error = WDAError("element not interactable", "A popup intercepted the click")
+        error = self.assert_code("element not interactable", lambda: self.phone.tap(selector={"label": "Target"}))
+        self.assertIn("image", error.details["observation"])
+        self.assertTrue(error.details["recovery"]["visual_check_required"])
+        self.assertFalse(error.details["recovery"]["replay_action"])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/target/click"])
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+
+    def test_no_progress_screenshot_failure_preserves_failure_and_requested_tree(self):
+        original = self.client.request
+        def request(method, path, payload=None, timeout=None):
+            if path == "/screenshot":
+                self.client.calls.append((method, path, payload))
+                raise WDAError("wda_unreachable", "Screenshot disconnected")
+            return original(method, path, payload, timeout)
+        with patch.object(self.client, "request", side_effect=request):
+            error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="both"))
+        self.assertEqual(error.details["observation_error"]["code"], "wda_unreachable")
+        self.assertTrue(error.details["action_executed"])
+        self.assertEqual(error.details["observation"]["nodes"][0]["label"], "Row 1")
+        self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
+
     def test_end_marker_verifies_coverage_but_requires_business_reconciliation(self):
         self.client.elements[0]["label"] = "End"
         result = self.phone.collect_list(max_pages=3, end_selector={"label": "End"})
@@ -1270,6 +1374,10 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(result["complete"])
         self.assertFalse(result["coverage_verified"])
         self.assertEqual(self.client.swipe_count, 1)
+        self.assertEqual([row["label"] for row in result["rows"]], ["Row 1"])
+        self.assertIn("image", result["observation"])
+        self.assertTrue(result["recovery"]["visual_check_required"])
+        self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
 
     def test_collect_list_collects_virtualized_replacement_pages_without_fallback(self):
         self.client.source_pages = [[node(label=label, y=350)] for label in ("A", "B", "C")]

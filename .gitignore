@@ -23,3 +23,5 @@ config.local.json
 # Development notes and evaluation cases are maintained locally only.
 /docs/
 /evals/
+
+/promo/

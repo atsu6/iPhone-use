@@ -351,7 +351,7 @@ class CoordinateFallbackTests(PhoneCase):
         self.assertTrue(error.details["action_executed"])
         self.assertEqual(error.details["recovery"]["use"], "coordinates")
         self.assertIn("image", error.details["observation"])
-        self.assertEqual(self.client.swipe_count, 2)
+        self.assertEqual(self.client.swipe_count, 1)
 
     def test_batch_stop_carries_the_same_evidence(self):
         self.client.elements.clear()

@@ -2,8 +2,6 @@
 
 **中文** · [English](README.en.md)
 
-![iPhone Use 在 Codex 中操作真实 iPhone 并实时展示手机屏幕](assets/iphone-use-demo.png)
-
 让 Codex 通过 USB 操作你的真实 iPhone。用自然语言描述任务，Codex 就能打开 App、读取页面、点击、滚动、输入文字、整理列表，并在侧边栏展示手机屏幕。
 
 iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
@@ -138,6 +136,8 @@ sh scripts/install.sh
 | `wda_screen`、`wda_metrics` | 预览开关与有界耗时统计 |
 
 工具继续使用 `wda_*` 名称，因为底层执行通道为 WDA；插件名称、技能和 MCP 服务统一为 iPhone Use。
+
+界面异常时先返回截图，再由模型判断下一步：滚动查找一次最多滑一次，仍找不到可点击目标就暂停；遮挡、滚动无进展、输入不符或预期页面未出现也走截图兜底。已有截图直接复用，不自动继续盲滑或重放操作。
 
 ## 本机数据与升级
 
