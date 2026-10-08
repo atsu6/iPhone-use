@@ -2,6 +2,8 @@
 
 [中文](README.md) · **English**
 
+![iPhone Use controlling a real iPhone in Codex with a live screen preview](assets/iphone-use-demo.png)
+
 Let Codex operate your real iPhone over USB. Describe a task in natural language: open apps, read screens, tap, scroll, enter text, collect lists, and watch the phone in a sidebar widget.
 
 The plugin connects to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (WDA). It includes a local MCP server, setup and usage skills, and a live screen widget. It reuses healthy connections and existing builds; when element targeting fails, it guides the model to inspect a screenshot and try coordinates.
