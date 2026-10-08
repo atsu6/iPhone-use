@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and allowlist a portable source package, excluding all device data."""
+"""Build separate source and install packages, keeping the complete widget."""
 import argparse
 import json
 from pathlib import Path
@@ -9,8 +9,30 @@ import sys
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','.gitignore','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
-DIRS=('assets','server','skills','scripts','docs','evals','tests','.github')
+FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
+DIRS=('assets','server','skills')
+INSTALL_SCRIPTS=('phone.py','wda.sh','update_app_catalog.py','check_screen_ui.py','package.py','install.sh','register_mcp.py')
+SOURCE_DIRS=('scripts','tests','.github')
+TOOLING_FILES=('package.json','package-lock.json','forward.mjs','screen-stream.mjs')
+
+
+def package_files(source_package=False):
+    """Local docs, evals, experiments and dependency installs are never shipped."""
+    sources=[ROOT/name for name in FILES]
+    for dirname in DIRS+(SOURCE_DIRS if source_package else ()):
+        sources.extend((ROOT/dirname).rglob('*'))
+    if source_package:
+        sources.append(ROOT/'.gitignore')
+    else:
+        sources.extend(ROOT/'scripts'/name for name in INSTALL_SCRIPTS)
+    sources.extend(ROOT/'tooling'/name for name in TOOLING_FILES)
+    for source in sorted(set(sources)):
+        if source.is_symlink():raise SystemExit('Refusing package symlink: '+str(source))
+        if not source.is_file():continue
+        rel=source.relative_to(ROOT)
+        if any(part in ('__pycache__','node_modules','.pytest_cache') for part in rel.parts):continue
+        if source.suffix in ('.pyc','.jsonl') or source.name=='.DS_Store':continue
+        yield source,rel
 
 
 def validate():
@@ -49,20 +71,13 @@ def main():
     stage=ROOT/'dist'/manifest['name']
     if stage.exists():shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    sources=[ROOT/name for name in FILES]
-    for dirname in DIRS:sources.extend((ROOT/dirname).rglob('*'))
-    sources.extend(ROOT/'tooling'/name for name in ('package.json','package-lock.json','forward.mjs','screen-stream.mjs'))
-    for source in sources:
-        if source.is_symlink():raise SystemExit('Refusing package symlink: '+str(source))
-        if not source.is_file():continue
-        rel=source.relative_to(ROOT)
-        if '__pycache__' in rel.parts or source.suffix in ('.pyc','.jsonl') or source.name=='.DS_Store':continue
+    for source,rel in package_files():
         target=stage/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
     if args.stage_only:print(stage);return
     archive=ROOT/'dist'/f"{manifest['name']}-{manifest['version']}-source.zip"
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
-        for path in sorted(stage.rglob('*')):
-            if path.is_file():z.write(path,str(Path(manifest['name'])/path.relative_to(stage)))
+        for source,rel in package_files(source_package=True):
+            z.write(source,str(Path(manifest['name'])/rel))
     print(archive)
 
 

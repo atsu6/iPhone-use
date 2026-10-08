@@ -21,7 +21,7 @@ description: 通过 WebDriverAgent MCP 工具高效操作真实 iPhone；新对�
 
 只读、禁止启动 / 重启等用户限制始终保留。恢复后复用 READY 的新观察了解原任务进度，不能重放可能已经生效的业务动作。
 
-READY 关联手机屏幕侧边栏，宿主支持时默认打开或复用本聊天已有面板；重复 setup / 恢复通道、暂停 / 恢复预览沿用同一个 widget。已有面板时直接继续，不为刷新再调用屏幕打开工具；需要重新打开已关闭的面板时调用一次 `wda_screen()`，不要为打开画面重复 READY。用户要求“先打开 widget 让我看”时先打开，再继续初始化与已授权任务；只有明确要求等他确认再操作时才等待。widget 顶部显示机型和 Live 状态，底部的刷新 / 主屏幕 / 截图三个按钮只供用户自己点击，不是模型的工具：不要调用仅供 App 使用的 `wda_screen_frame` 和 `wda_screen_action`，不要为刷新预览增加轮询、截图或 observe。用户点过主屏幕后页面会变，按下一次观察到的实际状态继续。画面留空、光效或 cursor 都不证明 READY、动作成功或任务完成，也不是模型观察。预览问题按 [屏幕通道说明](../../docs/screen-widget.md) 排查，不为它反复恢复控制通道。
+READY 关联手机屏幕侧边栏，宿主支持时默认打开或复用本聊天已有面板；重复 setup / 恢复通道、暂停 / 恢复预览沿用同一个 widget。已有面板时直接继续，不为刷新再调用屏幕打开工具；需要重新打开已关闭的面板时调用一次 `wda_screen()`，不要为打开画面重复 READY。用户要求“先打开 widget 让我看”时先打开，再继续初始化与已授权任务；只有明确要求等他确认再操作时才等待。widget 顶部显示机型和 Live 状态，底部的刷新 / 主屏幕 / 截图三个按钮只供用户自己点击，不是模型的工具：不要调用仅供 App 使用的 `wda_screen_frame` 和 `wda_screen_action`，不要为刷新预览增加轮询、截图或 observe。用户点过主屏幕后页面会变，按下一次观察到的实际状态继续。画面留空、光效或 cursor 都不证明 READY、动作成功或任务完成，也不是模型观察。预览问题按 [屏幕通道说明](references/screen.md) 排查，不为它反复恢复控制通道。
 
 App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要用户解锁时，按 [认证接管与恢复](references/authentication.md) 等用户完成。App 认证先 `wda_screen(action="pause")`；`phone_locked` 已自动暂停为 `device_locked`，不要再用显式 pause 覆盖原因。必须调用宿主提问工具（Default 优先 `functions.request_user_input_async`），首个选项固定「已完成继续」，第二个可为「暂时无法完成」。异步返回 / 预选不是用户答复；接管期间暂停手机动作、读取和截图，不索取凭据。实际完成通知后，App 认证或旧版未知暂停先 `wda_screen(action="resume")` 再取新观察；设备解锁则重验 READY，成功时仅自动解除同一次锁屏暂停。READY 的 `preview.paused` / `pause_reason` 说明预览状态；不能把 READY 成功当成 App 认证已完成。根据新状态继续剩余工作。
 
@@ -33,9 +33,11 @@ App 实际要求密码、PIN、验证码、Face ID / Touch ID，或手机需要�
 
 自绘内容、遮挡或缺失标签需要视觉判断时才取截图。截图随同一结果以图片返回，已缩放到适合阅读的尺寸：图像像素乘以 `image.pixel_to_point` 的 `[x, y]` 得到 iPhone 点，不要按原始分辨率或 Mac 屏幕换算。screenshot 跳过 XML；both 同时提供树和图。若 App 出现分享浮层，处理当前状态，不循环重复同一路径截图。
 
-## 失败时先看截图，再用坐标继续
+## 界面异常时先看截图，再决定操作
 
-selector 是首选，但 `no_such_element`、`ambiguous_target`、`occluded_target`、`not_editable`、`offscreen_target`、`search_exhausted` 或 `no_focused_field` 后，不反复改标签、重复同一个坐标或直接让用户代操作。先查看失败结果里的当前截图，再尝试可见目标的坐标操作；失败结果没有可用截图时取一次 `wda_observe(mode="screenshot")`。不要先重读整树。
+截图是界面异常的通用兜底。selector / 焦点失败、滚动后仍找不到可点击目标、滚动无进展、区域被遮挡或上下文改变、输入回读不符、预期页面没出现时，先查看结果里的当前截图，再决定下一次操作；没有可用截图时取一次 `wda_observe(mode="screenshot")`。不要先重读整树、换标签写法、增加滚动次数或原样重试。树被截断、坐标点击后明显没生效、页面与预期不一致时也按此流程处理。普通 `verified=false` 仍不是异常，不要求每步截图。
+
+截图先判断当前页面、首尾行是否移动、末尾控件 / 空白、弹窗 / 固定表头和实际可滚动区域。已见目标或任务范围边界就停止寻找；画面不再移动先处理边界或遮挡，再决定是否需要另一区域或方向。`direction` 始终是手指移动方向，up 通常查看下面的内容。用户侧栏的实时预览不替代模型实际查看工具图片。
 
 - 点击：`tap_point`、candidates 的 `tap` 是元素位置（iPhone 点），不证明它可点击。优惠券、广告、菜单或登录浮层可能盖住后台控件；先从截图找到实际可见的关闭 / 取消按钮，处理遮挡，再点目标。
 - 输入：先点截图中实际可见的输入框，再调用不带 selector 的 `wda_type_text(text=...)`。`no_focused_field` 表示没有输入；上一个点击可能被浮层拦截或落在错误位置，不能原样重复那组坐标和输入。按当前截图重新选点，下一步需要信息时让动作返回截图，以便判断页面与焦点。
@@ -64,8 +66,8 @@ for (const block of result.content ?? []) {
 - `wda_launch_app`：激活一次后继续；默认 `verify=false, observe="none"`。下一步需要新页面信息时设置 observe；关键入口确需证明目标 App / 页面时显式 `verify=true` 或传 `expect`。
 - `wda_tap`：优先使用 `selector`，从当前节点照抄 label / name / value / type，可加 enabled；标签很长或含会变化的时间、数字时用 `label_contains`。predicate 单独使用，保留实际标签里的换行、引号和反斜线；rect、visible、in_viewport 不是 selector 字段。同名匹配叠在同一位置（如 Cell 与其中的文字），或只有一个在屏幕内时，工具自行取该目标并在结果的 `target` 中说明；多个分开的匹配返回 `ambiguous_target` 和带 `index`、类型、位置、`tap` 坐标、`hittable` 的 candidates，按其中目标的 `tap` 坐标点击（或用同一 selector 加 `index`），不随意选第一项，也不必为此再观察。selector 失败或语义不足时用 iPhone 点坐标 x/y；observation_id 可选，提供时必须来自同一 Runtime，并仅核对 App / 视口上下文。已有页面信息足以定位时不额外读树或截图；切页、用户接管或旋转后按当前信息重新定位。
 - `wda_press_button`：仅用 schema 中支持的按钮。Home 使用专用 homescreen 路径，默认 `verify=false`，正常返回即可准备下一步；明确需要主屏状态时显式 `verify=true`。MCP 绑定不可用时按 [工具故障与代码调用](references/tool-fallback.md) 继续同一已授权动作。
-- `wda_swipe`：方向为手指移动方向，up 通常浏览后续内容。默认 `verify=false, observe="none"`，只执行一次手势，不读取 XML 验进展或自动尝试另一手势。可按已知列表传 region，不强制 observation_id 或 tree。下一步读取列表内容时顺带判断是否移动，明确没动再看入口、边界、浮层或区域。确需单独判断滚动进展时显式 `verify=true`；它有界检查列表几何变化，至多 max_attempts 次尝试。
-- `wda_wait`：确实依赖控件出现时使用有界 timeout；无需固定长 sleep，也不为所有导航补一个 wait。`wda_scroll_find`：有界查找未知位置的目标；找到后继续下一步，不再次重复查找同一结果。
+- `wda_swipe`：方向为手指移动方向，up 通常浏览后续内容。默认 `verify=false, observe="none"`，只执行一次手势，不读取 XML 验进展。可按已知列表传 region，不强制 observation_id 或 tree。下一步读取列表内容时顺带判断是否移动；明确没动先看截图中的入口、边界、浮层或区域。显式 `verify=true` 只检查一次手势的几何变化；无进展或上下文变化即附截图交回模型，即使传入旧参数 `max_attempts=2` 也不自动换手势重试。
+- `wda_wait`：确实依赖控件出现时使用有界 timeout；无需固定长 sleep，也不为所有导航补一个 wait。`wda_scroll_find`：目标已可点击就直接返回；遮挡或歧义立刻附截图停止。一次调用最多滑一次，滚动后仍找不到可点击目标时先查看返回截图，再判断是否继续滑；`max_swipes=0` 只查找，正数即使大于 1 也不连续盲滑。找到后继续下一步，不再次重复查找同一结果。
 
 `expect` 和 `verify=true` 是显式验收选项，用于最终关键状态或实际依赖，不是每步必填。HTTP accepted 与业务成功是不同事实；常规任务乐观继续，最终结论只依据关键结果。明确 error、输入 / 提交 uncertain 或动作部分完成时先查看实际状态，再决定剩余步骤。
 
@@ -77,9 +79,13 @@ for (const block of result.content ?? []) {
 
 多行内容可能在聊天控件里触发 Return 发送。只有确知当前 TextView 是合适的多行编辑器时才设置 `allow_newlines=true`；不能暗中把用户要求的格式改成单行。允许换行不等于授权发送。用户已授权发送时，在发送前的一次观察或显式输入验收中核对目标会话和完整草稿，再发送一次；发送后核对最终内容和发送次数。`submit=true` 不证明提交结果，提交后以真实结果页 / 记录验收。明确未发送才补做，不根据 timeout、未单独验证或普通 `verified=false` 自动重发。
 
+微信聊天消息尽量整理成不含换行的单条文本，再一次输入并发送，避免聊天框把回车解释为发送。确实需要多行排版时，不要把含 `\n` 的整段文本直接交给 `wda_type_text`：先把内容输入为草稿并确认焦点在微信输入框，在输入框内空白处点一下调出文本编辑 toolbar，再点击 toolbar 中的「换行」来插入换行；按需重复，完成后核对完整草稿，再单独点击一次「发送」。toolbar 未出现或没有「换行」选项时，停止并根据当前界面重新定位，不用键盘 Return 代替。此操作依赖微信当前版本和输入框实际显示的 toolbar；不能仅凭 `allow_newlines=true` 推断换行已安全插入。
+
 ## 连贯执行与列表采集
 
 用 `wda_batch` 合并已知短路径，最多 20 步；常规 tap、launch、Home、输入和滚动无需 expect，普通 `verified=false` 不阻断后续步骤。可以在计划末尾放一次 observe，或只在下一步需要信息的位置观察。明确错误、不确定动作或未验收的 submit 会停止；长文本未输完（`stop_reason="input_continues"`）或达到单次调用时间预算（`"time_budget"`）也会停止。按 completed_steps / stopped_at 和每步结果继续剩余步骤，不重放整个批次。未知页面、认证及动态弹窗需要新信息时再分段，不把未授权发送混入导航。
+
+寻找未知位置的记录时，不预先把多次同方向 swipe 塞进 batch。先滑一步并读取下一步需要的页面；树截断看不见末尾或页面没有进展时取截图，再判断是否继续。已知短路径仍可合并，任务范围或列表末尾已出现就停止滚动。
 
 `wda_collect_list(row_type="Cell", max_pages=6)` 有界采集最多 10 页，每次只滑一次并直接采集新页，复用完整树和 viewport；按目标行判断重复页，不因虚拟化列表标签全换而丢弃新页，也不额外尝试备用手势。返回 rows、pages、stop_reason，complete 始终为 false；相同 type/name/label/value 会去重，实际相同显示的记录可能被折叠。可传 end_selector 作为覆盖证据，最终按用户要求核对范围、条数、总额、日期和缺失字段；达到上限或无进展不能认定已全量。详情字段不足时进入详情读取，不要求每次进入详情都另验一次。具体关键验收见 [采集与输入验收](references/verification.md)。
 
@@ -87,7 +93,7 @@ for (const block of result.content ?? []) {
 
 `occluded_target` 在 click 前失败，没有发出点击，也不能推断失败点击打开了浮层。看错误附带的截图：目标可见就直接按 `tap_point` 用坐标点击；确有浮层、选择器或固定表头盖住时先处理它（真实关闭入口或面板外可安全关闭的位置），再继续。`offscreen_target` 先把目标滑入屏幕。自定义半屏面板可能没有原生 Alert / Sheet 节点，以截图为准，不根据背景树仍有按钮就认为无遮挡。
 
-显式滚动验证返回 `no_scroll_progress` 只表示已执行手势但没有证明列表移动，不证明空列表或到底。结合该调用返回的 observation 判断列表入口、边界、浮层或自绘内容，不盲目增加尝试次数。`scroll_context_changed` 表示已执行手势后上下文发生变化，先处理新状态；这些检查按显式验证使用，普通手势不为验证而额外读树。
+显式滚动验证返回 `no_scroll_progress` 只表示已执行手势但没有证明列表移动，不证明空列表或到底。该异常及 `scroll_context_changed`、区域被浮层阻挡都会附截图，即使请求 `observe="none" / "tree"`；已有结果截图直接复用。列表采集因重复页停止也附截图，保留已采集行和覆盖限制。先看画面再处理边界、浮层或区域，不盲目增加次数；普通手势仍不为验证而额外读树。
 
 `action_executed=true, action_complete=false` 或 `uncertain=true` 表示动作或部分步骤可能已生效；输入、发送、支付、下单等先读实际内容 / 记录，不能重放整项操作。纯查询的短暂失效可由工具有界重读，它不等同于执行了手机动作。`local.pid.0`、`wda_foreground_unavailable` 或 XCTest Code 41 是通道故障，按 READY 指引恢复，复用新观察继续剩余任务；服务恢复不重放业务动作。
 

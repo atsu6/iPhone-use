@@ -31,6 +31,8 @@ INPUT_TTL = 600
 # A selector that leads to no action is not retried in other spellings: the error hands back
 # the screen so the very next call can act by coordinates.
 SELECTOR_FAILURES = ("no_such_element","ambiguous_target","occluded_target","offscreen_target","not_editable","no_focused_field","search_exhausted")
+VISUAL_FAILURES = SELECTOR_FAILURES + ("no_scroll_progress","scroll_context_changed","modal_requires_region","blocked_scroll_region","postcondition_failed","input_mismatch",
+                                      "element not interactable","element click intercepted","invalid element state","no such element")
 
 
 def fail(code, message, **details):
@@ -67,6 +69,7 @@ def action_result(function):
                 if function.__name__=="swipe":
                     error.details.setdefault("attempts",self.accepted_actions-before)
                 error.details.setdefault("verification_required","At least one phone action was accepted before the error. Read actual state; do not automatically replay the operation.")
+            self.switch_to_coordinates(error,typing=function.__name__=="type_text")
             raise
     return wrapped
 
@@ -392,23 +395,40 @@ class PhoneController:
         return described
 
     def switch_to_coordinates(self,error,typing=False):
-        """Attach the current screen to a failed selector step so the next call can use coordinates."""
-        if error.code not in SELECTOR_FAILURES or error.details.get("secure_field"):
+        """Hand abnormal UI state back with a screenshot before the model chooses another action."""
+        if error.code not in VISUAL_FAILURES or error.details.get("secure_field"):
+            return
+        # Nested action/wait wrappers must not capture twice, even when capture failed.
+        if error.details.get("recovery",{}).get("visual_check_required"):
             return
         error.details.setdefault("action_executed",False)
-        try:error.details["observation"]=self.observe("screenshot")
+        try:
+            observed=error.details.get("observation")
+            if observed is None:
+                app=error.details.get("foreground_app")
+                error.details["observation"]=(self.observation_from_state([],self.viewport(VIEWPORT_TTL),app,"screenshot")
+                                              if app else self.observe("screenshot"))
+            elif "image" not in observed:observed["image"]=self.capture(observed["viewport"])
         except WDAError as failure:error.details["observation_error"]={"code":failure.code,"message":str(failure)}
         if error.code=="offscreen_target":
-            tool,step="wda_swipe","The match lies outside the screen (see target_rect or candidates against viewport). Swipe toward it, then tap it by coordinates from the screenshot that follows."
+            tool,step="wda_swipe","Inspect the attached screenshot FIRST. The match lies outside the viewport; check the actual list, direction and overlays before deciding whether to swipe toward it. Then use the resulting screenshot to locate it."
         elif error.code=="occluded_target":
             tool,step="wda_tap","Inspect the attached screenshot FIRST. A popup may cover the target; dismiss its visible close/cancel control before tapping the field or target. tap_point is the background element's location, NOT proof it can be clicked."
+        elif error.code in ("search_exhausted","no_scroll_progress","scroll_context_changed","modal_requires_region","blocked_scroll_region"):
+            tool,step=None,"Inspect the attached screenshot FIRST for the last row/end marker, unchanged content, wrong region, fixed header or popup. Decide whether another swipe is warranted and choose the visible target/region/direction; do not automatically repeat scrolling or increase its budget. No progress alone does not prove an empty or complete list."
+        elif error.code in ("postcondition_failed","input_mismatch"):
+            tool,step=None,"Inspect the attached screenshot FIRST to establish the actual page, field text or submission result. Continue only the missing work; do not blindly repeat the previous click, input or submission."
         elif typing:
             tool,step="wda_tap","Inspect the attached screenshot FIRST for a popup or wrong page. Tap the visible editable field with wda_tap x/y, then call wda_type_text with text and no selector. If a prior tap failed to focus the field, do not repeat the same point blindly; choose a new target from the current screenshot."
         else:
-            tool,step="wda_tap","Tap the target at its place in the attached screenshot with wda_tap x/y; a returned tap or tap_point is already in iPhone points."
-        recovery={"use":"coordinates","next_tool":tool,"replay_action":False,
+            tool,step="wda_tap","Inspect the attached screenshot FIRST, then tap the visible target with wda_tap x/y; a returned tap or tap_point is already in iPhone points."
+        recovery={**error.details.get("recovery",{}),"use":"coordinates" if error.code in SELECTOR_FAILURES else "screenshot","visual_check_required":True,"replay_action":False,
                   "next_step":step+" Image pixels x image.pixel_to_point give iPhone points. Inspect the image content, not its base64 text; through functions.exec forward image blocks with image(block), or open observation.image.path with view_image. If no screenshot is available, take one wda_observe(mode=screenshot) before acting. Do not try other selector spellings or read the tree again first."}
-        if tool=="wda_tap" and not typing and error.code!="occluded_target" and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
+        recovery.pop("next_tool",None);recovery.pop("next_arguments",None)
+        if tool:recovery["next_tool"]=tool
+        if "image" not in error.details.get("observation",{}):
+            recovery.update(next_tool="wda_observe",next_arguments={"mode":"screenshot"})
+        if recovery.get("next_tool")=="wda_tap" and not typing and error.code!="occluded_target" and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
         error.details["recovery"]=recovery
 
     def find(self,selector,limit=10):
@@ -481,6 +501,7 @@ class PhoneController:
         element=self.resolve(selector,editable,found)
         return (element["path"],element["type"]) if editable and with_kind else element["path"]
 
+    @action_result
     def wait(self,selector,timeout_seconds=6):
         finite(timeout_seconds,"timeout_seconds",0,20)
         pred=predicate(selector)
@@ -745,7 +766,7 @@ class PhoneController:
         return False
 
     @action_result
-    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=False,max_attempts=2,observe="none",_baseline=None,_max_nodes=100):
+    def swipe(self,direction="up",region=None,observation_id=None,expect=None,verify=False,max_attempts=1,observe="none",_baseline=None,_max_nodes=100):
         if direction not in ("up","down","left","right"):fail("invalid_argument","Invalid direction.")
         if observe not in ("none","tree","screenshot","both"):fail("invalid_argument","Invalid observe mode.")
         integer(max_attempts,"max_attempts",1,2)
@@ -766,62 +787,60 @@ class PhoneController:
             contained=lambda m:area["x"]>=m["rect"]["x"] and area["y"]>=m["rect"]["y"] and area["x"]+area["width"]<=m["rect"]["x"]+m["rect"]["width"] and area["y"]+area["height"]<=m["rect"]["y"]+m["rect"]["height"]
             if region is None or not all(contained(m) for m in modals):
                 details={"action_executed":False,"verified":False,"region":area,"native_modals":self.modal_report(modals),"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False,"next_step":"Handle the existing modal first, or choose a fresh explicit scroll region wholly inside its intended list. Do not scroll the underlying page through a modal."}}
-                observed=self.scroll_observation(before,viewport,observe,_max_nodes)
+                observed=self.scroll_observation(before,viewport,"tree" if observe in ("tree","both") else "none",_max_nodes)
                 if observed:details["observation"]=observed
                 fail("modal_requires_region" if region is None else "blocked_scroll_region","Native modals are present. The intended scroll area must be explicit and inside every modal's bounds; otherwise handle the foreground modal first.",**details)
         x=area["x"]+area["width"]/2;y=area["y"]+area["height"]/2
         dx=area["width"]*.32;dy=area["height"]*.32
         points={"up":(x,y+dy,x,y-dy),"down":(x,y-dy,x,y+dy),"left":(x+dx,y,x-dx,y),"right":(x-dx,y,x+dx,y)}[direction]
-        for attempt in range(max_attempts if verify else 1):
-            strategy="short_drag" if attempt==0 else "native_swipe"
-            if attempt==0:
-                self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
-            else:
-                self.screen_event("drag",**{"from_point":{"x":points[0],"y":points[1]},"to_point":{"x":points[2],"y":points[3]},"duration_ms":450})
-                self.post("/wda/swipe",{"direction":direction,"x":x,"y":y},timeout=20)
-            if not verify:
-                result=self.after(expect,observe,max_nodes=_max_nodes)
-                result.update(strategy=strategy,attempts=1,progress_verified=False)
-                return result
-            after,v=self.tree()
-            reasons=[]
-            if v!=viewport:reasons.append("viewport_changed")
-            if self.native_modals(after)!=modals:reasons.append("modal_changed")
-            if reasons:
-                details={"action_executed":True,"verified":False,"changed":False,"attempts":attempt+1,"reasons":reasons,"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_gesture_retry":False,"replay_action":False,"next_step":"Inspect the changed viewport/modal and choose the current target; do not continue a fallback gesture against the old page."}}
-                observed=self.scroll_observation(after,v,observe,_max_nodes)
-                if observed:details["observation"]=observed
-                fail("scroll_context_changed","A gesture was accepted, but the viewport or native modal context changed. This is not verified list progress; the fallback gesture was stopped.",**details)
-            changed=self.scroll_progress(before,after,area,direction)
-            if changed:
-                result={"action_executed":True,"action_complete":True,"verified":True,"verification_deferred":False,"changed":True,"progress_verified":True,"verification_scope":"Stable accessibility anchors moved in the requested direction; business coverage is separate.", "attempts":attempt+1,"strategy":strategy}
-                observed=self.scroll_observation(after,v,observe,_max_nodes)
-                if observed:result["observation"]=observed
-                if expect:result["postcondition"]=self.wait(expect)
-                return result
-        details={"action_executed":True,"verified":False,"changed":False,"attempts":max_attempts,"region":area,
+        # max_attempts=2 remains accepted for older callers, but a failed first
+        # gesture now yields a screenshot instead of an unseen fallback gesture.
+        self.post("/wda/dragfromtoforduration",dict(zip(("fromX","fromY","toX","toY"),points),duration=.1))
+        if not verify:
+            result=self.after(expect,observe,max_nodes=_max_nodes)
+            result.update(strategy="short_drag",attempts=1,progress_verified=False)
+            return result
+        after,v=self.tree()
+        reasons=[]
+        if v!=viewport:reasons.append("viewport_changed")
+        if self.native_modals(after)!=modals:reasons.append("modal_changed")
+        if reasons:
+            details={"action_executed":True,"verified":False,"changed":False,"attempts":1,"reasons":reasons,"recovery":{"same_gesture_retry":False,"replay_action":False}}
+            observed=self.scroll_observation(after,v,"tree" if observe in ("tree","both") else "none",_max_nodes)
+            if observed:details["observation"]=observed
+            fail("scroll_context_changed","A gesture was accepted, but the viewport or native modal context changed. Inspect the screenshot before choosing another action.",**details)
+        changed=self.scroll_progress(before,after,area,direction)
+        if changed:
+            result={"action_executed":True,"action_complete":True,"verified":True,"verification_deferred":False,"changed":True,"progress_verified":True,"verification_scope":"Stable accessibility anchors moved in the requested direction; business coverage is separate.", "attempts":1,"strategy":"short_drag"}
+            observed=self.scroll_observation(after,v,observe,_max_nodes)
+            if observed:result["observation"]=observed
+            if expect:result["postcondition"]=self.wait(expect)
+            return result
+        details={"action_executed":True,"verified":False,"changed":False,"attempts":1,"region":area,
                  "recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, including custom pickers/overlays that may not appear as native modals, or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
-        observed=self.scroll_observation(after,v,observe,_max_nodes)
+        observed=self.scroll_observation(after,v,"tree" if observe in ("tree","both") else "none",_max_nodes)
         if observed:details["observation"]=observed
         fail("no_scroll_progress","Gestures executed but stable accessibility anchors did not show movement in the requested direction. The page may be an overview, boundary, blocked region or custom-rendered list. Changing numbers alone are not scroll progress. This does not prove an empty or complete list; inspect returned state before choosing the next action.",**details)
 
     @action_result
-    def scroll_find(self,selector,direction="up",max_swipes=6):
+    def scroll_find(self,selector,direction="up",max_swipes=1):
         predicate(selector);integer(max_swipes,"max_swipes",0,10)
-        for count in range(max_swipes+1):
+        if direction not in ("up","down","left","right"):fail("invalid_argument","Invalid direction.")
+        # At most one gesture per call: unresolved state goes to the model's
+        # screenshot fallback before any further scrolling, even with a larger budget.
+        for count in range(min(max_swipes,1)+1):
             found=self.query(selector)
             if found["matches"]:
                 try:
                     element=self.resolve(selector,found=found)
                     return {"verified":True,"swipes":count,"matches":found["matches"],"target":self.describe(element)}
                 except WDAError as exc:
-                    if exc.code not in ("offscreen_target","occluded_target"):raise
-            if count==max_swipes:break
+                    exc.details.update(swipes=count,max_swipes=max_swipes)
+                    if exc.code!="offscreen_target" or count or not max_swipes:raise
+            if count==min(max_swipes,1):break
             self.swipe(direction,verify=False,observe="none")
-        error=WDAError("search_exhausted","No hittable match for this selector within max_swipes. Stop searching by selector: find the target on the screen and act by coordinates.",details={"swipes":max_swipes})
-        self.switch_to_coordinates(error)
-        error.details["action_executed"]=max_swipes>0
-        raise error
+        fail("search_exhausted","No hittable match after this search step. Inspect the screenshot before deciding whether to scroll again; do not automatically repeat the search or increase max_swipes.",
+             swipes=count,max_swipes=max_swipes,stop_reason="visual_check_required",action_executed=count>0)
 
     @action_result
     def collect_list(self,row_type="Cell",max_pages=6,end_selector=None):
@@ -853,9 +872,14 @@ class PhoneController:
             seen_pages.add(page_key)
             if index==max_pages-1:break
             observed=self.swipe("up",verify=False,observe="tree",_baseline=(nodes,observed["viewport"]),_max_nodes=500)["observation"]
-        return {"rows":[compact_node(row) for row in rows.values()],"pages":pages,"stop_reason":reason,"end_marker_seen":end,"complete":False,
+        result={"rows":[compact_node(row) for row in rows.values()],"pages":pages,"stop_reason":reason,"end_marker_seen":end,"complete":False,
                 "coverage_verified":end and not any(p["truncated"] for p in pages),
                 "limitations":["Rows deduplicate by identical type/name/label/value; identical rows may collapse.","Only exposed accessibility labels are collected. Reconcile expected counts, screenshot-only fields, totals, currencies and dates before claiming business completeness."]}
+        if reason=="no_progress":
+            error=WDAError("no_scroll_progress","Repeated collection page; inspect the screenshot before continuing.",details={"observation":observed,"action_executed":index>0,"recovery":{"same_gesture_retry":False,"end_of_list_proven":False}})
+            self.switch_to_coordinates(error)
+            result.update({key:value for key,value in error.details.items() if key in ("observation","observation_error","recovery")})
+        return result
 
     def batch(self,steps):
         if not isinstance(steps,list) or not 1<=len(steps)<=20:

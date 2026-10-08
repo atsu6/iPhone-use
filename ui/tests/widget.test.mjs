@@ -26,7 +26,7 @@ async function harness({ reducedMotion = false, context = { displayMode: 'inline
   const requestOptions = [];
   let layoutReads = 0;
   let imageWrites = 0;
-  const ids = ['app', 'device', 'screen', 'image', 'empty-state', 'cursor', 'stage', 'model', 'live-text', 'toast',
+  const ids = ['app', 'device', 'screen', 'image', 'empty-state', 'empty-state-text', 'cursor', 'stage', 'model', 'live-text', 'toast',
     'tool-refresh', 'tool-home', 'tool-screenshot'];
   const elements = Object.fromEntries(ids.map(id => [id, {
     style: { setProperty(name, value) { this[name] = value; } }, dataset: {},
@@ -275,7 +275,7 @@ test('paused clears the screen, errors back off silently, teardown cancels work'
   h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
   assert.equal(h.elements.screen.hidden, false);
   assert.equal(h.elements.image.hidden, true);
-  assert.equal(h.elements['empty-state'].textContent, '预览已暂停');
+  assert.equal(h.elements['empty-state-text'].textContent, '预览已暂停');
   assert.equal(h.elements.image.src, undefined);
   assert.equal(h.elements.app.dataset.busy, 'false');
   assert.equal(h.elements.device.hidden, false);
@@ -403,7 +403,7 @@ test('no frame keeps a fitted black-screen chassis and disconnected label', asyn
   assert.equal(h.elements.screen.hidden, false);
   assert.equal(h.elements.image.hidden, true);
   h.app.ontoolresult({ structuredContent: preview({ frame_available: false }) });
-  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state-text'].textContent, '未连接');
   assert.equal(h.elements['empty-state'].hidden, false);
   assert.ok(parseFloat(h.elements.device.style.height) <= h.stageSize.height);
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(1), frame_available: true }) });
@@ -415,14 +415,52 @@ test('no frame keeps a fitted black-screen chassis and disconnected label', asyn
   assert.equal(h.elements.image.hidden, false);
 });
 
-test('first image decode failure returns to the disconnected chassis', async () => {
+test('empty screen explains connecting, offline, locked, authentication and paused states', async () => {
+  const h = await harness();
+  assert.equal(h.elements['empty-state'].dataset.state, 'connecting');
+  assert.equal(h.elements['empty-state-text'].textContent, '正在连接');
+  for (const [fields, state, label] of [
+    [{ frame_available: false }, 'offline', '未连接'],
+    [{ paused: true, pause_reason: 'device_locked' }, 'locked', '等待解锁'],
+    [{ paused: true, pause_reason: 'authentication' }, 'authentication', '请完成认证'],
+    [{ paused: true, pause_reason: 'unknown' }, 'paused', '预览已暂停'],
+    [{ paused: true }, 'paused', '预览已暂停'],
+  ]) {
+    h.app.ontoolresult({ structuredContent: preview(fields) });
+    assert.equal(h.elements['empty-state'].dataset.state, state);
+    assert.equal(h.elements['empty-state-text'].textContent, label);
+    assert.equal(h.elements['empty-state'].hidden, false);
+    assert.equal(h.elements.image.hidden, true);
+  }
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(1), frame_available: true }) });
+  assert.equal(h.elements['empty-state'].hidden, true);
+});
+
+test('failed reconnect restores the authentication symbol and keeps phone controls disabled', async () => {
+  let release;
+  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+    ? new Promise(resolve => { release = resolve; })
+    : Promise.resolve({ structuredContent: preview() }) });
+  h.app.ontoolresult({ structuredContent: preview({ paused: true, pause_reason: 'authentication' }) });
+  h.elements['tool-refresh'].click();
+  await flush();
+  assert.equal(h.elements['empty-state'].dataset.state, 'connecting');
+  release({ isError: true, structuredContent: { error: { code: 'wda_unreachable' } } });
+  await flush();
+  assert.equal(h.elements['empty-state'].dataset.state, 'authentication');
+  assert.equal(h.elements['empty-state-text'].textContent, '请完成认证');
+  assert.equal(h.elements['tool-home'].disabled, true);
+  assert.equal(h.elements['tool-screenshot'].disabled, true);
+});
+
+test('first image decode failure explains unavailable picture in the chassis', async () => {
   const h = await harness();
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(1) }) });
   h.elements.image.onerror();
   assert.equal(h.elements.image.src, undefined);
   assert.equal(h.elements.image.hidden, true);
   assert.equal(h.elements.device.hidden, false);
-  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state-text'].textContent, '画面暂不可用');
   assert.equal(h.elements['empty-state'].hidden, false);
 });
 
@@ -568,7 +606,7 @@ test('refresh reports a real disconnected service instead of a success toast', a
   await flush();
   assert.match(h.elements.toast.textContent, /未连接到手机/);
   assert.equal(h.elements.toast.dataset.tone, 'error');
-  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state-text'].textContent, '未连接');
   assert.equal(h.elements.device.hidden, false);
 });
 
@@ -584,7 +622,7 @@ test('a poll from before user reconnect cannot put the recovered preview back in
   release({ structuredContent: preview({ paused: true, pause_reason: 'unknown' }) });
   await flush();
   assert.equal(h.elements.app.dataset.live, 'offline');
-  assert.equal(h.elements['empty-state'].textContent, '未连接');
+  assert.equal(h.elements['empty-state-text'].textContent, '未连接');
   assert.equal(h.calls.filter(call => call.name === 'wda_screen_action').length, 1);
 });
 
