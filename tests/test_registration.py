@@ -44,7 +44,7 @@ class RegistrationTests(unittest.TestCase):
             call(["codex","mcp","get","iphone_wda","--json"],capture_output=True,text=True,check=False)])
 
     def test_reinstall_preserves_environment_and_explicit_settings_override_only_their_keys(self):
-        existing = {"transport": {"env": {"IPHONE_USE_STATE_DIR": "/private/state old", "DEVELOPER_DIR": "/Xcode/Developer", "OTHER": "keep"}}}
+        existing = {"transport": {"env": {"IPHONE_USE_STATE_DIR": "/private/state old", "DEVELOPER_DIR": "/Xcode/Developer", "OTHER": "keep", "PLUGIN_ROOT": "/old/cache", "PLUGIN_DATA": "/old/data"}}}
         with patch.object(registration.subprocess, "run", return_value=Mock(returncode=0, stdout=json.dumps(existing))) as run:
             with patch.dict(registration.os.environ, {"IPHONE_USE_STATE_DIR": "/private/state new"}):
                 self.invoke(self.installation)

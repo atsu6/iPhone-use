@@ -23,6 +23,10 @@ def registration_environment():
                 raise ValueError("Invalid environment")
         except (ValueError, TypeError, AttributeError) as exc:
             raise SystemExit("Cannot read existing iPhone Use environment; registration was left unchanged.") from exc
+        # Codex injects these from the plugin currently loaded by the host.
+        # Keeping them explicitly would pin a later version to the old cache.
+        environment = {key: value for key, value in environment.items()
+                       if key not in ("PLUGIN_ROOT", "PLUGIN_DATA")}
     for key in ("IPHONE_USE_STATE_DIR", "WDA_STATE_DIR", "DEVELOPER_DIR"):
         if os.environ.get(key):
             environment[key] = os.environ[key]
