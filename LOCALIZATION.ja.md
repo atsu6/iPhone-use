@@ -36,7 +36,7 @@ sh scripts/install.sh
 ## 納品前の検証結果
 
 - TypeScript型チェックと画面HTMLのビルド：成功
-- Pythonのテスト（更新・再導入の検証を含む）：398件成功
+- Pythonのテスト（更新・再導入・ブラウザープレビューの検証を含む）：403件成功
 - ウィジェットの既存テスト：31件成功
 - マニフェスト、2スキル、モデル向け17ツールとApp専用2ツールの検証：成功
 - MCP stdioのinitialize、tools/list、ping：成功
