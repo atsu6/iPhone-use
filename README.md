@@ -6,7 +6,7 @@
 
 让 Codex 通过 USB 操作你的真实 iPhone。用自然语言描述任务，Codex 就能打开 App、读取页面、点击、滚动、输入文字、整理列表，并在侧边栏展示手机屏幕。
 
-iPhone Use 的 PUA（Phone Use Agent）工具使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
+iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
 
 **使用前，需要先在你自己的 iPhone 上安装、签名并启动 WDA Runner。** WDA 是运行在手机上的执行服务；下面的提示词和 setup 流程可以让 Codex 协助完成首次安装，已有健康的 WDA 可直接复用。
 
@@ -137,8 +137,6 @@ sh scripts/install.sh
 | `pua_batch`、`pua_scroll_find`、`pua_collect_list` | 组合动作、滚动查找与列表采集 |
 | `pua_screen`、`pua_metrics` | 预览开关与有界耗时统计 |
 
-工具统一使用 `pua_*` 名称，PUA 代表 Phone Use Agent；插件名称、技能和 MCP 服务为 iPhone Use。
-
 界面异常时先返回截图，再由模型判断下一步：滚动查找一次最多滑一次，仍找不到可点击目标就暂停；遮挡、滚动无进展、输入不符或预期页面未出现也走截图兜底。已有截图直接复用，不自动继续盲滑或重放操作。
 
 ## 本机数据与升级
@@ -166,8 +164,6 @@ python3 scripts/package.py
 ```
 
 构建结果是自包含屏幕 HTML，源代码包位于 `dist/iphone-use-<版本>-source.zip`。安装和普通使用不需要重新构建 UI。安装后的插件仍完整保留 widget 的源码、样式、构建脚本、配置、依赖锁文件和测试，便于本地维护。
-
-`docs/` 与 `evals/` 只在本地维护，不纳入 Git、源代码包或插件安装目录。插件需要的操作说明保留在 `skills/` 与其 `references/` 中。仓库和源代码包保留开发检查与测试；安装目录不复制根目录的 Python 测试、CI 工作流和开发基准 / 冒烟脚本，widget 的构建与验证工具则随插件保留。
 
 - [屏幕预览与恢复](skills/iphone-use/references/screen.md)
 - [App 标识参考](skills/iphone-use/references/apps.md)

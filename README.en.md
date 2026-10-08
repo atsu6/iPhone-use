@@ -6,7 +6,7 @@
 
 Let Codex operate your real iPhone over USB. Describe a task in natural language: open apps, read screens, tap, scroll, enter text, collect lists, and watch the phone in a sidebar widget.
 
-The plugin's PUA (Phone Use Agent) tools connect to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (WDA). It includes a local MCP server, setup and usage skills, and a live screen widget. It reuses healthy connections and existing builds; when element targeting fails, it guides the model to inspect a screenshot and try coordinates.
+The plugin connects to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (WDA). It includes a local MCP server, setup and usage skills, and a live screen widget. It reuses healthy connections and existing builds; when element targeting fails, it guides the model to inspect a screenshot and try coordinates.
 
 **Before using iPhone Use, install, sign, and start WDA Runner on your own iPhone.** WDA is the on-device execution service. The prompt and setup workflow below can help Codex complete the initial installation; a healthy existing WDA can be reused.
 
@@ -135,8 +135,6 @@ There are 17 model tools and 2 additional widget-only tools.
 | `pua_batch`, `pua_scroll_find`, `pua_collect_list` | Compound actions, search, collection |
 | `pua_screen`, `pua_metrics` | Preview controls and bounded timing statistics |
 
-Tools use the `pua_*` prefix for Phone Use Agent; the plugin, skills, and MCP service use the iPhone Use identity.
-
 Abnormal UI states return a screenshot for the model to inspect before choosing another action. Scroll search performs at most one swipe per call and stops if the target remains unreachable; occlusion, unproven scroll progress, input mismatch, and failed page expectations use the same fallback. Existing screenshots are reused, without automatic extra gestures or action replay.
 
 ## Runtime data and updates
@@ -162,8 +160,6 @@ python3 scripts/package.py
 ```
 
 The UI builds into self-contained HTML. Source packages are written to `dist/iphone-use-<version>-source.zip`; normal installation and use do not require rebuilding the UI. Installed plugins retain the complete widget source, styles, build scripts, configuration, dependency lockfile, and widget tests for local maintenance.
-
-`docs/` and `evals/` are maintained locally and excluded from Git, source archives, and plugin installs. Operational guidance remains in `skills/` and its `references/`. The repository and source archive retain development checks and tests; installs omit root Python tests, CI workflows, and development benchmark / smoke scripts while preserving widget build and validation tools.
 
 See [screen preview and recovery](skills/iphone-use/references/screen.md), [app identifiers](skills/iphone-use/references/apps.md), [troubleshooting](skills/iphone-use-setup/references/troubleshooting.md), and [changelog](CHANGELOG.md).
 
