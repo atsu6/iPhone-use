@@ -59,7 +59,10 @@ class PreviewServer(ThreadingHTTPServer):
     def __init__(self, runtime, port=0, token=None):
         self.runtime = runtime
         self.token = token or secrets.token_urlsafe(32)
-        self.widget = (ROOT / "assets/phone-screen.html").read_bytes()
+        # The SDK logs entire frame responses at debug level. Keep private
+        # image payloads out of browser logs and the browser control channel.
+        self.widget = (ROOT / "assets/phone-screen.html").read_bytes().replace(
+            b"<head>", b"<head><script>console.debug=()=>{};</script>", 1)
         self.probe = WDAClient(runtime.base_url, timeout=2)
         self.probe_lock = threading.Lock()
         self.last_probe = 0
