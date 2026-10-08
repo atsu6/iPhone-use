@@ -1,53 +1,47 @@
-# MCP 故障与代码调用
+# MCPの不具合とコードからの呼び出し
 
-优先调用封装好的工具，默认乐观执行常规动作，下一步需要信息时顺带判断上一动作。工具绑定缺失、宿主转发错误或已确认的封装问题不等于 PUA 不可用；可对同一已授权动作使用插件代码入口。代码回退保留相同的配置、会话、操作锁和明确异常处理，不新增每步验收。
+まず提供されたツールを使い、通常操作は次の必要な観察で進捗も確認する。バインド欠落、ホストの転送エラー、確認済みのラッパー問題はPUA自体の不具合とは限らない。同じ許可済み操作をプラグインのコード入口から続けられる。同じ設定、session、操作ロック、エラー処理を保ち、毎回の追加検証を挟まない。
 
-普通版提供 17 个模型工具；先查看本回合实际可调用的工具绑定（支持时用 ALL_TOOLS 或工具搜索），不能只从 tools/list、文档或先前聊天推断已经绑定。0.1.6 的 install.sh 同时注册同名标准 MCP，避免 Codex 插件共享说明预算隐藏工具，并保留完整 batch schema。新版安装后重新连接聊天；实际仍缺少所需工具时才用下面的代码入口继续，不默认把已封装操作都改成 CLI。
+モデル向け17ツールの、このターンで実際に使えるバインドをALL_TOOLSやツール検索で確認する。tools/list、文書、以前のチャットだけでは判断しない。install.shは同じ名前空間の標準MCPも登録する。導入後にチャットを再接続し、それでも必要なツールが使えない場合だけコード入口を使う。
 
-## 先区分错误
+## エラーを区別する
 
-- schema / 参数错误：按 argument_path、unknown_fields、allowed_fields 修正一次调用。action_executed=false 表示动作未发出，MCP 绑定仍不可用时可用代码入口；不要自动忽略未知参数。
-- `device_busy`：另一操作持有共享锁，等待它结束，不另建 Runtime 配置或 state directory 绕过锁。
-- `stale_observation`：提供的 ID 不属于当前 Runtime，或 App / 视口上下文已改变。用下一步所需的新信息定位，不为整图哈希、文本数字刷新或固定 30 秒期限增加读图；ID 是可选上下文，不是每个坐标动作的必填许可。
-- 界面异常统一先看截图：selector / 焦点失败、滚动后找不到可点击目标、无进展、区域被挡、滚动上下文改变、输入不符或预期页面未出现。先查看结果里已附截图，缺图才补一次 screenshot，再选择可见目标、处理浮层或决定是否继续滚动；不先重读树、换标签或原样重试。`tap_point` / candidates 不证明未被遮挡；输入先点可见输入框再 type_text，焦点仍失败须重新选点。叠在同一位置或只有一个在屏幕内的匹配由工具自行确定。
-- `input_continuation_expired`：长文本续传已失效，本次没有输入任何内容。读取字段实际文字，用 `replace=false` 只补缺少的部分。
-- `occluded_target` / `offscreen_target`：目标点击没有执行，不能推断未执行点击打开了浮层。`occluded_target` 按附带截图判断：目标可见就按 `tap_point` 用坐标点击，确有遮挡先处理遮挡；`offscreen_target` 先向目标滑动。自绘半屏面板可能没有原生 Alert / Sheet 节点，按真实截图判断。
-- 显式验收的 `postcondition_failed`：动作已接收但验收条件未满足，查看实际状态再决定剩余步骤，不因验收失败自动重放动作。
-- `action_executed=true, action_complete=false`、`uncertain=true` 或动作后 timeout：至少部分动作可能已生效。输入、发送、提交、删除等先看真实字段 / 记录，不能切换代码入口后盲目再做。
-- 查询短暂失败：工具可有界重读一次；POST 查询接口不应按 mutation 处理，查询失效不证明手机动作已执行。
-- `local.pid.0`、`pua_foreground_unavailable` 或 XCTest Code 41：通道故障，调用 READY 恢复；不要通过更改 selector 或重复手机按钮处理。锁屏、签名和信任问题按 setup skill；App 密码 / Face ID 按认证接管。
+- schema／引数：argument_path、unknown_fields、allowed_fieldsから修正する。action_executed=falseなら未実行。未知引数を黙って無視しない。
+- device_busy：共有ロックの操作が終わるまで待つ。別Runtime設定や状態ディレクトリで迂回しない。
+- stale_observation：別RuntimeのIDかアプリ・viewportの変化。次に必要な新情報で位置を決める。全画像ハッシュ、数字更新、固定30秒のために追加読取りをしない。IDは任意。
+- 画面異常：selector、焦点、対象未解決、移動なし、遮蔽、文脈変化、入力不一致、期待ページ不在は添付画像を先に見る。ない場合だけ1回取る。ラベル変更や同じ再試行をしない。tap_pointや候補は遮蔽なしを証明しない。見える欄を押してから入力し、焦点がなければ位置を選び直す。
+- input_continuation_expired：今回の入力はない。実際の文字を読み、replace=falseで不足だけ補う。
+- occluded_target／offscreen_target：対象タップは未実行。画像で見えるならtap_point、覆われていれば先に遮蔽処理、画面外ならスワイプ。独自パネルはAlert／Sheetがない場合がある。
+- postcondition_failed：操作は受理されたが結果条件が未達。現在の状態から残りを判断し、自動再実行しない。
+- action_executed=true、action_complete=false、uncertain、操作後timeout：部分的に有効かもしれない。入力、送信、削除は実際の欄・記録を読み、コード入口に変えて盲目的に繰り返さない。
+- 純照会の一時失敗：上限付きで1回再読できる。POSTの照会を変更操作と誤認しない。
+- local.pid.0、pua_foreground_unavailable、XCTest Code 41：READYで接続復旧。selector変更やボタン連打では対処しない。ロック・署名・信頼はsetup、アプリ認証は引き継ぎガイド。
 
-通过 `functions.exec` 时逐个内容块转发：文字用 `text(block.text)`，图片用 `image(block)`；不要 `text(result)` 把截图变成 base64 文本。图片无法转发时用 `view_image` 打开 `image.path` / `error.observation.image.path`。坐标按 `pixel_to_point` 换算。
+functions.execではtext(block.text)とimage(block)で内容を転送し、base64入り結果をtext(result)にしない。画像転送不能ならview_imageでimage.path／error.observation.image.pathを開く。座標はpixel_to_pointで変換する。
 
-普通 `verified=false` 不是错误，不要求 observe 或停止 batch。HTTP accepted 只描述请求边界；常规路径继续，最终关键状态显式验收。
+普通のverified=falseはerrorでもbatch停止条件でもない。HTTP受理は呼び出しの境界で、重要な最終状態は別途確認する。Homeは専用homescreen経路を1回使い、必要な場合だけverify=trueでSpringBoardを確認する。HTTP 200でも移動しない現象からiOS／XCTest内部の原因を推測しない。
 
-Home 使用手机端专用主屏幕端点。默认不单独等待 SpringBoard；准备下一步时的观察会显示实际状态。需要确认主屏时显式 `verify=true`，它有界核对前台；通用按键接口返回 HTTP 200 而界面未变的问题不能据此推定 iOS / XCTest 的内部原因。
+## READYの復旧
 
-## READY 的有界恢复
+通常はrecover=true、禁止・読み取り専用の場合だけfalse。一時的な前面不良では旧観察・sessionを消して1回再読し、持続時だけ所有者確認済みサービスを再起動する。操作は再実行しない。
 
-正常任务用 `pua_ready(recover=true)` 或省略 recover。false 仅用于用户明确禁止重启或只读诊断，保留该限制。暂时失效前台只清理旧观察 / 会话并重读一次；持续故障才重启已核验归属的本插件服务，复用有效构建。不会重放导航、输入或提交。
+recoveringは同じrecovery.job_idをjobs配列から追い、stopping／starting／servingを確認してREADY。Runnerのsucceededを待たずstartを重ねない。段階、ログ、retry_after_secondsに従い、固定回数ループや解析失敗の握りつぶしをしない。recovery_requiredは指示が許す場合だけnext_tool／next_argumentsでtrue。errorなしでも未READY。
 
-`ready=false, state="recovering"` 携带 recovery.job_id 和查询参数。status 返回 `jobs` 数组，找到 id 与 job_id 相等的工作；检查 recovery_phase，从 stopping / starting 到 serving 后重验 READY。Runner 可以长期 running，不等 succeeded、不重复 start。按阶段、日志和 retry_after_seconds 查询，不写固定 15 秒 × 20 次的等待循环，也不能读取不存在的单个 job 并吞掉解析异常。
+設定、endpoint、worker、待受の所有者と有効なビルドが必要。外部・不明サービスや競合は返された手順で処理し、ポートでプロセスを止めない。120秒冷却中はretry_after_secondsに従う。信頼・解除・UIオートメーションの確認は本人が行う。
 
-`ready=false, state="recovery_required", reason="recovery_disabled"` 时，用户指令允许才按 next_tool / next_arguments 调用 recover=true；明确禁止则说明阻塞。正常未就绪状态没有 error、MCP isError=false，仍不能继续手机动作。达到 `ready=true` 后直接复用其中的 observation 准备下一步，不紧接着重新 observe。
+## 同梱スクリプトを呼ぶ
 
-恢复要求配置、endpoint、worker 和监听端口归属匹配，归属不明、外部 PUA、端口冲突或缺少构建按返回步骤处理，不按端口杀进程。120 秒冷却按 retry_after_seconds 诊断，不连续重启。信任、解锁和 UI 自动化确认由用户在手机完成。
-
-## 直接执行提供的脚本
-
-从当前项目或已安装插件确定 `<PLUGIN_ROOT>`，不要照抄某人的版本 cache 路径。常规 Home：
+現在のソースか導入済みプラグインからPLUGIN_ROOTを特定し、他人のキャッシュパスを写さない。
 
 ```sh
 python3 <PLUGIN_ROOT>/scripts/phone.py pua_press_button '{"name":"home","observe":"none","verify":false}'
 ```
 
-脚本使用默认 `~/.local/share/iphone-use` 的共享会话与操作锁，返回结构化结果。下一步需要未知页面信息时在本次动作显式选择 observe；需要关键验收时显式 verify=true。命令输出只有 JSON：截图位于 `image.path`（已缩放的 JPEG，同名 `.png` 是原始截图），需要查看时用可用的图片工具打开，像素乘以 `image.pixel_to_point` 得到 iPhone 点。
+既定の~/.local/share/iphone-useの共有sessionと操作ロックを使い、JSONを返す。必要なobserve／verifyを同じ呼び出しで選ぶ。画像はimage.pathの縮小JPEGで、同名pngは元画像。画像ツールで開き、pixel_to_pointでポイントへ変換する。元の接続が非既定の場合だけ一致する--state-dir／--urlを使い、busy回避や同じ端末の並列制御に使わない。
 
-只有原通道确实使用非默认目录 / URL 才传匹配的 --state-dir / --url；不得为避开 busy 换目录或并行控制同一手机。
+## 最小限のコード入口
 
-## 写最小调用代码
-
-宿主无法调用脚本时可导入相同 Runtime。下例保留默认配置和结构化错误：
+スクリプトを呼べない場合は同じRuntimeを使う。
 
 ```python
 import json
@@ -69,18 +63,14 @@ finally:
     runtime.close()
 ```
 
-两个入口绕过 MCP 绑定，仍经过共享实现。observation ID 不跨进程共享；若选择使用 ID，在同一 Runtime 中取得观察并传给动作。已知坐标或 region 可不提供 ID，不为获得许可额外读图或树。使用 iPhone 点坐标，不使用 Mac 屏幕坐标或截图像素。共享实现自身故障不会因换入口而修复，按实际异常调整；不要另建外部 PUA session 或盲目重复 mutation。
+両入口は同じ実装を通る。observation IDはプロセス間共有されないので、使うなら同じRuntimeで取得する。既知の座標・regionでは省略できる。iPhoneポイントを使い、Mac座標や画像ピクセルは渡さない。共有実装の不具合は入口変更だけでは直らず、外部sessionを別途作ったり変更操作を盲目的に繰り返さない。
 
-## 滚动与批次
+## スクロールとbatch
 
-默认 swipe 为 `verify=false, observe="none"`，执行一手势，不读 XML 验进展或自动 fallback。已知 region 可直接使用，不强制树、锚点或 ID。下一步本就需要读取列表时，在该次动作直接返回所需观察并顺带判断是否移动；默认未验证返回不等于没有移动。
+既定のswipeはverify=false、observe=noneで1回のみ。既知のregionにツリー・アンカー・IDを強制しない。必要なリスト観察は同じ操作で返す。未検証は未移動という意味ではない。
 
-显式 `verify=true` 才检查滚动进展、原生浮层和变化上下文；需要调试时在该次调用选 tree / both，复用返回观察，不重复另读。进展以列表几何变化判断，数字或轮播文本刷新不应单独作为滚动成功 / 拒绝动作的依据。原生浮层的验证保护不能识别所有自绘面板，明确遮挡后按真实状态选区域或关闭面板。
+verify=trueの場合だけ幾何変化、ネイティブパネル、文脈を1回確認する。数値やカルーセルの更新だけを進捗としない。独自パネルは画像で領域・遮蔽を判断する。最初の移動未確認で画像を返して止まり、max_attempts=2でも再試行しない。scroll_findも最大1回のスワイプで、曖昧さ・遮蔽は事前に止まる。画像を見ずにmax_swipesを増やさない。
 
-`verify=true` 发现第一次手势无进展就附截图停止，不自动换手势；旧参数 `max_attempts=2` 仍可传入但不导致自动重试。`scroll_find` 每次最多滑一次，仍找不到可点击目标就先返回截图；遮挡和歧义在滑动前即停止。先实际查看图片再判断继续、区域、方向和目标，不直接增加 `max_swipes` 重跑。
+no_scroll_progressは空リスト・末尾の証拠ではない。scroll_context_changedは操作後の文脈変化。画像失敗は元のエラー・実行証拠を残し、別途1回取得する。batchは通常の未検証操作を続け、error、uncertain、結果条件のないsubmitなどで止まる。completed_steps／stopped_atから続ける。launchは既定1回だけ有効化し、明示verify／expectだけで結果を確認する。
 
-`no_scroll_progress` 不证明空列表或到底；异常结果即使请求 none/tree 也附截图，检查入口、边界、浮层及自绘内容。`scroll_context_changed` 表示手势后上下文变化，先看截图再处理；已执行部分不能当作未执行而重放。截图读取失败保留原错误与执行证据，并提示单独取图，不自行继续动作。
-
-batch 可连续执行普通 unverified 导航和输入；明确 error、uncertain 或未验收的 submit 才停止，按 completed_steps / stopped_at 继续剩余步骤。launch 默认只激活一次；显式 verify=true / expect 才有界等前台 / 页面。关键验收失败先看实际状态，不自动再次 activate。
-
-代码调用成功、Home 完成、某 App 读完或一个 batch 完成都只是阶段结果；继续剩余工作，最终关键结果与交付完成后才结束整项任务。
+コード呼び出し、Home、1つのアプリ、1つのbatchの完了は途中段階。残りを続け、重要な最終結果と成果物を確認してから終える。

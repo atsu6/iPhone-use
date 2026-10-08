@@ -1,6 +1,6 @@
 # iPhone Use
 
-[中文](README.md) · **English**
+[日本語](README.md) · [中文](README.zh-CN.md) · **English**
 
 ![iPhone Use controlling a real iPhone in Codex with a live screen preview](assets/iphone-use-demo.png)
 

@@ -74,17 +74,17 @@ const FRAME_INTERVAL = 250;
 const REQUEST_TIMEOUT = 3000;
 // A screenshot or Home may queue behind the phone operation already running.
 const ACTION_TIMEOUT = 12000;
-const LIVE_TEXT: Record<LiveState, string> = { connecting: '连接中', live: 'Live', paused: '已暂停', offline: '未连接' };
+const LIVE_TEXT: Record<LiveState, string> = { connecting: '接続中', live: 'ライブ', paused: '一時停止中', offline: '未接続' };
 const EMPTY_TEXT: Record<EmptyState, string> = {
-  connecting: '正在连接', offline: '未连接', locked: '等待解锁',
-  authentication: '请完成认证', paused: '预览已暂停', unavailable: '画面暂不可用',
+  connecting: '接続しています', offline: '未接続', locked: 'ロック解除待ち',
+  authentication: '認証を完了してください', paused: 'プレビューは一時停止中です', unavailable: '画面を取得できません',
 };
-const DONE: Record<ToolName, string> = { refresh: '已刷新连接', home: '已回到主屏幕', screenshot: '截图已复制到剪贴板' };
+const DONE: Record<ToolName, string> = { refresh: '接続を更新しました', home: 'ホーム画面に戻りました', screenshot: 'スクリーンショットをコピーしました' };
 const FAILED: Record<string, string> = {
-  device_busy: '手机正在执行操作，请稍后再试',
-  preview_paused: '认证接管期间已暂停',
-  clipboard_unavailable: '截图未能写入剪贴板',
-  pua_unreachable: '未连接到手机',
+  device_busy: 'iPhoneを操作中です。少し待ってから再試行してください',
+  preview_paused: 'ユーザーによる認証のため一時停止中です',
+  clipboard_unavailable: 'スクリーンショットをコピーできませんでした',
+  pua_unreachable: 'iPhoneに接続できません',
 };
 
 const validSize = (value: unknown): value is Size => {
@@ -311,10 +311,10 @@ function consume(value: unknown) {
   if (preview.paused === true) {
     clearFrame();
     setLive('paused');
-    liveText.textContent = preview.pause_reason === 'device_locked' ? '等待解锁' : LIVE_TEXT.paused;
+    liveText.textContent = preview.pause_reason === 'device_locked' ? 'ロック解除待ち' : LIVE_TEXT.paused;
     liveText.title = preview.pause_reason === 'device_locked'
-      ? '解锁 iPhone 后继续任务，或点击刷新恢复预览'
-      : '预览已暂停；完成手机认证后继续任务或点击刷新恢复画面';
+      ? 'iPhoneのロックを解除して作業を続けるか、更新ボタンでプレビューを再開してください'
+      : 'プレビューを一時停止しています。iPhoneで認証を完了して作業を続けるか、更新ボタンで画面を再開してください';
     showEmpty(preview.pause_reason === 'device_locked' ? 'locked'
       : preview.pause_reason === 'authentication' ? 'authentication' : 'paused');
     return;
@@ -416,18 +416,18 @@ async function act(name: ToolName) {
     const data = result.structuredContent as (Partial<Preview> & { service_ready?: boolean; error?: { code?: string } }) | undefined;
     if (result.isError || data?.error) {
       if (name === 'refresh' && !image.src) showEmpty(previousEmptyState);
-      notify(FAILED[data?.error?.code ?? ''] ?? '操作未完成，请重试', true);
+      notify(FAILED[data?.error?.code ?? ''] ?? '操作が完了しませんでした。再試行してください', true);
     } else {
       // A refresh answers with the new stream identity; take the next frame at once.
       if (name === 'refresh') consume(data);
-      notify(name === 'refresh' && data?.service_ready === false ? '未连接到手机，请确认连接后重试' : DONE[name], name === 'refresh' && data?.service_ready === false);
+      notify(name === 'refresh' && data?.service_ready === false ? 'iPhoneに接続できません。接続を確認して再試行してください' : DONE[name], name === 'refresh' && data?.service_ready === false);
       if (timer) clearTimeout(timer);
       timer = undefined;
       schedule(0);
     }
   } catch {
     if (name === 'refresh' && !image.src) showEmpty(previousEmptyState);
-    notify('操作未完成，请重试', true);
+    notify('操作が完了しませんでした。再試行してください', true);
   } finally {
     acting = false;
     delete tools[name].dataset.busy;

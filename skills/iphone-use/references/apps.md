@@ -1,55 +1,55 @@
-# 查找真实 app bundle ID
+# 実際のアプリのbundle IDを探す
 
-已经知道且核验过的 bundle ID 可直接启动，不为每次 launch 重查安装清单。查常用 App 可先用 `pua_apps(source="catalog")` 离线检索本地目录；未知应用或需要区分用户实际安装的版本时用 source=auto，先查选定 iPhone 的已安装应用，再查本地目录，仍无候选才查 Apple。不要凭品牌名拼写 bundle ID，也不要连续试多个猜测值。
+確認済みのIDなら直接起動し、毎回インストール一覧を読み直さない。既知のアプリはpua_apps(source="catalog")でオフライン検索する。未知のアプリや版の区別が必要な場合はsource=autoで選択中iPhoneのインストール一覧とローカル一覧を検索し、候補がなければAppleを検索する。ブランド名からIDを作ったり、推測値を連続試行しない。
 
 ```json
-{"query":"招商银行","source":"auto"}
+{"query":"WeChat","source":"auto","country":"jp"}
 ```
 
-本例应返回 `com.cmbchina.MPBBank`。检查名称、发布者和候选来源后，把 bundle_id 传给 `pua_launch_app`。正常启动乐观继续；下一步需要未知页面信息时在该次 launch 设置 observe，顺带查看实际前台和目标页，不另加默认启动验收。招商银行主应用与掌上生活信用卡应用是两个应用。
+名前、公開元、候補の出典を確認してbundle_idをpua_launch_appに渡す。未知ページが必要なら起動時のobserveで前面とページも読み、専用確認を重ねない。招商銀行の本体com.cmbchina.MPBBankとクレジットカード用の掌上生活は別アプリ。
 
-- `source=auto`：先读取已选设备的安装列表（本地缓存 300 秒），合并本地目录。精确名称/别名优先；精确匹配存在时不混入子串候选。无本地候选才调用 Apple。
-- `source=installed`：只查已选 iPhone，缺少选定设备或读取失败时返回可执行的诊断。英文品牌别名可用本地目录映射到安装列表的 bundle ID。
-- `source=catalog`：离线查本文件和 `apps.json` 中 36 个经过 Apple 查询核验的应用。完全不查询 iPhone 或网络。
-- `source=apple`：查询指定 App Store 国家/地区的 Apple 公共 API，默认 `country=cn`，可指定 `hk`、`us` 等。返回商店候选，不意味着安装在用户手机上。
+- source=auto：選択端末の一覧（300秒キャッシュ）と同梱一覧を統合。正確な名称・別名を優先し、一致があれば部分一致を混ぜない。ローカル候補がなければAppleへ。
+- source=installed：選択iPhoneだけを検索。端末未選択や取得失敗は診断を返す。ブランドの英語別名は同梱一覧でIDへ対応させられる。
+- source=catalog：apps.jsonの36アプリをオフライン検索する。端末やネットワークを照会しない。同梱一覧は上流が確認した中国・香港のアプリを中心にしており、実際の名前・ID・出典を保持している。
+- source=apple：指定したApp Store地域の公開APIを検索する。既定はcountry=cn。日本ならjp、香港hk、米国usを明示する。ストア候補は実機インストールの証拠ではない。
 
-`installed_verified=true` 表示选定设备安装列表确认了候选，`installation_checked` 表示本次查询是否成功获取过安装列表（最多缓存五分钟）；false 不能独立解释为未安装。候选中 `verified_at` 是来源核验时间。查询只返回匹配应用，不回传整份设备清单。设备安装清单和缓存保存在仓库外的私有状态目录，权限为 600；不会将设备信息或安装清单发送给 Apple。
+installed_verified=trueは実機のインストール一覧で確認済み。installation_checkedは今回一覧を取得できたか（最大5分キャッシュ）で、falseだけでは未インストールとはいえない。verified_atは出典の確認日時。対象候補だけを返す。端末一覧とキャッシュはリポジトリー外の非公開状態先（600）に保存し、Appleには送信しない。
 
-## Apple 官方 API
+## Appleの公式API
 
-[Apple iTunes Search API 文档](https://performance-partners.apple.com/search-api) 说明了 `software`、国家/地区参数、JSON、缓存和约每分钟 20 次查询的指导限制。该公开接口查询 App Store 应用元数据，无需用户的 Apple ID、密码或 API 密钥：
+[Apple iTunes Search APIの資料](https://performance-partners.apple.com/search-api)はsoftware、地域、JSON、キャッシュ、毎分約20件の目安を説明している。公開メタデータの検索にApple ID、パスワード、APIキーは不要。
 
 ```text
-https://itunes.apple.com/search?term=招商银行&country=cn&media=software&entity=software&limit=10
-https://itunes.apple.com/lookup?id=392899425&country=cn&entity=software
+https://itunes.apple.com/search?term=WeChat&country=jp&media=software&entity=software&limit=10
+https://itunes.apple.com/lookup?id=414478124&country=jp&entity=software
 ```
 
-先用名称搜索并核对实际发布者与产品，再用稳定的 `trackId` Lookup 刷新。官方文档说明 ID 查询误匹配更少；不要自动选名称搜索第一条。`pua_apps` 使用 URL 编码、5 秒网络超时、响应大小限制、Apple HTTPS 域名/路径和跳转限制、15 分钟缓存和每分钟最多 18 次新请求，避免长时间阻塞或重复撞限流。刷新脚本按地区批量 Lookup 已审核 ID。
+名称検索で公開元と製品を確認し、安定したtrackIdのLookupで更新する。検索の先頭を自動選択しない。実装はURLエンコード、5秒timeout、応答サイズ上限、Apple HTTPSのドメイン・パス・リダイレクト制限、15分キャッシュ、毎分最大18件の新規要求で制限する。
 
 ```sh
-python3 scripts/update_app_catalog.py --search "应用名称" --country cn
+python3 scripts/update_app_catalog.py --search "アプリ名" --country jp
 python3 scripts/update_app_catalog.py --refresh
 ```
 
-搜索只输出候选，不自动加入目录。维护者核对 App Store 页面、发布者和具体产品后再添加记录；刷新仅更新已有审核记录的商店元数据，缺失 ID 或 bundle ID 变化时停止并保留原目录。
+検索は候補を表示するだけで一覧に自動追加しない。保守者がストア、公開元、製品を確認して追加する。refreshは既存の確認済み記録のメタデータだけを更新し、ID欠落やbundle ID変更なら停止して元を保持する。
 
-## 范围与失败处理
+## 範囲と失敗
 
-Apple 商店搜索存在同名、地区和下架限制，企业内部、开发版或未上架应用可能不存在。[App Store Connect 的 bundleIds 接口](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-bundleids) 只能列出开发者团队自身注册的 ID，不能当作所有第三方应用的目录。已安装设备列表是确认用户实际应用的更直接证据。
+同名、地域、配信終了で検索できない場合がある。企業内、開発版、未公開アプリはストアに存在しないことがある。[App Store ConnectのbundleIds](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-bundleids)は自チームの登録IDだけで、全第三者アプリの一覧ではない。実機一覧が本人のアプリの直接的な証拠になる。
 
-本次实测 `富途牛牛` 在 CN 搜索没有目标应用，在 HK 查询才取得 `cn.futu.FutuTraderPhone`。遇到空结果先查 `source=installed`，或按用户实际商店地区查询；不要把地区搜索不到解释为没有安装。飞书与国际版 Lark、微信与企业微信、普通版与极速版/开发版也应分别核对。
+上流の確認では富途牛牛はCNで見つからずHKでcn.futu.FutuTraderPhoneを取得した。空ならsource=installedまたは実際の地域を調べ、検索不可を未導入とみなさない。飛書とLark、WeChatと企業WeChat、通常版と軽量版・開発版は区別する。
 
-若 MCP 查询本身不可用，可用固定的 Xcode 命令直接读取本地安装列表（`--include-all-apps` 必须保留：devicectl 默认仅显示开发应用），在本地过滤目标名称/bundle ID 后启动。下一步所需观察也可顺带判断启动状态。文件写到仓库外私有目录，不保存完整安装清单到项目：
+MCP照会が使えない場合は、Xcodeで一覧を読みローカルで対象だけを抽出する。--include-all-appsを保つ（devicectlの既定は開発アプリのみ）。ファイルはリポジトリー外の非公開先に置き、完全な端末一覧をプロジェクトへ保存しない。
 
 ```sh
-xcrun devicectl device info apps --device "<已选设备 UDID>" --include-all-apps --json-output "<私有目录>/apps.json" --timeout 8
+xcrun devicectl device info apps --device "<選択端末のUDID>" --include-all-apps --json-output "<非公開ディレクトリ>/apps.json" --timeout 8
 ```
 
-## 已核验目录
+## 上流で確認した一覧
 
-每条记录的实际 Apple API URL、商店名称、发布者、国家/地区与 UTC 核验时间见 [apps.json](apps.json)。下面只列品牌、bundle ID 和查询地区；商店记录不证明设备安装状态。
+実際のAPI URL、ストア名、公開元、地域、UTC確認日時は[apps.json](apps.json)。下表は元のブランド表記、bundle ID、確認地域を保持する。ストア記録は端末への導入を証明しない。
 
-| 应用 | bundle ID | 核验商店 |
+| アプリ | bundle ID | 確認したストア |
 | --- | --- | --- |
 | 微信 | `com.tencent.xin` | [CN](https://apps.apple.com/cn/app/id414478124) |
 | 支付宝 | `com.alipay.iphoneclient` | [CN](https://apps.apple.com/cn/app/id333206289) |

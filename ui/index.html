@@ -1,16 +1,16 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>iPhone 屏幕</title>
+  <title>iPhoneの画面</title>
   <style>/*__STYLE__*/</style>
 </head>
 <body>
-  <main id="app" data-frame-seq="0" data-busy="false" data-operating="false" data-live="connecting" aria-label="iPhone 实时屏幕">
+  <main id="app" data-frame-seq="0" data-busy="false" data-operating="false" data-live="connecting" aria-label="iPhoneのリアルタイム画面">
     <header id="status">
       <span id="model">iPhone</span>
-      <span id="live"><i class="dot" aria-hidden="true"></i><span id="live-text">连接中</span></span>
+      <span id="live"><i class="dot" aria-hidden="true"></i><span id="live-text">接続中</span></span>
     </header>
     <div id="stage">
       <div id="device" data-orientation="portrait">
@@ -20,7 +20,7 @@
         <div class="side-button power-button" aria-hidden="true"></div>
         <div class="receiver" aria-hidden="true"></div>
         <div id="screen">
-          <img id="image" alt="iPhone 实时屏幕" draggable="false" hidden>
+          <img id="image" alt="iPhoneのリアルタイム画面" draggable="false" hidden>
           <div id="empty-state" data-state="connecting" role="status" aria-live="polite">
             <div class="empty-state-content">
               <svg class="empty-state-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -31,7 +31,7 @@
                 <g data-icon="paused"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 8.5v7M14.5 8.5v7"/></g>
                 <g data-icon="unavailable"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.75"/><circle class="symbol-dot" cx="12" cy="16.5" r=".8"/></g>
               </svg>
-              <span id="empty-state-text">正在连接</span>
+              <span id="empty-state-text">接続しています</span>
             </div>
           </div>
           <div class="glow" aria-hidden="true">
@@ -44,14 +44,14 @@
       </div>
     </div>
     <div id="toast" role="status" aria-live="polite" hidden></div>
-    <nav id="toolbar" aria-label="手机工具">
-      <button id="tool-refresh" type="button" aria-label="刷新连接" title="重新连接；认证完成后点击可恢复预览">
+    <nav id="toolbar" aria-label="iPhoneの操作">
+      <button id="tool-refresh" type="button" aria-label="接続を更新" title="再接続します。認証完了後に押すとプレビューを再開できます">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.5 8.25A7.5 7.5 0 1 0 19.5 12"/><path d="M18.5 4.25v4h-4"/></svg>
       </button>
-      <button id="tool-home" type="button" aria-label="回到主屏幕" title="回到主屏幕">
+      <button id="tool-home" type="button" aria-label="ホーム画面に戻る" title="ホーム画面に戻る">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4.5 10.75 6.3-5.3a1.85 1.85 0 0 1 2.4 0l6.3 5.3"/><path d="M6.5 9.15V18A1.5 1.5 0 0 0 8 19.5h8a1.5 1.5 0 0 0 1.5-1.5V9.15"/><path d="M10 19.5v-5.75h4v5.75"/></svg>
       </button>
-      <button id="tool-screenshot" type="button" aria-label="截图到剪贴板" title="截图到剪贴板">
+      <button id="tool-screenshot" type="button" aria-label="スクリーンショットをクリップボードにコピー" title="スクリーンショットをクリップボードにコピー">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 6.5 1.2-1.75h4.6l1.2 1.75H18a1.75 1.75 0 0 1 1.75 1.75v9.5A1.75 1.75 0 0 1 18 19.5H6a1.75 1.75 0 0 1-1.75-1.75v-9.5A1.75 1.75 0 0 1 6 6.5Z"/><circle cx="12" cy="12.75" r="3.25"/></svg>
       </button>
     </nav>

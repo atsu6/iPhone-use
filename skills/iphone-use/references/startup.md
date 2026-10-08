@@ -1,26 +1,28 @@
-# 启动与恢复
+# 起動と復旧
 
-READY 没有返回 `ready=true` 时按返回的状态继续，不把这次结果当作整个任务失败，也不重放可能已经生效的业务动作。只读、禁止启动 / 重启等用户限制始终保留。
+READYで`ready=true`が返らなければ、その状態に応じて続ける。作業全体の失敗とみなさず、すでに有効かもしれない業務操作を繰り返さない。読み取り専用、起動・再起動禁止の指示を守る。
 
-## 服务未启动
+## サービスが未起動の場合
 
-`recover=true` 可恢复已核验归属的失效 XCTest 通道，但不自动完成冷启动。READY 返回 `pua_unreachable`、连接拒绝、`not_ready` 或明确服务未启动时，`initialization_required=true` 及 recovery 的 next_tool / next_arguments 指向初始化下一步，不表示已自动启动：
+`recover=true`は所有者を確認したXCTest接続を復旧するが、停止中サービスをコールドスタートしない。`pua_unreachable`、接続拒否、`not_ready`などでは`initialization_required=true`とrecoveryのnext_tool／next_argumentsが次の初期化を示す。
 
-1. 调用 `pua_setup(action="status")` 查看 `configured`、`service` 和 `jobs`。
-2. 已有与当前配置 / endpoint 对应的 start / recover 工作为 queued 或 running 时，记录其 `id`，用 `pua_setup(action="status", job_id=...)` 查询同一工作；从返回的 `jobs` 数组匹配 id，不复用旧的无关工作。恢复到 `recovery_phase="serving"` 或启动服务达到 `service.ready=true` 后重新调用 READY，长期 Runner 可以保持 running，不等 succeeded，也不再 start。若对应 fetch / build 工作正在运行，先复用并查询该工作，再继续缺失步骤。
-3. `configured=true`、服务未就绪且没有可复用的活动工作时，调用一次 `pua_setup(action="start")`，复用现有签名构建。根据实际返回记录新工作的 `job_id`，或 `already_running=true` 时的 `job.id`，再查询同一工作。只在返回明确提示源代码 / 构建缺失或失效时按 `iphone-use-setup` 补 fetch / build；不因服务未启动先重建、重新签名或重装。若 `service.ready=true`，直接重验 READY，无需 start。
-4. `configured=false` 时读取 `iphone-use-setup`，按实际缺项完成 doctor / discover、fetch、configure、build / start。真实 USB、Xcode、信任、开发者模式或签名阻塞才转入对应处理；用户本人需解锁、登录或确认时用 [认证接管](authentication.md) 的提问流程。
-5. READY 返回 `ready=true` 后复用它的 observation 继续原任务。缺项需用户完成或存在真实启动失败时才报告准确阻塞。
+1. `pua_setup(action="status")`でconfigured、service、jobsを調べる。
+2. 現在の設定／endpointに合うstart／recoverがqueuedかrunningなら同じidを`pua_setup(action="status", job_id=...)`で追う。返されたjobs配列からidで選び、無関係な古いジョブを再利用しない。復旧のservingまたは起動のservice.ready=trueでREADYを再確認する。Runnerのsucceededを待たずstartも重ねない。対応するfetch／buildが実行中なら先にその結果を追う。
+3. configured=true、未起動、活動ジョブなしならstartを一度呼ぶ。返されたjob_idまたはalready_running=trueのjob.idを記録する。ソースやビルドの不足・無効が明示されたときだけsetupスキルでfetch／buildを補う。サービスが使えるならREADYへ直接進む。
+4. configured=falseなら`iphone-use-setup`を読み、不足に応じてdoctor／discover、fetch、configure、build／startを行う。本人の解除・ログイン・信頼は[認証の引き継ぎ](authentication.md)で待つ。
+5. READYのobservationから元の作業を続ける。実際の失敗や本人の操作待ちだけを正確な障害として報告する。
 
-服务还未启动时 widget 可能暂时空白，打开或留空既不证明 READY，也不是整项任务失败。
+未起動中のプレビューの空白はREADYの証拠でも作業全体の失敗でもない。
 
-## 通道恢复中
+## 復旧中の状態
 
-- `ready=false, state="recovering"`：按 recovery 的 job_id 和 status 参数查询同一工作。从返回的 `jobs` 数组找到该工作，recovery_phase=serving 后重验 READY；长期 Runner 可以保持 running，不等 succeeded，不重复 start。
-- `ready=false, state="recovery_required", reason="recovery_disabled"`：仅在用户指令允许恢复时按 next_tool / next_arguments 调用 recover=true；明确禁止重启则保留限制并报告阻塞。
+- `ready=false, state="recovering"`：recovery.job_idとstatus引数で同じジョブを調べ、jobs配列から選ぶ。recovery_phase=servingでREADYを確認し、startを繰り返さない。
+- `ready=false, state="recovery_required", reason="recovery_disabled"`：指示が復旧を許す場合だけnext_tool／next_argumentsでrecover=trueを使う。再起動禁止なら制限を守って報告する。
 
-两种状态没有 error、MCP isError=false，仍不表示手机可操作。实际恢复拒绝、冷却、锁屏等按返回原因处理；按工作状态与返回的 retry_after_seconds 查询，不用固定长 sleep 或固定次数空轮询。
+errorなし、MCP isError=falseでも操作可能とは限らない。復旧拒否、冷却、ロックは返された理由に従う。状態、ログ、retry_after_secondsに応じて調べ、固定の長いsleepや固定回数の空ポーリングをしない。
 
-## 屏幕预览
+## プレビュー
 
-widget 通过独立 USB MJPEG 通道显示最新手机画面，界面最多每秒读取 4 次服务端缓存，不轮询截图或 XML，也不占手机操作锁；长时间的手机操作期间预览照常刷新。首次操作后边缘渐变持续显示，认证暂停、断开 / 换流、关闭 / 重新加载后清除；圆形 cursor 标记实际点击位置或拖动路径，二者都不证明动作成功。widget 隐藏 / 关闭后停止轮询，预览租约 5 秒到期；认证暂停会停止采集并清空画面，恢复必须等用户明确确认。更新插件后，已有聊天可能仍运行旧 MCP 进程和旧页面；重连聊天并重新打开 widget 加载新版，不能靠重复 READY 刷新缓存。`paused=true` 的空白是接管暂停，只有用户确认完成后才 resume。
+独立したUSB MJPEGの最新キャッシュを画面が最大毎秒4回読む。画像・XMLのポーリングではなく、操作ロックも使わない。長い操作中も表示を更新する。最初の操作後の端の光は、認証停止、切断・ストリーム変更、終了・再読込で解除される。丸いカーソルはタップ位置・ドラッグ経路を示し、操作成功の証拠ではない。
+
+非表示・終了時はポーリングを止め、プレビューのリースは5秒で切れる。認証停止は取得を止め画像を消し、本人の実際の完了回答後に再開する。更新後の古いチャットは旧プロセスや画面を保持し得るため、チャットを再接続して画面を開き直す。READYの繰り返しではキャッシュ更新にならない。

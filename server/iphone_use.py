@@ -54,70 +54,70 @@ def num(low,high,kind="number"):
 
 BOOL={"type":"boolean"}
 SEL=obj({
- "label":string("Exact accessibility label copied from fresh nodes; real newlines and punctuation are preserved automatically.",max_length=1000),
- "label_contains":string("Substring of the label, for long or changing labels. Case-sensitive, encoded safely.",max_length=1000),
- "name":string("Exact accessibility identifier/name. Nodes omit name when it equals label.",max_length=1000),
- "value":string("Exact current accessibility value; not the text to enter. Omit values that change asynchronously.",max_length=1000),
- "type":string("Exact element type as nodes show it, e.g. Button. Not an application bundle ID.",max_length=1000),
- "enabled":{"oneOf":[{"type":"boolean"},{"type":"string","enum":["true","false"]}],"description":"Optional exact enabled filter. This does not prove hittability."},
- "index":{**num(0,199,"integer"),"description":"0-based position among the matches in tree order, as listed by pua_find or an ambiguous_target error. Only to choose between several matches."},
- "predicate":string("Advanced NSPredicate query used alone (index may accompany it). Prefer the exact fields so text is safely encoded.",max_length=2000)})
-SEL["description"]="Exact label/name/value/type/enabled fields or label_contains, or a standalone predicate. rect, visible and in_viewport are observation fields, not selector fields. Matches nested at one place, or with only one on screen, resolve to that element; several separate matches return candidates with tap points and an index."
-SEL["examples"]=[{"label":"返回","type":"Button"}]
+ "label":string("現在の要素の正確なlabel。実際の改行と句読点は保持される。",max_length=1000),
+ "label_contains":string("長い・変化するlabelの部分文字列。大文字小文字を区別する。",max_length=1000),
+ "name":string("正確なname。labelと同じ場合は要素で省略される。",max_length=1000),
+ "value":string("現在の正確なvalue。入力文章ではない。非同期に変わる値は省く。",max_length=1000),
+ "type":string("要素に表示された種類（例：Button）。アプリのbundle IDではない。",max_length=1000),
+ "enabled":{"oneOf":[{"type":"boolean"},{"type":"string","enum":["true","false"]}],"description":"任意のenabled一致条件。操作可能とは限らない。"},
+ "index":{**num(0,199,"integer"),"description":"pua_findまたはambiguous_targetの候補の0始まりindex。複数候補の選択に使う。"},
+ "predicate":string("単独のNSPredicate（index併用可）。安全に文字を扱うため通常は各フィールドを使う。",max_length=2000)})
+SEL["description"]="label/name/value/type/enabled、label_contains、または単独predicate。rect/visible/in_viewportは観察専用。同じ位置の重複や画面内に1件だけなら解決し、別位置の複数候補はtapとindexを返す。"
+SEL["examples"]=[{"label":"戻る","type":"Button"}]
 SEL["minProperties"]=1
-OBS=string("Post-action output, default none. Use tree/both when the next decision needs the resulting page; screenshot returns an image. This is next-step context, not proof of this action; expect/verify control verification.",enum=["none","tree","screenshot","both"])
+OBS=string("操作後の情報（既定none）。次の判断にtree/both、画像にはscreenshot。操作の成功証明はexpect/verifyで指定する。",enum=["none","tree","screenshot","both"])
 OBS["default"]="none"
 EXPECT={"expect":SEL,"observe":OBS}
-VERIFY={"type":"boolean","default":False,"description":"Opt in to this operation's result check. Default false executes once and defers checking to the next required observation or final key checkpoint. Never blindly replay an uncertain mutation."}
+VERIFY={"type":"boolean","default":False,"description":"結果を明示確認する。既定falseは1回実行し、次の必要な観察か重要な最終確認で検証する。不確実な操作を繰り返さない。"}
 REGION=obj({k:num(0 if k in ("x","y") else 1,10000) for k in ("x","y","width","height")},("x","y","width","height"))
-REGION["description"]="Scroll rectangle in iPhone points, not screenshot pixels. observation_id is optional. Omit region for the central area, or use the actual list bounds. With verify=true, the region must fit current viewport and native modal bounds."
+REGION["description"]="iPhoneポイントの領域。画像ピクセルではない。observation_idは任意。省略は中央。verify=trueでは現在のviewportとネイティブパネル内に収める。"
 SCHEMAS={
- "observe":obj({"mode":string("Standalone observation output, default tree. Use mode here; observe is a post-action option on mutation tools. none is not a standalone observation mode.",enum=["tree","screenshot","both"]),"include_invisible":BOOL,"max_nodes":num(1,500,"integer"),"expensive_visibility":BOOL}),
+ "observe":obj({"mode":string("独立した観察はmodeを使う（既定tree）。observeは操作後の情報。noneは独立観察には使えない。",enum=["tree","screenshot","both"]),"include_invisible":BOOL,"max_nodes":num(1,500,"integer"),"expensive_visibility":BOOL}),
  "find":obj({"selector":SEL,"limit":num(1,30,"integer")},("selector",)),
- "tap":obj({"selector":SEL,"x":num(0,10000),"y":num(0,10000),"observation_id":string("Optional ID from this Runtime. Checks app/viewport context, not whole-page pixel equality or age."),**EXPECT}),
- "swipe":obj({"direction":string("Finger movement; up usually reveals later rows. Default up.",enum=["up","down","left","right"]),"region":REGION,"observation_id":string("Optional ID from this Runtime; checks app/viewport context, not numeric/carousel text changes or age."),"expect":SEL,"verify":{**VERIFY,"description":"False: one gesture, no XML checks. True: check anchor movement once; failure returns a screenshot before another action. Numeric refresh is not progress."},"max_attempts":{**num(1,2,"integer"),"default":1,"description":"Legacy limit; even 2 stops after the first unproven gesture for screenshot inspection."},"observe":OBS}),
- "type_text":obj({"selector":SEL,"text":string("Full text to enter. Required with selector unless continue_token is given.",max_length=10000),"allow_newlines":BOOL,"submit":BOOL,"replace":BOOL,"verify":{**VERIFY,"description":"Default false enters the full intended text once without value readback. True checks exact value and stops before submit on mismatch. Secure fields require user takeover."},**EXPECT,"continue_token":string("Token from a result with input_complete=false. Pass it alone to type the rest of that text with its original options.",max_length=64)}),
+ "tap":obj({"selector":SEL,"x":num(0,10000),"y":num(0,10000),"observation_id":string("同じRuntimeの任意ID。アプリ/viewportを確認し、全画像一致や経過時間は検査しない。"),**EXPECT}),
+ "swipe":obj({"direction":string("指の移動方向（既定up）。upは通常、下に続く行を表示する。",enum=["up","down","left","right"]),"region":REGION,"observation_id":string("同じRuntimeの任意ID。アプリ/viewportを確認し、数字・カルーセルの変化や経過時間は検査しない。"),"expect":SEL,"verify":{**VERIFY,"description":"falseは1回実行してXMLを確認しない。trueは移動を1回確認し、失敗時は画像を返す。数字更新だけは移動ではない。"},"max_attempts":{**num(1,2,"integer"),"default":1,"description":"旧互換の上限。2でも最初の移動未確認で止め、画像で判断する。"},"observe":OBS}),
+ "type_text":obj({"selector":SEL,"text":string("入力する全文。continue_tokenがない場合、selectorと併せて使うときは必須。",max_length=10000),"allow_newlines":BOOL,"submit":BOOL,"replace":BOOL,"verify":{**VERIFY,"description":"既定falseは全文を1回入力し読み戻さない。trueは全文一致を確認し、不一致なら送信前に止める。保護欄は本人が入力する。"},**EXPECT,"continue_token":string("input_complete=falseの継続トークン。これだけを渡して元の設定で残りを入力する。",max_length=64)}),
  "press_button":obj({"name":string(enum=["home","volumeup","volumedown"]),"verify":VERIFY,**EXPECT},("name",)),
  "launch_app":obj({"bundle_id":string(),"verify":VERIFY,**EXPECT},("bundle_id",)),
  "wait":obj({"selector":SEL,"timeout_seconds":num(0,20)},("selector",)),
- "scroll_find":obj({"selector":SEL,"direction":string("Finger movement; up usually reveals later rows.",enum=["up","down","left","right"]),"max_swipes":{**num(0,10,"integer"),"default":1,"description":"0 only queries; positive legacy limits allow at most one swipe, then an unresolved target returns a screenshot for the next decision."}},("selector",)),
+ "scroll_find":obj({"selector":SEL,"direction":string("指の移動方向。upは通常、下に続く行を表示する。",enum=["up","down","left","right"]),"max_swipes":{**num(0,10,"integer"),"default":1,"description":"0は検索のみ。正数は最大1回スワイプし、未解決なら次の判断用の画像を返す。"}},("selector",)),
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
  "apps":obj({"query":string(max_length=100),"country":string(max_length=2),"source":string(enum=["auto","catalog","installed","apple"]),"limit":num(1,30,"integer")},("query",)),
- "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"Also verify screenshot; false retains status/session/source/viewport/unlock checks."},"recover":{"type":"boolean","default":True,"description":"Normal task startup: omit or set true, so a persistent local.pid/XCTest fault can queue one bounded restart of a proven owned PUA. Use false only for an explicitly requested diagnostic/no-restart check, not a routine precheck. False is respected and returns ready=false, state=recovery_required when restart is needed; queued recovery returns state=recovering. Neither state proves readiness."}}),"metrics":obj({"reset":{"type":"boolean","default":False,"description":"Return the totals, then start a new measurement window."}}),
+ "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"画像も確認する。falseでもstatus/session/source/viewport/ロック解除は確認する。"},"recover":{"type":"boolean","default":True,"description":"通常は省略/true。持続するlocal.pid/XCTest障害で所有者確認済みPUAを1回復旧する。明示的な診断/再起動禁止だけfalse。必要な復旧が禁止ならrecovery_required、実行中ならrecovering。どちらも未READY。"}}),"metrics":obj({"reset":{"type":"boolean","default":False,"description":"統計を返して新しい計測を開始する。"}}),
  "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string()},("action",))
 }
 # Each batch operation carries the same closed argument schema as its standalone tool.
 BATCH_OPS=["tap","swipe","type_text","launch_app","press_button","wait","observe","scroll_find"]
 SCHEMAS["batch"]=obj({"steps":{"type":"array","minItems":1,"maxItems":20,"items":{"oneOf":[obj({"op":{"type":"string","const":op},"args":SCHEMAS[op]},("op","args")) for op in BATCH_OPS]}}},("steps",))
 SCHEMAS["ready"]["examples"]=[{"recover":True,"screenshot":False}]
-SCHEMAS["screen"]=obj({"action":string("Default open displays the live iPhone sidebar. Pause before password/Face ID takeover; resume only after the user confirms completion.",enum=["open","pause","resume"])})
+SCHEMAS["screen"]=obj({"action":string("既定openで画面を表示。パスワード/Face IDの前にpause、本人の完了回答後だけresume。",enum=["open","pause","resume"])})
 SCHEMAS["screen_frame"]=obj({"after_seq":num(0,9007199254740991,"integer"),"last_event_id":num(0,9007199254740991,"integer")})
-SCHEMAS["screen_action"]=obj({"action":string("refresh reconnects the preview stream, home returns the iPhone to its Home screen, screenshot copies a native capture to the Mac clipboard.",enum=["refresh","home","screenshot"])},("action",))
+SCHEMAS["screen_action"]=obj({"action":string("refreshで再接続、homeでホーム画面、screenshotでMacのクリップボードへ画像コピー。",enum=["refresh","home","screenshot"])},("action",))
 # Tools the preview App calls itself; the model never sees them.
 APP_TOOLS=("screen_frame","screen_action")
 DESCRIPTIONS={
- "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and PUA health without changing the phone. Start here for setup.",
- "setup":"Initialize/start PUA when READY is unreachable or not_ready: status first, reuse an active start/recovery job, or start once with the existing config/build. Poll its job until service.ready=true, then READY again. Missing config/source/build uses iphone-use-setup. No blanket reinstall or extra approval for authorized startup; honor no-restart instructions. Never uninstalls apps.",
- "ready":"First phone task in a new chat: initialize with READY (recover=true or omitted); only ready=true permits phone tasks. Reuse this chat's healthy channel afterward. pua_unreachable/not_ready is a setup branch, not final task failure: setup(status), reuse an active job or start once, then READY again. recover=true handles owned runtime faults; it does not cold-start a stopped service. For state=recovering/recovery_required follow guidance. Never replay phone actions.",
- "observe":"Fresh phone controls and/or a screenshot, with the iPhone point viewport and an observation_id. Nodes: type without the XCUIElementType prefix; rect=[x,y,width,height] in points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. The screenshot is scaled for reading: image pixels x image.pixel_to_point [x,y] = points.",
- "find":"Query selector fields or a PUA predicate directly without a whole tree. Returns matches in tree order with index, type, texts and rect; this tool's selector documents the fields every selector accepts.",
- "tap":"Tap the element a selector resolves to after on-screen and hittable checks, or tap point coordinates with optional contextual observation_id. If the selector fails, the error returns a screenshot and tap points: tap by x/y in the next call instead of trying other selectors. Executes once optimistically; expect opts into a postcondition. Request tree/both if the next decision needs the new page.",
- "swipe":"One gesture; default verify=false/observe=none skips XML checks. verify=true checks geometry once; failure returns a screenshot even with none/tree, without another gesture. Inspect it before acting; no progress does not prove list completeness.",
- "type_text":"Enter the full intended Unicode text into an editable nonsecure field; no short-text trial or mandatory readback. Omit selector to type into the field that already has keyboard focus, which is how to continue after a selector failed: tap the field by x/y, then type. Send the whole text in one call: long text is typed in bounded requests, and a result with input_complete=false returns a continue_token to pass alone in the next call, after which verify/submit/expect/observe run. verify=true opts into exact readback before submit; expect opts into a page postcondition. Newlines need explicit intent; submit defaults false. Never replay uncertain input/submission.",
- "press_button":"Home uses the dedicated PUA homescreen endpoint once; default skips foreground polling. verify=true checks SpringBoard for Home, expect can check a page. Volume effects cannot be semantically verified.",
- "launch_app":"Activate once using a resolved bundle ID, optimistically by default. verify=true polls foreground up to five seconds; expect checks the intended page. Request observation for the next decision. Never blindly replay uncertain activation.",
- "wait":"Bounded semantic presence polling for expected target. Presence is a UI postcondition, not proof of business correctness.",
- "batch":"Up to 20 known steps in one model round trip. Routine unverified actions continue optimistically with intermediate observe=none. Stops on actual error, failed explicit check, uncertainty, submission without an explicit result expectation, unfinished long input (input_continues) or the per-call time budget (time_budget); continue from stopped_at without repeating completed steps. Observe the last step when the next decision needs page context.",
- "scroll_find":"Find a hittable target with at most one swipe. Ambiguity/occlusion stops immediately; an unresolved post-scroll query returns a screenshot. Inspect the end, region and overlays before deciding whether to swipe again; do not blindly repeat or raise the budget.",
- "collect_list":"Collect/deduplicate accessibility rows over bounded pages. Returns evidence and explicit coverage limits; always requires reconciliation before declaring business completeness.",
- "metrics":"In-process totals without text, app data or images: PUA HTTP time and bytes, tool time, response bytes per tool, and the wait between each response and the next tool request (host, model and user time). reset=true starts a new window."
+ "doctor":"端末を変更せず、MacのXcode、USB端末、署名の前提条件、PUAの状態を診断する。初回設定の診断に使う。",
+ "setup":"READYがpua_unreachable／not_readyならstatusから初期化する。対応するstart／recoverジョブを再利用するか、既存設定・ビルドで1回startし、service.ready=trueでREADYを再確認する。不足はiphone-use-setupで補う。許可済み起動に追加承認を挟まず、再起動禁止を守る。アプリは削除しない。",
+ "ready":"新しいチャットの最初にREADYを取得する（recover=trueまたは省略）。ready=trueだけが操作可能を示す。以後は正常な接続を再利用する。未起動はsetup(status)、既存ジョブまたは1回start、再READYへ進む。recoverは所有者確認済みの実行障害を復旧し、停止中サービスは起動しない。recovering／recovery_requiredの案内に従い、操作を再実行しない。",
+ "observe":"現在の要素・画像、iPhoneポイントのviewport、observation_idを返す。typeはXCUIElementTypeを省略、rect=[x,y,width,height]。name省略はlabel、value省略は文字、enabled／visible／in_viewport省略はtrue。要素は遮蔽され得る。画像ピクセル×image.pixel_to_point[x,y]でポイントに変換する。",
+ "find":"全ツリーを取得せずselectorまたはpredicateで検索する。ツリー順のindex、種類、文字、rectを返す。selectorの各フィールドの説明はこのツールを参照する。",
+ "tap":"画面内・操作可能なselector対象、またはポイント座標を1回タップする。observation_idは任意。selector失敗時は画像とtap位置を返すため、別selectorを試さず画像からx/yで押す。expectで結果条件を検証する。次の判断にページが必要ならtree／bothを指定する。",
+ "swipe":"1回スワイプする。既定verify=false／observe=noneではXML確認を省く。verify=trueは幾何変化を1回確認し、失敗時はnone／treeでも画像を返し追加操作はしない。先に画像を見る。移動なしは全件取得の証拠ではない。",
+ "type_text":"非保護の編集欄へ必要なUnicode全文を入力する。短い試験や毎回の読み戻しは不要。selectorなしは現在のフォーカス欄に入力し、特定失敗後は座標タップから続ける。長文は全体を1回渡し、input_complete=falseならcontinue_tokenだけで継続する。完了後にverify／submit／expect／observeを実行。verify=trueは送信前に全文を確認。改行は明示的な意図が必要、submitは既定false。不確実な入力・送信を繰り返さない。",
+ "press_button":"Homeは専用homescreenを1回呼ぶ。既定では前面の待機を省略し、verify=trueはSpringBoard、expectはページを確認する。音量の効果は意味的に検証できない。",
+ "launch_app":"確認したbundle IDで1回有効化する。verify=trueは最大5秒前面を待ち、expectはページを確認する。次の判断に必要な観察を同じ呼び出しで返す。不確実な起動を繰り返さない。",
+ "wait":"上限付きで指定対象の出現を待つ。表示はUI条件であり業務上の正しさの証拠ではない。",
+ "batch":"既知の最大20ステップをまとめる。通常の未検証操作はobserve=noneで続ける。エラー、明示検証失敗、不確実性、結果条件のない送信、長文未完了(input_continues)、時間上限(time_budget)で停止する。stopped_atから続け、完了済みを繰り返さない。次にページが必要なら最後で観察する。",
+ "scroll_find":"最大1回のスワイプで操作可能な対象を探す。曖昧さ・遮蔽は即停止し、移動後の未解決は画像を返す。末尾、領域、パネルを見てから次を判断し、回数を盲目的に増やさない。",
+ "collect_list":"上限付きページから要素行を取得・重複除去する。証拠と取得範囲の制限を返す。業務上の全件取得を宣言する前に照合する。",
+ "metrics":"現プロセスのHTTP時間・通信量、ツール時間・応答量、次のリクエストまでの間隔を返す。本文、アプリ情報、画像は含まない。間隔にはホスト・モデル・ユーザーの時間が含まれる。reset=trueで新しい計測を開始する。"
 }
-DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
+DESCRIPTIONS["apps"]="実機のインストール一覧、確認済み別名、Apple検索からbundle IDを解決する。起動前に名称を調べ、IDを推測しない。ストア情報はインストールの証拠ではない。installed_verified、公開元、地域を確認する。日本のストア検索にはcountry=jpを指定する（既定cn）。"
 READS={"doctor","observe","find","wait","metrics","apps"}
 READS.update(("screen","screen_frame"))
-DESCRIPTIONS["screen"]="Open or reuse the live iPhone screen in the Codex side panel. No phone actions or UI controls. Pause the preview before password/Face ID user takeover; resume after explicit completion. READY also opens or reuses this view by default."
-DESCRIPTIONS["screen_frame"]="App-only cached live preview and action cursor events. Never reads XML, starts sessions or occupies the phone operation lock."
-DESCRIPTIONS["screen_action"]="App-only toolbar of the live preview, pressed by the user: refresh the preview stream, send the iPhone Home, or copy a screenshot to the Mac clipboard. Refused while the preview is paused for authentication."
+DESCRIPTIONS["screen"]="CodexのサイドパネルにiPhoneのライブ画面を開くか再利用する。端末を操作しない。パスワード・Face IDの引き継ぎ前にpause、本人の完了回答後にresumeする。READYも既定で同じ画面を開く。"
+DESCRIPTIONS["screen_frame"]="App専用のキャッシュフレームと操作カーソル。XML、session起動、端末操作ロックは使用しない。"
+DESCRIPTIONS["screen_action"]="ユーザーが押すApp専用ボタン。プレビューの再接続、iPhoneのHome、Macへの画像コピー。認証による停止中は操作を制限する。"
 
 
 def undocumented(value):
@@ -128,8 +128,8 @@ def undocumented(value):
 
 # Every selector has the same fields. pua_find publishes their documentation once; other
 # tools publish the same closed shape with one line pointing there.
-SEL_BRIEF={**undocumented(SEL),"description":"Selector; fields as documented on pua_find.selector."}
-OBS_BRIEF={**undocumented(OBS),"description":"Post-action output for the next decision; default none."}
+SEL_BRIEF={**undocumented(SEL),"description":"selectorの各項目はpua_find.selectorの説明を参照。"}
+OBS_BRIEF={**undocumented(OBS),"description":"次の判断のための操作後情報。既定none。"}
 
 
 def published_schema(name):
@@ -170,7 +170,7 @@ for tool in TOOLS:
     if tool["name"] in ("pua_ready","pua_screen"):
         tool["_meta"]={"ui":{"resourceUri":SCREEN_URI}}
     if tool["name"]=="pua_screen":
-        tool.update(title="手机屏幕")
+        tool.update(title="iPhoneの画面")
         tool["_meta"]["openai/ui"]={"entrypoints":[{"type":"thread"}]}
         tool["annotations"].update(readOnlyHint=False,destructiveHint=False,idempotentHint=True)
     if tool["name"][len("pua_"):] in APP_TOOLS:tool["_meta"]={"ui":{"visibility":["app"]}}
@@ -585,20 +585,16 @@ def tool_result(runtime,params):
 
 
 INSTRUCTIONS=(
- "PUA means Phone Use Agent; all iPhone Use tools use the pua_ prefix. "
- "Read iphone-use-setup before setup and iphone-use for tasks. First phone task in a new chat: pua_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
- "If READY fails with pua_unreachable/not_ready, continue initialization rather than end the task: pua_setup(action=status), reuse an active start/recovery job or start once from the existing config/build, poll that job until service.ready=true, then READY again. Missing config/source/build uses the setup skill. "
- "recover=true is runtime recovery, not cold startup; for state=recovering follow its setup job until the service is ready, then READY again. Honor explicit diagnostic/no-start/no-restart instructions. "
- "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use pua_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
- "Results are one compact JSON text. Tree nodes give type without the XCUIElementType prefix and rect=[x,y,width,height] in iPhone points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. "
- "A screenshot arrives as an image in the same result; through functions.exec forward each image block with image(block) and text blocks with text(block.text), never text(the whole result) or base64. If image forwarding is unavailable, use view_image on image.path or error.observation.image.path. It is scaled for reading: image pixels x image.pixel_to_point [x,y] = iPhone points. Standalone observation uses mode, mutation output uses observe. "
- "Selectors copy label/name/value/type from fresh nodes; use label_contains for long or changing labels. Matches nested at one place, or with only one on screen, resolve by themselves. "
- "Screenshot inspection is the fallback for abnormal UI state: selector/focus failure, unresolved scroll search, no scroll progress, changed/blocked scroll context, input mismatch or a failed page expectation. Inspect the attached screenshot FIRST before any further mutation; if no usable image is attached take one pua_observe(mode=screenshot). Decide from visible state whether to stop, handle a popup, change the region/direction, tap by x/y or continue missing work. scroll_find never chains another swipe after an unresolved post-scroll query. tap_point/candidates locate elements but do not prove they are unobstructed; close a visible popup before tapping a covered background target. For input tap the visible editable field, then type_text with text and no selector. If a coordinate tap or focus failed, choose a new target from a fresh screenshot rather than repeat the same point or hand routine UI trouble to the user. Do not try other selector spellings or read the tree again first. Correct schema/channel/authentication errors by their own recovery; never blindly replay uncertain actions. Resolve unknown bundle IDs with pua_apps. "
- "Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. "
- "Chain known steps in batch; do not batch speculative repeated swipes toward an unknown target. Inspect the next page first, using a screenshot when tree truncation hides the boundary. explicit expect/verify opts into checking key outcomes. Send long text whole: when type_text returns input_complete=false, call it again with only continue_token; a batch stopped by input_continues or time_budget continues from stopped_at. "
- "Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. "
- "For App passwords or Face ID call pua_screen(action=pause); phone_locked already auto-pauses the preview for device unlock, so do not overwrite that reason with an extra pause. Pause phone calls and use the available host question tool (request_user_input_async in Default), first option exactly 已完成继续. Wait for the actual user answer; async return or preselection is not confirmation. After the actual user completion answer, explicitly pua_screen(action=resume) for App authentication or legacy/unknown pause, then read fresh state. For device unlock run READY once; successful READY clears only its matching device_locked pause. READY/open never clear App authentication or unknown pause. Continue remaining work from that fresh state. "
- "Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."
+ "PUAはPhone Use Agent。ツール名はpua_で始まる。ユーザーには日本語で案内する。設定前にiphone-use-setup、作業前にiphone-useを読む。新しいチャットの最初はpua_ready(recover=true, screenshot=false)。ready=trueを確認し、そのobservationと正常な接続を再利用する。 "
+ "READYがpua_unreachable/not_readyならpua_setup(action=status)から初期化を続ける。対応するstart/recoverを再利用するか既存設定・ビルドでstartを1回呼び、service.ready=trueでREADYを再確認する。不足はsetupスキルで補う。recoverは実行障害の復旧で、コールドスタートではない。recoveringは同じジョブを追う。明示的な診断、起動・再起動禁止を守る。 "
+ "画面はREADYで同じサイドパネルを開くか再利用する。setup/復旧/pause/resumeで同じパネルを保持する。閉じた画面はpua_screenで開き、表示中の更新には使わない。開くだけではREADYや追加承認を意味しない。プレビューのフレームはモデルの観察や最終確認の代わりにならない。 "
+ "結果は簡潔なJSON。typeはXCUIElementTypeを省略、rect=[x,y,width,height]はiPhoneポイント。name省略はlabel、value省略は文字、enabled/visible/in_viewport省略はtrue。固定ヘッダーやパネルが要素を覆う場合がある。 "
+ "画像は同じ結果のimageブロック。functions.execではimage(block)、text(block.text)で転送し、全結果やbase64をtextにしない。転送不能ならview_imageでimage.path/error.observation.image.pathを開く。画像ピクセル×image.pixel_to_point[x,y]をiPhoneポイントへ変換する。独立観察はmode、操作後はobserve。 "
+ "selectorは現在のlabel/name/value/typeを写し、長い・変化するラベルはlabel_contains。同じ場所の重複や画面内1件はツールが解決する。selector/焦点の失敗、検索未解決、移動なし、領域の遮蔽/文脈変化、入力不一致、期待ページ不在は必ず添付画像を先に見る。なければpua_observe(mode=screenshot)を1回呼ぶ。画像から終了、パネル処理、領域/方向変更、座標タップ、残りの処理を判断する。scroll_findは未解決後に連続スワイプしない。tap_point/candidatesは遮蔽なしを証明しない。見える入力欄をタップし、selectorなしのtype_textで入力する。座標や焦点失敗は画像から位置を選び直し、同じ座標やラベル変更・ツリー再読を先に繰り返さない。schema/接続/認証は対応手順で復旧し、不確実な操作を再実行しない。未知bundle IDはpua_apps。 "
+ "通常操作はobserve=none、verify=false。verified=false/verification_deferred=trueは正常で、個別確認を要求しない。次の判断に必要なら同じ操作でtree/bothを返し進捗も確認する。既知の手順はbatchへまとめる。未知対象への連続した推測スワイプはbatchに入れず、次ページを先に見て境界が隠れた場合は画像を使う。重要な結果にはexpect/verify。長文は全文を1回渡し、input_complete=falseならcontinue_tokenだけで継続する。input_continues/time_budgetで停止したbatchはstopped_atから続ける。 "
+ "完了前に重要な最終結果を確認する。明確な失敗を観察してから修正し、不確実な入力/送信や実行済みの複数手順を全部やり直さない。no_scroll_progressは空データや全件取得の証拠ではない。 "
+ "アプリのパスワード/Face IDはpua_screen(action=pause)。phone_lockedはdevice_lockedで自動停止するので追加pauseで上書きしない。端末呼び出しを止め、ホストの質問ツール（Defaultはrequest_user_input_async）を使う。先頭の選択肢は必ず「完了したので続けてください」。非同期戻り値や初期選択は回答ではない。本人の実際の完了回答後、アプリ/旧unknown停止はresumeし新しく観察する。ロック解除はREADYを1回確認し、同じdevice_lockedだけを解除する。READY/openはアプリ認証/unknown停止を解除しない。新しい状態から残りを続ける。 "
+ "action_complete/verifiedは全作業の完了ではない。成果物を追跡し、短い進捗を伝え、残りがある間は続ける。完了または具体的な障害でfinalにする。MCPバインドが使えない場合はスキルのRuntime入口で同じ操作ロックを保つ。 "
 )
 
 
@@ -644,7 +640,7 @@ def serve(runtime):
                 elif method=="ping":result={}
                 elif method=="tools/list":result={"tools":TOOLS}
                 elif method=="resources/list":
-                    result={"resources":[{"uri":SCREEN_URI,"name":"iPhone Use Screen","title":"手机屏幕","mimeType":"text/html;profile=mcp-app","_meta":SCREEN_META}]}
+                    result={"resources":[{"uri":SCREEN_URI,"name":"iPhone Use Screen","title":"iPhoneの画面","mimeType":"text/html;profile=mcp-app","_meta":SCREEN_META}]}
                 elif method=="resources/read":
                     if params.get("uri")!=SCREEN_URI:raise WDAError("invalid_argument","Unknown screen resource URI.")
                     html=(Path(__file__).resolve().parents[1]/"assets/phone-screen.html").read_text()
