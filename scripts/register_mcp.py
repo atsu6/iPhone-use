@@ -9,6 +9,26 @@ import sys
 import tempfile
 
 
+def registration_environment():
+    """Retain local runtime/Xcode settings when replacing the cached server."""
+    previous = subprocess.run(["codex", "mcp", "get", "iphone_use", "--json"],
+                              capture_output=True, text=True, check=False)
+    environment = {}
+    if previous.returncode == 0:
+        try:
+            environment = json.loads(previous.stdout).get("transport", {}).get("env") or {}
+            if not isinstance(environment, dict) or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in environment.items()):
+                raise ValueError("Invalid environment")
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise SystemExit("Cannot read existing iPhone Use environment; registration was left unchanged.") from exc
+    for key in ("IPHONE_USE_STATE_DIR", "WDA_STATE_DIR", "DEVELOPER_DIR"):
+        if os.environ.get(key):
+            environment[key] = os.environ[key]
+    return environment
+
+
 def retire_previous_registration():
     previous = subprocess.run(["codex", "mcp", "get", "iphone_wda", "--json"],
                               capture_output=True, text=True, check=False)
@@ -54,7 +74,10 @@ def main():
     print(json.dumps(installation,ensure_ascii=False),flush=True)
     # Same name as the plugin registration: Config wins over Plugin in Codex,
     # so there is one namespace, without the shared agent-plugin tool budget.
-    subprocess.run(["codex","mcp","add","iphone_use","--","python3",str(server)],check=True)
+    command = ["codex", "mcp", "add", "iphone_use"]
+    for key, value in sorted(registration_environment().items()):
+        command.extend(["--env", key + "=" + value])
+    subprocess.run(command + ["--", "python3", str(server)], check=True)
     retire_previous_registration()
 
 

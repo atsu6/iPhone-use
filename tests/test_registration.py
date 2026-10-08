@@ -28,6 +28,8 @@ class RegistrationTests(unittest.TestCase):
         env = patch.dict(registration.os.environ, {"CODEX_HOME": str(self.config_home)})
         env.start()
         self.addCleanup(env.stop)
+        for key in ("IPHONE_USE_STATE_DIR", "WDA_STATE_DIR", "DEVELOPER_DIR"):
+            registration.os.environ.pop(key, None)
 
     def invoke(self,data):
         with patch.object(registration.sys,"stdin",io.StringIO(json.dumps(data))), contextlib.redirect_stdout(io.StringIO()):
@@ -37,8 +39,33 @@ class RegistrationTests(unittest.TestCase):
         with patch.object(registration.subprocess,"run") as run:
             self.invoke(self.installation)
         self.assertEqual(run.call_args_list, [
+            call(["codex","mcp","get","iphone_use","--json"],capture_output=True,text=True,check=False),
             call(["codex","mcp","add","iphone_use","--","python3",str(self.root/"server/iphone_use.py")],check=True),
             call(["codex","mcp","get","iphone_wda","--json"],capture_output=True,text=True,check=False)])
+
+    def test_reinstall_preserves_environment_and_explicit_settings_override_only_their_keys(self):
+        existing = {"transport": {"env": {"IPHONE_USE_STATE_DIR": "/private/state old", "DEVELOPER_DIR": "/Xcode/Developer", "OTHER": "keep"}}}
+        with patch.object(registration.subprocess, "run", return_value=Mock(returncode=0, stdout=json.dumps(existing))) as run:
+            with patch.dict(registration.os.environ, {"IPHONE_USE_STATE_DIR": "/private/state new"}):
+                self.invoke(self.installation)
+        run.assert_any_call(["codex", "mcp", "add", "iphone_use", "--env", "DEVELOPER_DIR=/Xcode/Developer",
+                             "--env", "IPHONE_USE_STATE_DIR=/private/state new", "--env", "OTHER=keep",
+                             "--", "python3", str(self.root / "server/iphone_use.py")], check=True)
+
+    def test_missing_registration_uses_explicit_runtime_and_xcode(self):
+        with patch.object(registration.subprocess, "run", return_value=Mock(returncode=1, stdout="")) as run:
+            with patch.dict(registration.os.environ, {"IPHONE_USE_STATE_DIR": "/private/state", "DEVELOPER_DIR": "/Xcode/Developer"}):
+                self.invoke(self.installation)
+        run.assert_any_call(["codex", "mcp", "add", "iphone_use", "--env", "DEVELOPER_DIR=/Xcode/Developer",
+                             "--env", "IPHONE_USE_STATE_DIR=/private/state", "--", "python3",
+                             str(self.root / "server/iphone_use.py")], check=True)
+
+    def test_unreadable_existing_environment_does_not_replace_registration(self):
+        for payload in ("invalid", json.dumps({"transport": {"env": {"BAD": None}}})):
+            with self.subTest(payload=payload), patch.object(registration.subprocess, "run", return_value=Mock(returncode=0, stdout=payload)) as run:
+                with self.assertRaises(SystemExit):
+                    self.invoke(self.installation)
+            self.assertEqual(run.call_count, 1)
 
     def test_upgrade_removes_only_owned_mcp_and_disables_previous_plugin_preserving_other_settings(self):
         config = self.config_home / "config.toml"
@@ -69,7 +96,7 @@ class RegistrationTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_registration_failure_propagates_instead_of_reporting_success(self):
-        with patch.object(registration.subprocess,"run",side_effect=subprocess.CalledProcessError(1,["codex","mcp","add"])), self.assertRaises(subprocess.CalledProcessError):
+        with patch.object(registration.subprocess,"run",side_effect=[Mock(returncode=1, stdout=""), subprocess.CalledProcessError(1,["codex","mcp","add"])]), self.assertRaises(subprocess.CalledProcessError):
             self.invoke(self.installation)
 
 
