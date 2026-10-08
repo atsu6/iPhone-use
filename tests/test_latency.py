@@ -245,9 +245,9 @@ class LongInputTests(PhoneCase):
             for arguments in ({"selector": {"label": "Target"}}, {"observe": "tree"},
                               {"continue_token": "t", "text": "both"}, {"continue_token": ""}):
                 with self.subTest(arguments=arguments):
-                    self.assert_code("invalid_argument", lambda: runtime.call("wda_type_text", arguments))
+                    self.assert_code("invalid_argument", lambda: runtime.call("pua_type_text", arguments))
             self.assertEqual(self.client.calls, [])
-            self.assert_code("input_continuation_expired", lambda: runtime.call("wda_type_text", {"continue_token": "stale"}))
+            self.assert_code("input_continuation_expired", lambda: runtime.call("pua_type_text", {"continue_token": "stale"}))
 
 
 class CoordinateFallbackTests(PhoneCase):
@@ -263,7 +263,7 @@ class CoordinateFallbackTests(PhoneCase):
                 error = self.assert_code(code, lambda: self.phone.tap(selector={"label": "Target"}))
                 details = error.details
                 self.assertFalse(details["action_executed"])
-                self.assertEqual((details["recovery"]["use"], details["recovery"]["next_tool"]), ("coordinates", "wda_tap"))
+                self.assertEqual((details["recovery"]["use"], details["recovery"]["next_tool"]), ("coordinates", "pua_tap"))
                 self.assertIn("Do not try other selector spellings", details["recovery"]["next_step"])
                 self.assertEqual(Path(details["observation"]["image"]["path"]).read_bytes(), self.client.screenshot)
                 self.assertEqual(self.client.actions(), [])
@@ -292,12 +292,12 @@ class CoordinateFallbackTests(PhoneCase):
 
         def request(method, path, payload=None, timeout=None):
             if path == "/screenshot":
-                raise WDAError("wda_unreachable", "Screenshot channel disconnected")
+                raise WDAError("pua_unreachable", "Screenshot channel disconnected")
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "request", side_effect=request):
             error = self.assert_code("no_such_element", lambda: self.phone.tap(selector={"label": "Target"}))
-        self.assertEqual(error.details["observation_error"]["code"], "wda_unreachable")
+        self.assertEqual(error.details["observation_error"]["code"], "pua_unreachable")
         self.assertEqual(error.details["recovery"]["use"], "coordinates")
 
     def test_failed_selector_typing_points_to_tap_then_focused_input(self):
@@ -401,7 +401,7 @@ class SourceRootTests(PhoneCase):
     def test_unresolved_foreground_is_still_a_channel_fault(self):
         self.client.source_root["bundleId"] = "local.pid.0"
         self.client.app = "local.pid.0"
-        self.assert_code("wda_foreground_unavailable", lambda: self.phone.observe())
+        self.assert_code("pua_foreground_unavailable", lambda: self.phone.observe())
 
     def test_supplied_observation_still_checks_the_real_foreground_and_viewport(self):
         observed = self.phone.observe()
@@ -546,8 +546,8 @@ class SettleTests(PhoneCase):
 
     def test_speed_is_restored_when_the_read_fails(self):
         self.phone.settle_seconds = 0.5
-        with patch.object(self.client, "source", side_effect=WDAError("wda_unreachable", "read lost")):
-            error = self.assert_code("wda_unreachable", lambda: self.phone.tap(selector={"label": "Target"}, observe="tree"))
+        with patch.object(self.client, "source", side_effect=WDAError("pua_unreachable", "read lost")):
+            error = self.assert_code("pua_unreachable", lambda: self.phone.tap(selector={"label": "Target"}, observe="tree"))
         self.assertTrue(error.details["action_executed"])
         self.assertEqual(self.client.settings[-1], {"animationCoolOffTimeout": 0})
 
@@ -622,8 +622,8 @@ class ResultContentTests(unittest.TestCase):
         self.runtime.phone = PhoneController(self.client, self.directory.name)
 
     def test_model_results_are_one_compact_text_block_without_a_structured_copy(self):
-        for name, arguments in (("wda_observe", {}), ("wda_tap", {"x": 10, "y": 10}), ("wda_missing", {}),
-                                ("wda_tap", {"selector": {"label": "Absent"}})):
+        for name, arguments in (("pua_observe", {}), ("pua_tap", {"x": 10, "y": 10}), ("wda_missing", {}),
+                                ("pua_tap", {"selector": {"label": "Absent"}})):
             with self.subTest(name=name, arguments=arguments):
                 result = tool_result(self.runtime, {"name": name, "arguments": arguments})
                 self.assertEqual(set(result), {"content", "isError"})
@@ -631,16 +631,16 @@ class ResultContentTests(unittest.TestCase):
                 self.assertEqual(json.dumps(json.loads(text), ensure_ascii=False, separators=(",", ":")), text)
 
     def test_screenshot_is_delivered_as_an_image_block_the_host_cannot_drop(self):
-        result = tool_result(self.runtime, {"name": "wda_tap", "arguments": {"x": 10, "y": 10, "observe": "screenshot"}})
+        result = tool_result(self.runtime, {"name": "pua_tap", "arguments": {"x": 10, "y": 10, "observe": "screenshot"}})
         self.assertNotIn("structuredContent", result)
         self.assertEqual([item["type"] for item in result["content"]], ["text", "image"])
         self.assertEqual(base64.b64decode(result["content"][1]["data"]), self.client.screenshot)
         self.assertNotIn(result["content"][1]["data"][:40], result["content"][0]["text"])
 
     def test_preview_tools_keep_the_structured_object_the_widget_reads(self):
-        opened = tool_result(self.runtime, {"name": "wda_screen", "arguments": {}})
+        opened = tool_result(self.runtime, {"name": "pua_screen", "arguments": {}})
         self.assertEqual(json.loads(opened["content"][0]["text"]), opened["structuredContent"])
-        frame = tool_result(self.runtime, {"name": "wda_screen_frame", "arguments": {}})
+        frame = tool_result(self.runtime, {"name": "pua_screen_frame", "arguments": {}})
         self.assertEqual(frame["content"], [])
         self.assertIn("frame_available", frame["structuredContent"])
         self.runtime.screen.close()
@@ -663,7 +663,7 @@ class ServeTests(unittest.TestCase):
 
         class SlowRuntime:
             def call(self, name, arguments):
-                if name == "wda_tap":
+                if name == "pua_tap":
                     started.set()
                     if not release.wait(10):
                         raise AssertionError("the reader never served the preview poll")
@@ -677,9 +677,9 @@ class ServeTests(unittest.TestCase):
                 pass
 
         def lines():
-            yield self.call("tap", "wda_tap")
+            yield self.call("tap", "pua_tap")
             self.assertTrue(started.wait(10))
-            yield self.call("frame", "wda_screen_frame")
+            yield self.call("frame", "pua_screen_frame")
             yield json.dumps({"jsonrpc": "2.0", "id": "ping", "method": "ping"}) + "\n"
             deadline = time.monotonic() + 10
             while output.getvalue().count("\n") < 2 and time.monotonic() < deadline:
@@ -709,7 +709,7 @@ class ServeTests(unittest.TestCase):
             def replied(self):
                 pass
 
-        responses = self.run_server(OrderedRuntime(), iter(self.call(n, "wda_tap", {"n": n}) for n in range(5)))
+        responses = self.run_server(OrderedRuntime(), iter(self.call(n, "pua_tap", {"n": n}) for n in range(5)))
         self.assertEqual(seen, [0, 1, 2, 3, 4])
         self.assertEqual([response["id"] for response in responses], [0, 1, 2, 3, 4])
 
@@ -722,25 +722,25 @@ class ServeTests(unittest.TestCase):
             runtime.client = client
             runtime.phone = PhoneController(client, directory)
             responses = self.run_server(runtime, iter([
-                self.call(1, "wda_observe"), self.call(2, "wda_tap", {"x": 10, "y": 10, "observe": "screenshot"}),
-                self.call(3, "wda_screen_frame"), self.call(4, "wda_metrics", {"reset": True}), self.call(5, "wda_metrics")]))
+                self.call(1, "pua_observe"), self.call(2, "pua_tap", {"x": 10, "y": 10, "observe": "screenshot"}),
+                self.call(3, "pua_screen_frame"), self.call(4, "pua_metrics", {"reset": True}), self.call(5, "pua_metrics")]))
             by_id = {response["id"]: response["result"] for response in responses}
             metrics = json.loads(by_id[4]["content"][0]["text"])
             self.assertEqual(metrics["responses"]["count"], 2)
-            observe = metrics["responses"]["by_tool"]["wda_observe"]
+            observe = metrics["responses"]["by_tool"]["pua_observe"]
             self.assertEqual(observe["text_bytes"], len(by_id[1]["content"][0]["text"].encode()))
             self.assertEqual(observe["image_bytes"], 0)
-            self.assertEqual(metrics["responses"]["by_tool"]["wda_tap"]["image_bytes"], len(by_id[2]["content"][1]["data"]))
-            self.assertNotIn("wda_screen_frame", metrics["responses"]["by_tool"])
+            self.assertEqual(metrics["responses"]["by_tool"]["pua_tap"]["image_bytes"], len(by_id[2]["content"][1]["data"]))
+            self.assertNotIn("pua_screen_frame", metrics["responses"]["by_tool"])
             self.assertEqual((metrics["rounds"]["count"], metrics["rounds"]["waits"]), (2, 1))
             self.assertGreaterEqual(metrics["rounds"]["max_wait_seconds"], 0)
-            self.assertEqual(metrics["tools"]["by_tool"]["wda_tap"]["count"], 1)
-            self.assertEqual(metrics["tools"]["by_tool"]["wda_tap"]["errors"], 0)
+            self.assertEqual(metrics["tools"]["by_tool"]["pua_tap"]["count"], 1)
+            self.assertEqual(metrics["tools"]["by_tool"]["pua_tap"]["errors"], 0)
             # Totals only: no labels, text, app identifiers or image data.
             self.assertNotIn("Row 1", by_id[4]["content"][0]["text"])
             self.assertNotIn("com.example", by_id[4]["content"][0]["text"])
             after = json.loads(by_id[5]["content"][0]["text"])
-            self.assertEqual(set(after["responses"]["by_tool"]), {"wda_metrics"})
+            self.assertEqual(set(after["responses"]["by_tool"]), {"pua_metrics"})
             self.assertEqual(after["tools"]["count"], 1)
             self.assertIsNone(after["rounds"]["median_wait_seconds"])
 

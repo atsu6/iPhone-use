@@ -24,15 +24,16 @@ from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
 
-VERSION="0.3.4"
-SCREEN_URI="ui://iphone-use/phone-0.3.4.html"
+PUAError=WDAError
+VERSION="0.3.6"
+SCREEN_URI="ui://iphone-use/phone-0.3.6.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
 # ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
 # including after the MCP process reconnects; no device identifiers are needed.
 SCREEN_SESSION_ID="iphone-use-screen"
 SCREEN_META={"ui":{"csp":{"connectDomains":[],"resourceDomains":[]},"prefersBorder":False},"openai/ui":{"availableDisplayModes":["fullscreen"],"preferredDisplayMode":"fullscreen"}}
 PROTOCOLS=("2025-11-25","2025-06-18","2025-03-26","2024-11-05")
-# Seconds WDA may wait for animations to end before a post-action tree read; WDA_SETTLE_SECONDS overrides it.
+# Seconds PUA may wait for animations to end before a post-action tree read; WDA_SETTLE_SECONDS overrides it.
 SETTLE_SECONDS=0.8
 
 
@@ -59,7 +60,7 @@ SEL=obj({
  "value":string("Exact current accessibility value; not the text to enter. Omit values that change asynchronously.",max_length=1000),
  "type":string("Exact element type as nodes show it, e.g. Button. Not an application bundle ID.",max_length=1000),
  "enabled":{"oneOf":[{"type":"boolean"},{"type":"string","enum":["true","false"]}],"description":"Optional exact enabled filter. This does not prove hittability."},
- "index":{**num(0,199,"integer"),"description":"0-based position among the matches in tree order, as listed by wda_find or an ambiguous_target error. Only to choose between several matches."},
+ "index":{**num(0,199,"integer"),"description":"0-based position among the matches in tree order, as listed by pua_find or an ambiguous_target error. Only to choose between several matches."},
  "predicate":string("Advanced NSPredicate query used alone (index may accompany it). Prefer the exact fields so text is safely encoded.",max_length=2000)})
 SEL["description"]="Exact label/name/value/type/enabled fields or label_contains, or a standalone predicate. rect, visible and in_viewport are observation fields, not selector fields. Matches nested at one place, or with only one on screen, resolve to that element; several separate matches return candidates with tap points and an index."
 SEL["examples"]=[{"label":"返回","type":"Button"}]
@@ -82,7 +83,7 @@ SCHEMAS={
  "scroll_find":obj({"selector":SEL,"direction":string("Finger movement; up usually reveals later rows.",enum=["up","down","left","right"]),"max_swipes":{**num(0,10,"integer"),"default":1,"description":"0 only queries; positive legacy limits allow at most one swipe, then an unresolved target returns a screenshot for the next decision."}},("selector",)),
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
  "apps":obj({"query":string(max_length=100),"country":string(max_length=2),"source":string(enum=["auto","catalog","installed","apple"]),"limit":num(1,30,"integer")},("query",)),
- "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"Also verify screenshot; false retains status/session/source/viewport/unlock checks."},"recover":{"type":"boolean","default":True,"description":"Normal task startup: omit or set true, so a persistent local.pid/XCTest fault can queue one bounded restart of a proven owned WDA. Use false only for an explicitly requested diagnostic/no-restart check, not a routine precheck. False is respected and returns ready=false, state=recovery_required when restart is needed; queued recovery returns state=recovering. Neither state proves readiness."}}),"metrics":obj({"reset":{"type":"boolean","default":False,"description":"Return the totals, then start a new measurement window."}}),
+ "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"Also verify screenshot; false retains status/session/source/viewport/unlock checks."},"recover":{"type":"boolean","default":True,"description":"Normal task startup: omit or set true, so a persistent local.pid/XCTest fault can queue one bounded restart of a proven owned PUA. Use false only for an explicitly requested diagnostic/no-restart check, not a routine precheck. False is respected and returns ready=false, state=recovery_required when restart is needed; queued recovery returns state=recovering. Neither state proves readiness."}}),"metrics":obj({"reset":{"type":"boolean","default":False,"description":"Return the totals, then start a new measurement window."}}),
  "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string()},("action",))
 }
 # Each batch operation carries the same closed argument schema as its standalone tool.
@@ -95,21 +96,21 @@ SCHEMAS["screen_action"]=obj({"action":string("refresh reconnects the preview st
 # Tools the preview App calls itself; the model never sees them.
 APP_TOOLS=("screen_frame","screen_action")
 DESCRIPTIONS={
- "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and WDA health without changing the phone. Start here for setup.",
- "setup":"Initialize/start WDA when READY is unreachable or not_ready: status first, reuse an active start/recovery job, or start once with the existing config/build. Poll its job until service.ready=true, then READY again. Missing config/source/build uses iphone-use-setup. No blanket reinstall or extra approval for authorized startup; honor no-restart instructions. Never uninstalls apps.",
- "ready":"First phone task in a new chat: initialize with READY (recover=true or omitted); only ready=true permits phone tasks. Reuse this chat's healthy channel afterward. wda_unreachable/not_ready is a setup branch, not final task failure: setup(status), reuse an active job or start once, then READY again. recover=true handles owned runtime faults; it does not cold-start a stopped service. For state=recovering/recovery_required follow guidance. Never replay phone actions.",
+ "doctor":"Diagnose local Xcode, USB devices, signing prerequisites and PUA health without changing the phone. Start here for setup.",
+ "setup":"Initialize/start PUA when READY is unreachable or not_ready: status first, reuse an active start/recovery job, or start once with the existing config/build. Poll its job until service.ready=true, then READY again. Missing config/source/build uses iphone-use-setup. No blanket reinstall or extra approval for authorized startup; honor no-restart instructions. Never uninstalls apps.",
+ "ready":"First phone task in a new chat: initialize with READY (recover=true or omitted); only ready=true permits phone tasks. Reuse this chat's healthy channel afterward. pua_unreachable/not_ready is a setup branch, not final task failure: setup(status), reuse an active job or start once, then READY again. recover=true handles owned runtime faults; it does not cold-start a stopped service. For state=recovering/recovery_required follow guidance. Never replay phone actions.",
  "observe":"Fresh phone controls and/or a screenshot, with the iPhone point viewport and an observation_id. Nodes: type without the XCUIElementType prefix; rect=[x,y,width,height] in points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. The screenshot is scaled for reading: image pixels x image.pixel_to_point [x,y] = points.",
- "find":"Query selector fields or a WDA predicate directly without a whole tree. Returns matches in tree order with index, type, texts and rect; this tool's selector documents the fields every selector accepts.",
+ "find":"Query selector fields or a PUA predicate directly without a whole tree. Returns matches in tree order with index, type, texts and rect; this tool's selector documents the fields every selector accepts.",
  "tap":"Tap the element a selector resolves to after on-screen and hittable checks, or tap point coordinates with optional contextual observation_id. If the selector fails, the error returns a screenshot and tap points: tap by x/y in the next call instead of trying other selectors. Executes once optimistically; expect opts into a postcondition. Request tree/both if the next decision needs the new page.",
  "swipe":"One gesture; default verify=false/observe=none skips XML checks. verify=true checks geometry once; failure returns a screenshot even with none/tree, without another gesture. Inspect it before acting; no progress does not prove list completeness.",
  "type_text":"Enter the full intended Unicode text into an editable nonsecure field; no short-text trial or mandatory readback. Omit selector to type into the field that already has keyboard focus, which is how to continue after a selector failed: tap the field by x/y, then type. Send the whole text in one call: long text is typed in bounded requests, and a result with input_complete=false returns a continue_token to pass alone in the next call, after which verify/submit/expect/observe run. verify=true opts into exact readback before submit; expect opts into a page postcondition. Newlines need explicit intent; submit defaults false. Never replay uncertain input/submission.",
- "press_button":"Home uses the dedicated WDA homescreen endpoint once; default skips foreground polling. verify=true checks SpringBoard for Home, expect can check a page. Volume effects cannot be semantically verified.",
+ "press_button":"Home uses the dedicated PUA homescreen endpoint once; default skips foreground polling. verify=true checks SpringBoard for Home, expect can check a page. Volume effects cannot be semantically verified.",
  "launch_app":"Activate once using a resolved bundle ID, optimistically by default. verify=true polls foreground up to five seconds; expect checks the intended page. Request observation for the next decision. Never blindly replay uncertain activation.",
  "wait":"Bounded semantic presence polling for expected target. Presence is a UI postcondition, not proof of business correctness.",
  "batch":"Up to 20 known steps in one model round trip. Routine unverified actions continue optimistically with intermediate observe=none. Stops on actual error, failed explicit check, uncertainty, submission without an explicit result expectation, unfinished long input (input_continues) or the per-call time budget (time_budget); continue from stopped_at without repeating completed steps. Observe the last step when the next decision needs page context.",
  "scroll_find":"Find a hittable target with at most one swipe. Ambiguity/occlusion stops immediately; an unresolved post-scroll query returns a screenshot. Inspect the end, region and overlays before deciding whether to swipe again; do not blindly repeat or raise the budget.",
  "collect_list":"Collect/deduplicate accessibility rows over bounded pages. Returns evidence and explicit coverage limits; always requires reconciliation before declaring business completeness.",
- "metrics":"In-process totals without text, app data or images: WDA HTTP time and bytes, tool time, response bytes per tool, and the wait between each response and the next tool request (host, model and user time). reset=true starts a new window."
+ "metrics":"In-process totals without text, app data or images: PUA HTTP time and bytes, tool time, response bytes per tool, and the wait between each response and the next tool request (host, model and user time). reset=true starts a new window."
 }
 DESCRIPTIONS["apps"]="Resolve a real bundle ID by installed-device inventory, bundled verified aliases, or Apple's Search API. Query app name before launch instead of guessing. Store metadata does not prove installation; check installed_verified and publisher/country."
 READS={"doctor","observe","find","wait","metrics","apps"}
@@ -125,9 +126,9 @@ def undocumented(value):
     return value
 
 
-# Every selector has the same fields. wda_find publishes their documentation once; other
+# Every selector has the same fields. pua_find publishes their documentation once; other
 # tools publish the same closed shape with one line pointing there.
-SEL_BRIEF={**undocumented(SEL),"description":"Selector; fields as documented on wda_find.selector."}
+SEL_BRIEF={**undocumented(SEL),"description":"Selector; fields as documented on pua_find.selector."}
 OBS_BRIEF={**undocumented(OBS),"description":"Post-action output for the next decision; default none."}
 
 
@@ -163,17 +164,17 @@ def published_schema(name):
     return schema
 
 
-TOOLS=[{"name":"wda_"+name,"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
+TOOLS=[{"name":"pua_"+name,"title":"Pua "+name.replace("_"," "),"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
         "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
 for tool in TOOLS:
-    if tool["name"] in ("wda_ready","wda_screen"):
+    if tool["name"] in ("pua_ready","pua_screen"):
         tool["_meta"]={"ui":{"resourceUri":SCREEN_URI}}
-    if tool["name"]=="wda_screen":
+    if tool["name"]=="pua_screen":
         tool.update(title="手机屏幕")
         tool["_meta"]["openai/ui"]={"entrypoints":[{"type":"thread"}]}
         tool["annotations"].update(readOnlyHint=False,destructiveHint=False,idempotentHint=True)
-    if tool["name"][len("wda_"):] in APP_TOOLS:tool["_meta"]={"ui":{"visibility":["app"]}}
-    if tool["name"]=="wda_screen_action":tool["annotations"].update(readOnlyHint=False,destructiveHint=False,idempotentHint=True)
+    if tool["name"][len("pua_"):] in APP_TOOLS:tool["_meta"]={"ui":{"visibility":["app"]}}
+    if tool["name"]=="pua_screen_action":tool["annotations"].update(readOnlyHint=False,destructiveHint=False,idempotentHint=True)
 
 
 def validate(value,schema,path="arguments"):
@@ -279,15 +280,15 @@ class Runtime:
         self._device_lookup=None
 
     def call(self,name,args):
-        # WDA has one active session. Serialize independent Codex MCP processes
+        # PUA has one active session. Serialize independent Codex MCP processes
         # sharing this runtime, and share only this plugin's session identity.
-        if not isinstance(name,str) or not name.startswith("wda_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown WDA tool.")
+        if not isinstance(name,str) or not name.startswith("pua_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown PUA tool.")
         validate(args,SCHEMAS[name[4:]]);validate_semantics(name[4:],args)
-        if name in ("wda_screen","wda_screen_frame","wda_screen_action"):self.identify_device()
-        # Cached preview polling does not share the WDA action/session lock.
-        if name=="wda_screen_frame":return self.screen.frame(**args)
-        if name=="wda_screen_action":return self.screen_action(args["action"])
-        if name=="wda_screen":
+        if name in ("pua_screen","pua_screen_frame","pua_screen_action"):self.identify_device()
+        # Cached preview polling does not share the PUA action/session lock.
+        if name=="pua_screen_frame":return self.screen.frame(**args)
+        if name=="pua_screen_action":return self.screen_action(args["action"])
+        if name=="pua_screen":
             action=args.get("action","open")
             if action=="pause":self.screen.set_paused(True)
             elif action=="resume":self.screen.set_paused(False)
@@ -378,7 +379,7 @@ class Runtime:
             try:data=base64.b64decode(encoded,validate=True)
             except (ValueError,TypeError):raise WDAError("invalid_response","Invalid screenshot encoding.")
             size=wda_image.png_size(data[:32])
-            if size is None:raise WDAError("invalid_response","WDA screenshot is not PNG.")
+            if size is None:raise WDAError("invalid_response","PUA screenshot is not PNG.")
             copy_png(self.state_dir,data)
             return {"ok":True,"action":action,"copied":True,"width":size[0],"height":size[1]}
         finally:client.close()
@@ -388,7 +389,7 @@ class Runtime:
         text=str(error).lower()
         if "not authorized for performing ui testing actions" in text or ("xctdaemonerrordomain" in text and "code=41" in text):
             return "xctest_authorization"
-        if error.code=="wda_foreground_unavailable" or ("local.pid." in text and error.code=="stale element reference"):
+        if error.code=="pua_foreground_unavailable" or ("local.pid." in text and error.code=="stale element reference"):
             return "foreground_unavailable"
         return None
 
@@ -396,11 +397,11 @@ class Runtime:
         try:lock_pause=self.screen.locked_pause_id()
         except Exception:lock_pause=None
         status=self.client.request("GET","/status").get("value") or {}
-        if status.get("ready") is not True:raise WDAError("not_ready","WDA is not accepting commands. Run wda_doctor and inspect setup status.")
+        if status.get("ready") is not True:raise WDAError("not_ready","PUA is not accepting commands. Run pua_doctor and inspect setup status.")
         if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself, keep it awake, and verify READY again.")
         sid=self.client.ensure_session()
         observation=self.phone.observe("both" if screenshot else "tree")
-        if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and WDA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
+        if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and PUA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
         result={"ready":True,"state":"ready","proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
         try:
             self.screen.resume_after_unlock(lock_pause)
@@ -412,8 +413,8 @@ class Runtime:
         info=dict(info)
         job_id=info["job_id"]
         self.client.close();self.client.session_id=None;self.phone.reset()
-        info.update(status_tool="wda_setup",status_arguments={"action":"status","job_id":job_id},next_tool="wda_ready",next_arguments={"screenshot":screenshot,"recover":recover},retry_after_seconds=1,replay_action=False)
-        result={"ready":False,"state":"recovering","message":"Owned WDA recovery is running in the background. Poll the supplied setup job; once the service is reachable, run READY again. No phone task may proceed until ready=true. Do not replay the failed user action.","action_executed":False,"category":"channel_runtime","session_read_retried":retried,"recovery":info}
+        info.update(status_tool="pua_setup",status_arguments={"action":"status","job_id":job_id},next_tool="pua_ready",next_arguments={"screenshot":screenshot,"recover":recover},retry_after_seconds=1,replay_action=False)
+        result={"ready":False,"state":"recovering","message":"Owned PUA recovery is running in the background. Poll the supplied setup job; once the service is reachable, run READY again. No phone task may proceed until ready=true. Do not replay the failed user action.","action_executed":False,"category":"channel_runtime","session_read_retried":retried,"recovery":info}
         if cause is not None:result["cause"]=cause.as_dict()
         return result
 
@@ -441,19 +442,19 @@ class Runtime:
                 original=error;fault=self.channel_fault(error)
         if original.code=="phone_locked":raise original
         pending=self.setup_manager.pending_recovery() if hasattr(self.setup_manager,"pending_recovery") else None
-        if pending and original.code in ("wda_unreachable","not_ready","invalid session id","wda_foreground_unavailable","stale element reference","unknown error","invalid argument"):
+        if pending and original.code in ("pua_unreachable","not_ready","invalid session id","pua_foreground_unavailable","stale element reference","unknown error","invalid argument"):
             recovery={"ok":True,"recovery":pending,"job_id":pending.get("job_id")}
         elif fault and recover:
             recovery=self.setup_manager.recover()
         else:
             if fault:
-                return {"ready":False,"state":"recovery_required","reason":"recovery_disabled","message":"The WDA/XCTest channel needs recovery, but this call explicitly disabled service restart. No recovery was started. Resume with recover=true only when allowed by the current user instructions.","action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":{"state":"disabled","next_tool":"wda_ready","next_arguments":{"screenshot":screenshot,"recover":True},"permission_note":"Honor any user instruction forbidding restart; do not automatically override it.","replay_action":False}}
-            if original.code in ("wda_unreachable","not_ready"):
+                return {"ready":False,"state":"recovery_required","reason":"recovery_disabled","message":"The PUA/XCTest channel needs recovery, but this call explicitly disabled service restart. No recovery was started. Resume with recover=true only when allowed by the current user instructions.","action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":{"state":"disabled","next_tool":"pua_ready","next_arguments":{"screenshot":screenshot,"recover":True},"permission_note":"Honor any user instruction forbidding restart; do not automatically override it.","replay_action":False}}
+            if original.code in ("pua_unreachable","not_ready"):
                 # A stopped service needs setup/start, not an owned-listener restart.
                 # Keep the failure truthful, but give the next read-only diagnostic.
                 original.details.update(ready=False,action_executed=False,initialization_required=True,
-                    recovery={"next_tool":"wda_setup","next_arguments":{"action":"status"},"replay_action":False,
-                              "next_step":"Continue initialization; do not end the phone task solely because WDA is not started. Inspect configured/jobs/service: reuse an active start/recovery job, or start once from the existing configuration/build if permitted, then verify READY. Missing prerequisites use iphone-use-setup. Honor explicit no-restart or read-only instructions."})
+                    recovery={"next_tool":"pua_setup","next_arguments":{"action":"status"},"replay_action":False,
+                              "next_step":"Continue initialization; do not end the phone task solely because PUA is not started. Inspect configured/jobs/service: reuse an active start/recovery job, or start once from the existing configuration/build if permitted, then verify READY. Missing prerequisites use iphone-use-setup. Honor explicit no-restart or read-only instructions."})
             raise original
         info=dict(recovery.get("recovery") or {})
         job_id=recovery.get("job_id") or info.get("job_id")
@@ -461,10 +462,10 @@ class Runtime:
             info["job_id"]=job_id
             return self.recovering_result(info,screenshot,recover,retried,original)
         info.update(next_steps=recovery.get("next_steps",[]),replay_action=False)
-        raise WDAError("wda_recovery_required","Automatic WDA recovery was not started: "+str(recovery.get("error","service ownership could not be proven")),details={"ready":False,"action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":info})
+        raise WDAError("pua_recovery_required","Automatic PUA recovery was not started: "+str(recovery.get("error","service ownership could not be proven")),details={"ready":False,"action_executed":False,"category":"channel_runtime","session_read_retried":retried,"cause":original.as_dict(),"recovery":info})
 
     def _call(self,name,args):
-        if not isinstance(name,str) or not name.startswith("wda_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown WDA tool.")
+        if not isinstance(name,str) or not name.startswith("pua_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown PUA tool.")
         op=name[4:];validate(args,SCHEMAS[op]);validate_semantics(op,args)
         start=time.monotonic();error=None;activity=None
         try:
@@ -507,7 +508,7 @@ class Runtime:
             if op in READS:
                 exc.details.setdefault("action_executed",False)
             if self.channel_fault(exc):
-                exc.details.update(category="channel_runtime",recovery={"tool":"wda_ready","arguments":{"screenshot":False},"replay_action":False})
+                exc.details.update(category="channel_runtime",recovery={"tool":"pua_ready","arguments":{"screenshot":False},"replay_action":False})
             raise
         except (ValueError,TypeError) as exc:error="invalid_argument";raise WDAError(error,str(exc)) from exc
         finally:
@@ -538,7 +539,7 @@ class Runtime:
 
     def note_response(self,name,result,arrived):
         """Record what one model-facing response cost and how long the previous one waited for it."""
-        if name=="wda_screen_frame":return
+        if name=="pua_screen_frame":return
         content=result.get("content",[])
         self.responses.append({"tool":name if isinstance(name,str) else "invalid",
             "text_bytes":sum(len(item["text"].encode()) for item in content if item.get("type")=="text"),
@@ -572,30 +573,31 @@ def tool_result(runtime,params):
     try:
         data=runtime.call(name,params.get("arguments",{}))
         # The preview App reads structuredContent; frames never become model text.
-        if name=="wda_screen_frame":return {"content":[],"structuredContent":data,"isError":False}
-        result=result_content(data,structured=name in ("wda_screen","wda_screen_action"))
-        if name in ("wda_ready","wda_screen"):
+        if name=="pua_screen_frame":return {"content":[],"structuredContent":data,"isError":False}
+        result=result_content(data,structured=name in ("pua_screen","pua_screen_action"))
+        if name in ("pua_ready","pua_screen"):
             result["_meta"]={"openai/widgetSessionId":SCREEN_SESSION_ID}
         return result
-    except WDAError as exc:return result_content({"error":exc.as_dict()},structured=name=="wda_screen_action")
+    except WDAError as exc:return result_content({"error":exc.as_dict()},structured=name=="pua_screen_action")
     except Exception as exc:
         print("iphone-use tool failure: "+type(exc).__name__,file=sys.stderr)
         return result_content({"error":{"code":"internal_error","message":"Local tool failed; inspect setup status or local stderr.","uncertain":True}})
 
 
 INSTRUCTIONS=(
- "Read iphone-use-setup before setup and iphone-use for tasks. First phone task in a new chat: wda_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
- "If READY fails with wda_unreachable/not_ready, continue initialization rather than end the task: wda_setup(action=status), reuse an active start/recovery job or start once from the existing config/build, poll that job until service.ready=true, then READY again. Missing config/source/build uses the setup skill. "
+ "PUA means Phone Use Agent; all iPhone Use tools use the pua_ prefix. "
+ "Read iphone-use-setup before setup and iphone-use for tasks. First phone task in a new chat: pua_ready(recover=true, screenshot=false); only ready=true permits phone tasks, then reuse READY's observation and the healthy channel. "
+ "If READY fails with pua_unreachable/not_ready, continue initialization rather than end the task: pua_setup(action=status), reuse an active start/recovery job or start once from the existing config/build, poll that job until service.ready=true, then READY again. Missing config/source/build uses the setup skill. "
  "recover=true is runtime recovery, not cold startup; for state=recovering follow its setup job until the service is ready, then READY again. Honor explicit diagnostic/no-start/no-restart instructions. "
- "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use wda_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
+ "The live iPhone screen opens or reuses the same side panel with READY; setup/recovery and preview pause/resume keep the existing panel. Use pua_screen to reopen a closed panel, not to refresh an already open one. Opening it does not prove readiness or require an extra user confirmation, and widget frames never substitute for a model observation or final verification. "
  "Results are one compact JSON text. Tree nodes give type without the XCUIElementType prefix and rect=[x,y,width,height] in iPhone points; an omitted name equals label, an omitted value repeats the text, omitted enabled/visible/in_viewport are true. A listed node is not proven hittable: fixed headers and overlays can cover it. "
  "A screenshot arrives as an image in the same result; through functions.exec forward each image block with image(block) and text blocks with text(block.text), never text(the whole result) or base64. If image forwarding is unavailable, use view_image on image.path or error.observation.image.path. It is scaled for reading: image pixels x image.pixel_to_point [x,y] = iPhone points. Standalone observation uses mode, mutation output uses observe. "
  "Selectors copy label/name/value/type from fresh nodes; use label_contains for long or changing labels. Matches nested at one place, or with only one on screen, resolve by themselves. "
- "Screenshot inspection is the fallback for abnormal UI state: selector/focus failure, unresolved scroll search, no scroll progress, changed/blocked scroll context, input mismatch or a failed page expectation. Inspect the attached screenshot FIRST before any further mutation; if no usable image is attached take one wda_observe(mode=screenshot). Decide from visible state whether to stop, handle a popup, change the region/direction, tap by x/y or continue missing work. scroll_find never chains another swipe after an unresolved post-scroll query. tap_point/candidates locate elements but do not prove they are unobstructed; close a visible popup before tapping a covered background target. For input tap the visible editable field, then type_text with text and no selector. If a coordinate tap or focus failed, choose a new target from a fresh screenshot rather than repeat the same point or hand routine UI trouble to the user. Do not try other selector spellings or read the tree again first. Correct schema/channel/authentication errors by their own recovery; never blindly replay uncertain actions. Resolve unknown bundle IDs with wda_apps. "
+ "Screenshot inspection is the fallback for abnormal UI state: selector/focus failure, unresolved scroll search, no scroll progress, changed/blocked scroll context, input mismatch or a failed page expectation. Inspect the attached screenshot FIRST before any further mutation; if no usable image is attached take one pua_observe(mode=screenshot). Decide from visible state whether to stop, handle a popup, change the region/direction, tap by x/y or continue missing work. scroll_find never chains another swipe after an unresolved post-scroll query. tap_point/candidates locate elements but do not prove they are unobstructed; close a visible popup before tapping a covered background target. For input tap the visible editable field, then type_text with text and no selector. If a coordinate tap or focus failed, choose a new target from a fresh screenshot rather than repeat the same point or hand routine UI trouble to the user. Do not try other selector spellings or read the tree again first. Correct schema/channel/authentication errors by their own recovery; never blindly replay uncertain actions. Resolve unknown bundle IDs with pua_apps. "
  "Execute routine actions optimistically: observe=none and verify=false are defaults, verified=false/verification_deferred=true is normal and does not require a separate verification call. If the next decision needs the resulting page, request observe=tree/both in the action and inspect previous success while planning that next step. "
  "Chain known steps in batch; do not batch speculative repeated swipes toward an unknown target. Inspect the next page first, using a screenshot when tree truncation hides the boundary. explicit expect/verify opts into checking key outcomes. Send long text whole: when type_text returns input_complete=false, call it again with only continue_token; a batch stopped by input_continues or time_budget continues from stopped_at. "
  "Verify final critical results before reporting completion. Retry or replan only after observing a definite failure; never replay uncertain input/submission or an already executed multi-step operation wholesale. No_scroll_progress from explicit verification does not prove empty/complete data. "
- "For App passwords or Face ID call wda_screen(action=pause); phone_locked already auto-pauses the preview for device unlock, so do not overwrite that reason with an extra pause. Pause phone calls and use the available host question tool (request_user_input_async in Default), first option exactly 已完成继续. Wait for the actual user answer; async return or preselection is not confirmation. After the actual user completion answer, explicitly wda_screen(action=resume) for App authentication or legacy/unknown pause, then read fresh state. For device unlock run READY once; successful READY clears only its matching device_locked pause. READY/open never clear App authentication or unknown pause. Continue remaining work from that fresh state. "
+ "For App passwords or Face ID call pua_screen(action=pause); phone_locked already auto-pauses the preview for device unlock, so do not overwrite that reason with an extra pause. Pause phone calls and use the available host question tool (request_user_input_async in Default), first option exactly 已完成继续. Wait for the actual user answer; async return or preselection is not confirmation. After the actual user completion answer, explicitly pua_screen(action=resume) for App authentication or legacy/unknown pause, then read fresh state. For device unlock run READY once; successful READY clears only its matching device_locked pause. READY/open never clear App authentication or unknown pause. Continue remaining work from that fresh state. "
  "Operation action_complete/verified fields do not mean the user's entire task is complete. Track all deliverables, give commentary progress and continue tools while work remains; final only after completion or a concrete blocker. For an unavailable MCP binding use the skill's direct Runtime fallback with the same operation lock."
 )
 
@@ -649,12 +651,12 @@ def serve(runtime):
                     result={"contents":[{"uri":SCREEN_URI,"mimeType":"text/html;profile=mcp-app","text":html,"_meta":SCREEN_META}]}
                 elif method=="tools/call":
                     arrived=time.monotonic()
-                    if params.get("name") not in ("wda_screen_frame","wda_screen","wda_screen_action"):
+                    if params.get("name") not in ("pua_screen_frame","pua_screen","pua_screen_action"):
                         jobs.put((ident,params,arrived));continue
                     # Preview polls, its toolbar and opening or pausing the panel never wait behind a phone operation.
                     result=tool_result(runtime,params)
-                    if params.get("name")=="wda_screen":
-                        runtime.note_response("wda_screen",result,arrived);runtime.replied()
+                    if params.get("name")=="pua_screen":
+                        runtime.note_response("pua_screen",result,arrived);runtime.replied()
                 else:
                     send({"jsonrpc":"2.0","id":ident,"error":{"code":-32601,"message":"Method not found"}});continue
                 response={"jsonrpc":"2.0","id":ident,"result":result}
@@ -672,7 +674,7 @@ def main():
     args=parser.parse_args();runtime=Runtime(args.state_dir,args.url)
     try:
         if args.doctor or args.ready:
-            try:data=runtime.call("wda_doctor" if args.doctor else "wda_ready",{})
+            try:data=runtime.call("pua_doctor" if args.doctor else "pua_ready",{})
             except WDAError as exc:data={"error":exc.as_dict()}
             print(json.dumps(data,ensure_ascii=False));return 1 if "error" in data or (args.ready and data.get("ready") is not True) else 0
         serve(runtime);return 0

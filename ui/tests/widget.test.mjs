@@ -104,7 +104,7 @@ test('connects before requesting only fullscreen, then polls only the app frame 
   assert.equal(h.lifecycle.join(','), 'connect,fullscreen');
   await h.tick();
   assert.equal(h.calls.length, 1);
-  assert.equal(h.calls[0].name, 'wda_screen_frame');
+  assert.equal(h.calls[0].name, 'pua_screen_frame');
   assert.equal(JSON.stringify(h.calls[0].arguments), '{"after_seq":0,"last_event_id":0}');
   assert.equal([...h.timers.values()][0].delay, 250);
   assert.equal(h.requestOptions[0].timeout, 3000);
@@ -438,14 +438,14 @@ test('empty screen explains connecting, offline, locked, authentication and paus
 
 test('failed reconnect restores the authentication symbol and keeps phone controls disabled', async () => {
   let release;
-  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+  const h = await harness({ reply: params => params.name === 'pua_screen_action'
     ? new Promise(resolve => { release = resolve; })
     : Promise.resolve({ structuredContent: preview() }) });
   h.app.ontoolresult({ structuredContent: preview({ paused: true, pause_reason: 'authentication' }) });
   h.elements['tool-refresh'].click();
   await flush();
   assert.equal(h.elements['empty-state'].dataset.state, 'connecting');
-  release({ isError: true, structuredContent: { error: { code: 'wda_unreachable' } } });
+  release({ isError: true, structuredContent: { error: { code: 'pua_unreachable' } } });
   await flush();
   assert.equal(h.elements['empty-state'].dataset.state, 'authentication');
   assert.equal(h.elements['empty-state-text'].textContent, '请完成认证');
@@ -542,14 +542,14 @@ test('status pill names the phone model and follows the stream state', async () 
 
 test('toolbar sends exactly one app-only action and reports its outcome', async () => {
   let release;
-  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+  const h = await harness({ reply: params => params.name === 'pua_screen_action'
     ? new Promise(resolve => { release = resolve; })
     : Promise.resolve({ structuredContent: preview() }) });
   h.elements['tool-home'].click();
   h.elements['tool-screenshot'].click();
   await flush();
-  const actions = h.calls.filter(call => call.name === 'wda_screen_action');
-  assert.equal(JSON.stringify(actions), '[{"name":"wda_screen_action","arguments":{"action":"home"}}]');
+  const actions = h.calls.filter(call => call.name === 'pua_screen_action');
+  assert.equal(JSON.stringify(actions), '[{"name":"pua_screen_action","arguments":{"action":"home"}}]');
   assert.equal(h.requestOptions[h.calls.indexOf(actions[0])].timeout, 12000);
   assert.equal(h.elements['tool-home'].dataset.busy, 'true');
   assert.ok(['tool-refresh', 'tool-home', 'tool-screenshot'].every(id => h.elements[id].disabled));
@@ -568,7 +568,7 @@ test('toolbar failures name the reason without changing the preview', async () =
     { isError: true, structuredContent: { error: { code: 'something_new' } } },
     { structuredContent: { ok: true, action: 'screenshot', copied: true } },
   ];
-  const h = await harness({ reply: params => params.name === 'wda_screen_action'
+  const h = await harness({ reply: params => params.name === 'pua_screen_action'
     ? (replies.length ? Promise.resolve(replies.shift()) : Promise.reject(new Error('lost')))
     : Promise.resolve({ structuredContent: preview() }) });
   h.app.ontoolresult({ structuredContent: preview({ frame: frame(4), frame_available: true }) });
@@ -584,7 +584,7 @@ test('toolbar failures name the reason without changing the preview', async () =
 });
 
 test('refresh adopts the new stream and asks for a frame at once', async () => {
-  const h = await harness({ reply: params => Promise.resolve(params.name === 'wda_screen_action'
+  const h = await harness({ reply: params => Promise.resolve(params.name === 'pua_screen_action'
     ? { structuredContent: { ok: true, action: 'refresh', service_ready: true, ...preview({ stream_id: 'next', frame_available: false }) } }
     : { structuredContent: preview({ stream_id: 'first' }) }) });
   h.app.ontoolresult({ structuredContent: preview({ stream_id: 'first', frame: frame(9), frame_available: true }) });
@@ -594,7 +594,7 @@ test('refresh adopts the new stream and asks for a frame at once', async () => {
   assert.equal(h.elements.toast.textContent, '已刷新连接');
   assert.equal([...h.timers.values()].some(timer => timer.delay === 0), true);
   await h.tick();
-  const polls = h.calls.filter(call => call.name === 'wda_screen_frame');
+  const polls = h.calls.filter(call => call.name === 'pua_screen_frame');
   assert.equal(polls.at(-1).arguments.after_seq, 0);
   // The last pixels stay until the new stream delivers its first frame.
   assert.equal(h.elements.device.hidden, false);
@@ -612,7 +612,7 @@ test('refresh reports a real disconnected service instead of a success toast', a
 
 test('a poll from before user reconnect cannot put the recovered preview back in pause', async () => {
   let release;
-  const h = await harness({ reply: params => params.name === 'wda_screen_frame'
+  const h = await harness({ reply: params => params.name === 'pua_screen_frame'
     ? new Promise(resolve => { release = resolve; })
     : Promise.resolve({ structuredContent: { ok: true, service_ready: true, ...preview({ stream_id: 'reconnected', frame_available: false }) } }) });
   h.app.ontoolresult({ structuredContent: preview({ paused: true }) });
@@ -623,7 +623,7 @@ test('a poll from before user reconnect cannot put the recovered preview back in
   await flush();
   assert.equal(h.elements.app.dataset.live, 'offline');
   assert.equal(h.elements['empty-state-text'].textContent, '未连接');
-  assert.equal(h.calls.filter(call => call.name === 'wda_screen_action').length, 1);
+  assert.equal(h.calls.filter(call => call.name === 'pua_screen_action').length, 1);
 });
 
 test('host theme is applied and followed, and teardown releases the toolbar', async () => {

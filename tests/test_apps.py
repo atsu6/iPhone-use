@@ -116,7 +116,7 @@ class AppTests(unittest.TestCase):
             self.setup.config = {"udid": "$(touch /tmp/unsafe)"}
             invalid = self.catalog.lookup("招商银行", source="installed")
         self.assertFalse(result["ok"])
-        self.assertIn("wda_setup", result["warnings"][0])
+        self.assertIn("pua_setup", result["warnings"][0])
         self.assertFalse(invalid["ok"])
 
     def test_failed_installed_probe_does_not_claim_catalog_app_installed(self):

@@ -52,7 +52,7 @@ class ProtocolTests(unittest.TestCase):
 
     def serve_ready(self, runtime, arguments):
         request = {"jsonrpc": "2.0", "id": "ready-state", "method": "tools/call", "params": {
-            "name": "wda_ready", "arguments": arguments}}
+            "name": "pua_ready", "arguments": arguments}}
         output = io.StringIO()
         with patch.object(sys, "stdin", io.StringIO(json.dumps(request) + "\n")), contextlib.redirect_stdout(output):
             serve(runtime)
@@ -105,7 +105,7 @@ class ProtocolTests(unittest.TestCase):
         manager.recover.assert_called_once_with()
 
     def test_ready_refusal_lock_and_unknown_fault_remain_mcp_errors(self):
-        for case, expected in (("owner", "wda_recovery_required"), ("locked", "phone_locked"), ("unknown", "device-fault")):
+        for case, expected in (("owner", "pua_recovery_required"), ("locked", "phone_locked"), ("unknown", "device-fault")):
             with self.subTest(case=case):
                 runtime, client = self.runtime()
                 manager = Mock()
@@ -149,12 +149,12 @@ class ProtocolTests(unittest.TestCase):
         names = [tool["name"] for tool in tools]
         self.assertEqual(len(names), 19)
         self.assertEqual(len(names), len(set(names)))
-        for name in ("wda_ready", "wda_setup", "wda_observe", "wda_tap", "wda_type_text", "wda_batch", "wda_collect_list", "wda_apps"):
+        for name in ("pua_ready", "pua_setup", "pua_observe", "pua_tap", "pua_type_text", "pua_batch", "pua_collect_list", "pua_apps"):
             self.assertIn(name, names)
         for tool in tools:
             self.assertEqual(tool["inputSchema"]["type"], "object")
             self.assertFalse(tool["inputSchema"]["additionalProperties"])
-        apps = next(tool for tool in tools if tool["name"] == "wda_apps")
+        apps = next(tool for tool in tools if tool["name"] == "pua_apps")
         self.assertTrue(apps["annotations"]["readOnlyHint"])
         self.assertFalse(apps["annotations"]["destructiveHint"])
         self.assertTrue(apps["annotations"]["idempotentHint"])
@@ -166,16 +166,16 @@ class ProtocolTests(unittest.TestCase):
         def resolved(schema, prop):
             value = schema["properties"][prop]
             return schema["$defs"][value["$ref"].split("/")[-1]] if "$ref" in value else value
-        for name in ("wda_tap", "wda_swipe", "wda_type_text", "wda_press_button", "wda_launch_app"):
+        for name in ("pua_tap", "pua_swipe", "pua_type_text", "pua_press_button", "pua_launch_app"):
             with self.subTest(name=name):
                 schema = tools[name]["inputSchema"]
                 self.assertEqual(resolved(schema, "observe")["default"], "none")
-                self.assertEqual(set(resolved(schema, "expect")["properties"]), set(resolved(tools["wda_find"]["inputSchema"], "selector")["properties"]))
-                if name != "wda_tap":
+                self.assertEqual(set(resolved(schema, "expect")["properties"]), set(resolved(tools["pua_find"]["inputSchema"], "selector")["properties"]))
+                if name != "pua_tap":
                     self.assertFalse(schema["properties"]["verify"]["default"])
-        for name in ("wda_tap", "wda_swipe"):
+        for name in ("pua_tap", "pua_swipe"):
             self.assertNotIn("observation_id", tools[name]["inputSchema"].get("required", []))
-        batch_steps = tools["wda_batch"]["inputSchema"]["properties"]["steps"]["items"]["oneOf"]
+        batch_steps = tools["pua_batch"]["inputSchema"]["properties"]["steps"]["items"]["oneOf"]
         def contract(value, definitions):
             if isinstance(value, dict):
                 if "$ref" in value:return contract(definitions[value["$ref"].split("/")[-1]], definitions)
@@ -184,14 +184,14 @@ class ProtocolTests(unittest.TestCase):
             return value
         for step in batch_steps:
             op = step["properties"]["op"]["const"]
-            standalone = tools["wda_" + op]["inputSchema"]
-            self.assertEqual(contract(step["properties"]["args"], tools["wda_batch"]["inputSchema"]["$defs"]),
+            standalone = tools["pua_" + op]["inputSchema"]
+            self.assertEqual(contract(step["properties"]["args"], tools["pua_batch"]["inputSchema"]["$defs"]),
                              contract(standalone, standalone.get("$defs", {})))
 
     def test_stdio_apps_catalog_returns_public_evidence_without_wda_access(self):
         responses = self.exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-                "name": "wda_apps", "arguments": {"query": "招商银行", "source": "catalog"}}},
+                "name": "pua_apps", "arguments": {"query": "招商银行", "source": "catalog"}}},
         ], url="http://127.0.0.1:1")
         result = responses[0]["result"]
         self.assertFalse(result["isError"])
@@ -204,21 +204,21 @@ class ProtocolTests(unittest.TestCase):
     def test_apps_catalog_is_read_only_even_when_phone_is_locked(self):
         runtime, client = self.runtime()
         client.locked = True
-        result = runtime.call("wda_apps", {"query": "招商银行", "source": "catalog"})
+        result = runtime.call("pua_apps", {"query": "招商银行", "source": "catalog"})
         self.assertTrue(result["ok"])
         self.assertEqual(result["candidates"][0]["bundle_id"], "com.cmbchina.MPBBank")
         self.assertEqual(client.calls, [])
 
     def test_stdio_invalid_arguments_return_tool_error_without_wda_access(self):
         invalid_cases = [
-            ("wda_tap", {"x": True, "y": 200, "observation_id": "unused"}),
-            ("wda_type_text", {"selector": {"label": "Target"}, "text": "line 1\nline 2"}),
-            ("wda_find", {"selector": {"label": "Target", "predicate": "label == 'Target'"}}),
-            ("wda_batch", {"steps": [{"op": "tap", "args": {"selector": {"label": "Target"}}}, {"op": "unknown", "args": {}}]}),
+            ("pua_tap", {"x": True, "y": 200, "observation_id": "unused"}),
+            ("pua_type_text", {"selector": {"label": "Target"}, "text": "line 1\nline 2"}),
+            ("pua_find", {"selector": {"label": "Target", "predicate": "label == 'Target'"}}),
+            ("pua_batch", {"steps": [{"op": "tap", "args": {"selector": {"label": "Target"}}}, {"op": "unknown", "args": {}}]}),
             ("wda_missing", {}),
-            ("wda_apps", {"query": "招商银行", "source": "guess"}),
-            ("wda_apps", {"query": "招商银行", "country": "CHN"}),
-            ("wda_apps", {"query": ""}),
+            ("pua_apps", {"query": "招商银行", "source": "guess"}),
+            ("pua_apps", {"query": "招商银行", "country": "CHN"}),
+            ("pua_apps", {"query": ""}),
         ]
         responses = self.exchange([{"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {"name": name, "arguments": args}} for index, (name, args) in enumerate(invalid_cases)])
         self.assertEqual(len(responses), len(invalid_cases))
@@ -226,7 +226,7 @@ class ProtocolTests(unittest.TestCase):
             result = response["result"]
             self.assertTrue(result["isError"])
             content = payload(result)
-            self.assertNotIn(content["error"]["code"], ("wda_unreachable", "action_uncertain", "internal_error"))
+            self.assertNotIn(content["error"]["code"], ("pua_unreachable", "action_uncertain", "internal_error"))
 
     def test_stdio_parse_error_does_not_break_following_ping(self):
         responses = self.exchange(["{broken", {"jsonrpc": "2.0", "id": 1, "method": "ping"}])
@@ -235,7 +235,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_default_swipe_executes_once_without_progress_or_output_reads(self):
         runtime, client = self.runtime()
-        result = runtime.call("wda_swipe", {"direction": "up"})
+        result = runtime.call("pua_swipe", {"direction": "up"})
         self.assertTrue(result["action_executed"])
         self.assertFalse(result["verified"])
         self.assertTrue(result["verification_deferred"])
@@ -247,7 +247,7 @@ class ProtocolTests(unittest.TestCase):
     def test_swipe_schema_accepts_explicit_progress_verification_without_output(self):
         runtime, client = self.runtime()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_swipe", {"direction": "up", "observe": "none", "verify": True})
+            runtime.call("pua_swipe", {"direction": "up", "observe": "none", "verify": True})
         self.assertEqual(caught.exception.code, "no_scroll_progress")
         self.assertEqual(caught.exception.details["attempts"], 1)
         self.assertTrue(caught.exception.details["action_executed"])
@@ -257,7 +257,7 @@ class ProtocolTests(unittest.TestCase):
     def test_unknown_argument_reports_allowed_fields_without_device_access(self):
         runtime, client = self.runtime()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_observe", {"observe": "none"})
+            runtime.call("pua_observe", {"observe": "none"})
         error = caught.exception.as_dict()
         self.assertEqual(error["code"], "invalid_argument")
         self.assertFalse(error["action_executed"])
@@ -270,7 +270,7 @@ class ProtocolTests(unittest.TestCase):
     def test_no_progress_error_image_is_mcp_image_content_and_retains_details(self):
         runtime, client = self.runtime()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_swipe", {"observe": "screenshot", "max_attempts": 1, "verify": True})
+            runtime.call("pua_swipe", {"observe": "screenshot", "max_attempts": 1, "verify": True})
         result = result_content({"error": caught.exception.as_dict()})
         self.assertTrue(result["isError"])
         self.assertEqual(payload(result)["error"]["code"], "no_scroll_progress")
@@ -284,7 +284,7 @@ class ProtocolTests(unittest.TestCase):
         runtime, client = self.runtime()
         client.elements.clear()
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_scroll_find", {"selector": {"label": "Missing"}, "max_swipes": 10})
+            runtime.call("pua_scroll_find", {"selector": {"label": "Missing"}, "max_swipes": 10})
         result = result_content({"error": caught.exception.as_dict()})
         self.assertTrue(result["isError"])
         self.assertEqual(payload(result)["error"]["swipes"], 1)
@@ -295,7 +295,7 @@ class ProtocolTests(unittest.TestCase):
     def test_batch_continues_optimistic_navigation_and_input_without_readback(self):
         runtime, client = self.runtime()
         text = "直接输入完整的长文本，不做试输入。" * 20
-        result = runtime.call("wda_batch", {"steps": [
+        result = runtime.call("pua_batch", {"steps": [
             {"op": "press_button", "args": {"name": "home"}},
             {"op": "launch_app", "args": {"bundle_id": "com.example.phone"}},
             {"op": "tap", "args": {"selector": {"label": "Target"}}},
@@ -314,7 +314,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_batch_explicit_progress_check_stops_after_no_progress(self):
         runtime, client = self.runtime()
-        result = runtime.call("wda_batch", {"steps": [
+        result = runtime.call("pua_batch", {"steps": [
             {"op": "swipe", "args": {"observe": "none", "verify": True}},
             {"op": "press_button", "args": {"name": "home", "observe": "none"}},
         ]})
@@ -328,7 +328,7 @@ class ProtocolTests(unittest.TestCase):
     def test_batch_stops_after_uncertain_action_and_never_replays_it(self):
         runtime, client = self.runtime()
         client.home_error = WDAError("action_uncertain", "Home response was lost", uncertain=True)
-        result = runtime.call("wda_batch", {"steps": [
+        result = runtime.call("pua_batch", {"steps": [
             {"op": "press_button", "args": {"name": "home"}},
             {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Do not enter"}},
         ]})
@@ -340,7 +340,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_batch_stops_after_submission_until_a_deliberate_checkpoint(self):
         runtime, client = self.runtime()
-        result = runtime.call("wda_batch", {"steps": [
+        result = runtime.call("pua_batch", {"steps": [
             {"op": "type_text", "args": {"selector": {"label": "Target"}, "text": "Submit once", "submit": True}},
             {"op": "press_button", "args": {"name": "home"}},
         ]})
@@ -353,8 +353,8 @@ class ProtocolTests(unittest.TestCase):
 
     def test_home_and_text_accept_explicit_expected_next_state(self):
         for name, arguments in (
-            ("wda_press_button", {"name": "home", "expect": {"label": "Target"}}),
-            ("wda_type_text", {"selector": {"label": "Target"}, "text": "Complete text", "expect": {"label": "Target"}}),
+            ("pua_press_button", {"name": "home", "expect": {"label": "Target"}}),
+            ("pua_type_text", {"selector": {"label": "Target"}, "text": "Complete text", "expect": {"label": "Target"}}),
         ):
             with self.subTest(name=name):
                 runtime, _ = self.runtime()
@@ -365,7 +365,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_exact_enabled_tree_string_survives_protocol_schema(self):
         runtime, client = self.runtime()
-        result = runtime.call("wda_find", {"selector": {"label": "Target", "enabled": "true"}})
+        result = runtime.call("pua_find", {"selector": {"label": "Target", "enabled": "true"}})
         self.assertEqual(result["matches"], 1)
         query = next(body["value"] for _, path, body in client.calls if path == "/elements")
         self.assertIn("enabled == true", query)
@@ -385,7 +385,7 @@ class ProtocolTests(unittest.TestCase):
             {"op": "tap", "args": {"selector": {"label": "Target"}, "extra": True}},
         ]
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_batch", {"steps": steps})
+            runtime.call("pua_batch", {"steps": steps})
         self.assertEqual(caught.exception.code, "invalid_argument")
         details = caught.exception.as_dict()
         self.assertEqual(details["argument_path"], "arguments.steps[1].args")
@@ -401,7 +401,7 @@ class ProtocolTests(unittest.TestCase):
             {"op": "tap", "args": {"selector": {"label": "Target", "predicate": "label == 'Target'"}, "observe": "none"}},
         ]
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_batch", {"steps": steps})
+            runtime.call("pua_batch", {"steps": steps})
         self.assertEqual(caught.exception.code, "invalid_selector")
         self.assertEqual(client.calls, [])
 
@@ -412,14 +412,14 @@ class ProtocolTests(unittest.TestCase):
             {"op": "launch_app", "args": {"bundle_id": "not-a-bundle", "observe": "none"}},
         ]
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_batch", {"steps": steps})
+            runtime.call("pua_batch", {"steps": steps})
         self.assertEqual(caught.exception.code, "invalid_argument")
         self.assertEqual(client.calls, [])
 
     def test_coordinates_and_custom_region_accept_no_observation_id(self):
         for name, arguments, expected_path in (
-            ("wda_tap", {"x": 10, "y": 200}, "/wda/tap"),
-            ("wda_swipe", {"region": {"x": 50, "y": 200, "width": 200, "height": 200}}, "/wda/dragfromtoforduration"),
+            ("pua_tap", {"x": 10, "y": 200}, "/wda/tap"),
+            ("pua_swipe", {"region": {"x": 50, "y": 200, "width": 200, "height": 200}}, "/wda/dragfromtoforduration"),
         ):
             with self.subTest(name=name):
                 runtime, client = self.runtime()
@@ -432,9 +432,9 @@ class ProtocolTests(unittest.TestCase):
     def test_incomplete_or_mixed_coordinates_fail_before_phone_access(self):
         runtime, client = self.runtime()
         invalid = [
-            ("wda_tap", {"x": 10}),
-            ("wda_tap", {"y": 200}),
-            ("wda_tap", {"selector": {"label": "Target"}, "x": 10}),
+            ("pua_tap", {"x": 10}),
+            ("pua_tap", {"y": 200}),
+            ("pua_tap", {"selector": {"label": "Target"}, "x": 10}),
         ]
         for name, arguments in invalid:
             with self.subTest(name=name, arguments=arguments), self.assertRaises(WDAError) as caught:
@@ -444,8 +444,8 @@ class ProtocolTests(unittest.TestCase):
 
     def test_unbound_coordinates_and_region_still_check_viewport_before_mutation(self):
         for name, arguments in (
-            ("wda_tap", {"x": 390, "y": 200}),
-            ("wda_swipe", {"region": {"x": 300, "y": 200, "width": 200, "height": 200}}),
+            ("pua_tap", {"x": 390, "y": 200}),
+            ("pua_swipe", {"region": {"x": 300, "y": 200, "width": 200, "height": 200}}),
         ):
             with self.subTest(name=name):
                 runtime, client = self.runtime()
@@ -464,7 +464,7 @@ class ProtocolTests(unittest.TestCase):
         try:
             self.assertEqual(worker.stdout.readline().strip(), "locked")
             with self.assertRaises(WDAError) as caught:
-                runtime.call("wda_tap", {"selector": {"label": "Target"}, "observe": "none"})
+                runtime.call("pua_tap", {"selector": {"label": "Target"}, "observe": "none"})
             self.assertEqual(caught.exception.code, "device_busy")
             self.assertEqual(client.calls, [])
         finally:
@@ -480,10 +480,10 @@ class ProtocolTests(unittest.TestCase):
         second, second_client = self.runtime()
         first_client.session_id = "shared-session-123"
         with patch.object(first, "_call", side_effect=lambda name, args: {"session_id": first.client.session_id}):
-            self.assertEqual(first.call("wda_metrics", {}), {"session_id": "shared-session-123"})
+            self.assertEqual(first.call("pua_metrics", {}), {"session_id": "shared-session-123"})
         self.assertIsNone(second_client.session_id)
         with patch.object(second, "_call", side_effect=lambda name, args: {"session_id": second.client.session_id}):
-            self.assertEqual(second.call("wda_metrics", {}), {"session_id": "shared-session-123"})
+            self.assertEqual(second.call("pua_metrics", {}), {"session_id": "shared-session-123"})
         self.assertEqual(first_client.calls + second_client.calls, [])
         cache = Path(self.directory.name) / "session.json"
         self.assertEqual(json.loads(cache.read_text()), {"url": first.base_url, "session_id": "shared-session-123"})
@@ -493,7 +493,7 @@ class ProtocolTests(unittest.TestCase):
         runtime, client = self.runtime()
         client.locked = True
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_tap", {"selector": {"label": "Target"}, "observe": "none"})
+            runtime.call("pua_tap", {"selector": {"label": "Target"}, "observe": "none"})
         self.assertEqual(caught.exception.code, "phone_locked")
         self.assertEqual(client.calls, [("GET", "/wda/locked", None)])
         self.assertEqual(client.actions(), [])
@@ -502,7 +502,7 @@ class ProtocolTests(unittest.TestCase):
         runtime, client = self.runtime()
         client.locked = True
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_ready", {"screenshot": False})
+            runtime.call("pua_ready", {"screenshot": False})
         self.assertEqual(caught.exception.code, "phone_locked")
         self.assertEqual(client.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
         self.assertIsNone(client.session_id)
@@ -511,14 +511,14 @@ class ProtocolTests(unittest.TestCase):
         runtime, client = self.runtime()
         client.nodes = []
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=True), self.assertRaises(WDAError) as caught:
-            runtime.call("wda_ready", {"screenshot": False})
+            runtime.call("pua_ready", {"screenshot": False})
         self.assertEqual(caught.exception.code, "mirroring_conflict")
         self.assertFalse(any(path in ("/wda/tap", "/wda/keys") for _, path, _ in client.actions()))
 
     def test_ready_nonempty_tree_proves_unlocked_usable_phone(self):
         runtime, client = self.runtime()
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
-            result = runtime.call("wda_ready", {"screenshot": False})
+            result = runtime.call("pua_ready", {"screenshot": False})
         self.assertTrue(result["ready"])
         self.assertEqual(result["state"], "ready")
         self.assertTrue(result["proof"]["phone_unlocked"])

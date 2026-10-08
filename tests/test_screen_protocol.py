@@ -129,17 +129,17 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertIn("resources", responses[0]["result"]["capabilities"])
         tools = {item["name"]: item for item in responses[1]["result"]["tools"]}
         self.assertEqual(len(tools), 19)
-        for name in ("wda_ready", "wda_screen"):
+        for name in ("pua_ready", "pua_screen"):
             self.assertEqual(tools[name]["_meta"]["ui"]["resourceUri"], SCREEN_URI)
-        self.assertEqual(tools["wda_screen"]["_meta"]["openai/ui"]["entrypoints"], [{"type": "thread"}])
-        for name in ("wda_screen_frame", "wda_screen_action"):
+        self.assertEqual(tools["pua_screen"]["_meta"]["openai/ui"]["entrypoints"], [{"type": "thread"}])
+        for name in ("pua_screen_frame", "pua_screen_action"):
             self.assertEqual(tools[name]["_meta"]["ui"]["visibility"], ["app"])
-        self.assertEqual(tools["wda_screen_action"]["inputSchema"]["properties"]["action"]["enum"], ["refresh", "home", "screenshot"])
-        self.assertFalse(tools["wda_screen_action"]["annotations"]["destructiveHint"])
+        self.assertEqual(tools["pua_screen_action"]["inputSchema"]["properties"]["action"]["enum"], ["refresh", "home", "screenshot"])
+        self.assertFalse(tools["pua_screen_action"]["annotations"]["destructiveHint"])
         visible = [item for item in tools.values()
                    if item.get("_meta", {}).get("ui", {}).get("visibility") != ["app"]]
         self.assertEqual(len(visible), 17)
-        self.assertTrue(tools["wda_screen_frame"]["annotations"]["readOnlyHint"])
+        self.assertTrue(tools["pua_screen_frame"]["annotations"]["readOnlyHint"])
 
     def test_stdio_serves_packaged_widget_without_connecting_to_wda(self):
         responses = self.exchange([
@@ -171,7 +171,7 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         with (Path(self.directory.name) / "operation.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            result = runtime.call("wda_screen_frame", {"after_seq": 6, "last_event_id": 2})
+            result = runtime.call("pua_screen_frame", {"after_seq": 6, "last_event_id": 2})
         self.assertIs(result, screen.frame_result)
         self.assertEqual(screen.events, [("frame", {"after_seq": 6, "last_event_id": 2})])
         self.assertEqual(client.calls, [])
@@ -180,7 +180,7 @@ class ScreenProtocolTests(unittest.TestCase):
 
     def test_frame_payload_is_structured_only_without_image_or_text_tokens(self):
         runtime, client, screen = self.runtime()
-        result = self.call_over_stdio(runtime, "wda_screen_frame", {"after_seq": 0})
+        result = self.call_over_stdio(runtime, "pua_screen_frame", {"after_seq": 0})
         self.assertEqual(result["content"], [])
         self.assertIs(result["isError"], False)
         self.assertEqual(result["structuredContent"], screen.frame_result)
@@ -190,9 +190,9 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         with (Path(self.directory.name) / "operation.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            runtime.call("wda_screen", {})
-            paused = runtime.call("wda_screen", {"action": "pause"})
-            resumed = runtime.call("wda_screen", {"action": "resume"})
+            runtime.call("pua_screen", {})
+            paused = runtime.call("pua_screen", {"action": "pause"})
+            resumed = runtime.call("pua_screen", {"action": "resume"})
         self.assertTrue(paused["paused"])
         self.assertFalse(resumed["paused"])
         self.assertEqual(client.calls, [])
@@ -202,10 +202,10 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         results = []
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
-            for name, arguments in (("wda_ready", {"screenshot": False, "recover": False}),
-                                    ("wda_screen", {}), ("wda_screen", {"action": "pause"}),
-                                    ("wda_ready", {"screenshot": False, "recover": False}),
-                                    ("wda_screen", {"action": "resume"})):
+            for name, arguments in (("pua_ready", {"screenshot": False, "recover": False}),
+                                    ("pua_screen", {}), ("pua_screen", {"action": "pause"}),
+                                    ("pua_ready", {"screenshot": False, "recover": False}),
+                                    ("pua_screen", {"action": "resume"})):
                 results.append(self.call_over_stdio(runtime, name, arguments))
         identifiers = [result["_meta"]["openai/widgetSessionId"] for result in results]
         self.assertTrue(identifiers[0])
@@ -224,7 +224,7 @@ class ScreenProtocolTests(unittest.TestCase):
 
     def test_widget_session_survives_repeated_opens_and_mcp_process_reconnect(self):
         request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                   "params": {"name": "wda_screen", "arguments": {}}}
+                   "params": {"name": "pua_screen", "arguments": {}}}
         first, repeated = self.exchange([request, {**request, "id": 2}])
         reconnected, = self.exchange([request])
         results = [reply["result"] for reply in (first, repeated, reconnected)]
@@ -236,9 +236,9 @@ class ScreenProtocolTests(unittest.TestCase):
     def test_setup_status_and_failed_ready_do_not_create_a_widget_session(self):
         runtime, client, screen = self.runtime()
         with patch.object(runtime.setup_manager, "setup", return_value={"configured": True}):
-            status = self.call_over_stdio(runtime, "wda_setup", {"action": "status"})
+            status = self.call_over_stdio(runtime, "pua_setup", {"action": "status"})
         client.locked = True
-        failed = self.call_over_stdio(runtime, "wda_ready", {"screenshot": False, "recover": False})
+        failed = self.call_over_stdio(runtime, "pua_ready", {"screenshot": False, "recover": False})
         self.assertNotIn("_meta", status)
         self.assertNotIn("_meta", failed)
         self.assertTrue(failed["isError"])
@@ -247,9 +247,9 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(client.actions(), [])
 
     def test_invalid_preview_arguments_rejected_before_backend_or_phone(self):
-        cases = [("wda_screen", {"action": "click"}), ("wda_screen", {"x": 100}),
-                 ("wda_screen_frame", {"after_seq": True}), ("wda_screen_frame", {"after_seq": -1}),
-                 ("wda_screen_frame", {"last_event_id": 1.5}), ("wda_screen_frame", {"observe": "tree"})]
+        cases = [("pua_screen", {"action": "click"}), ("pua_screen", {"x": 100}),
+                 ("pua_screen_frame", {"after_seq": True}), ("pua_screen_frame", {"after_seq": -1}),
+                 ("pua_screen_frame", {"last_event_id": 1.5}), ("pua_screen_frame", {"observe": "tree"})]
         runtime, client, screen = self.runtime()
         for name, args in cases:
             with self.subTest(name=name, args=args), self.assertRaises(WDAError) as caught:
@@ -261,7 +261,7 @@ class ScreenProtocolTests(unittest.TestCase):
     def test_ready_opens_preview_by_default_without_a_frame_poll_or_added_screenshot(self):
         runtime, client, screen = self.runtime()
         with patch.object(runtime.setup_manager, "mirroring_running", return_value=False):
-            result = runtime.call("wda_ready", {"screenshot": False, "recover": False})
+            result = runtime.call("pua_ready", {"screenshot": False, "recover": False})
         self.assertTrue(result["ready"])
         self.assertEqual(sum(kind == "start" for kind, _ in screen.events), 1)
         self.assertFalse(any(kind == "frame" for kind, _ in screen.events))
@@ -278,7 +278,7 @@ class ScreenProtocolTests(unittest.TestCase):
                 at_action.extend(screen.events)
             return original(method, path, payload, timeout)
         client.session = request
-        result = runtime.call("wda_tap", {"x": 120, "y": 240})
+        result = runtime.call("pua_tap", {"x": 120, "y": 240})
         self.assertTrue(result["action_executed"])
         self.assertEqual([path for _, path, _ in client.calls], ["/wda/locked", "/window/size", "/wda/tap"])
         self.assertEqual([event for event in at_action if event[0] == "tap"],
@@ -288,7 +288,7 @@ class ScreenProtocolTests(unittest.TestCase):
 
     def test_semantic_tap_cursor_uses_validated_rect_center(self):
         runtime, client, screen = self.runtime()
-        result = runtime.call("wda_tap", {"selector": {"label": "Target"}})
+        result = runtime.call("pua_tap", {"selector": {"label": "Target"}})
         self.assertTrue(result["action_executed"])
         self.assertEqual([event for event in screen.events if event[0] == "tap"],
                          [("tap", {"point": {"x": 195, "y": 222}, "viewport": client.size})])
@@ -297,7 +297,7 @@ class ScreenProtocolTests(unittest.TestCase):
 
     def test_swipe_cursor_tracks_the_executed_drag_endpoints(self):
         runtime, client, screen = self.runtime()
-        result = runtime.call("wda_swipe", {"direction": "up", "region": {"x": 40, "y": 100, "width": 300, "height": 600}})
+        result = runtime.call("pua_swipe", {"direction": "up", "region": {"x": 40, "y": 100, "width": 300, "height": 600}})
         self.assertTrue(result["action_executed"])
         action = next(body for method, path, body in client.calls if method == "POST" and path == "/wda/dragfromtoforduration")
         events = [args for kind, args in screen.events if kind == "drag"]
@@ -312,7 +312,7 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         secret = "Long private text 绝不传给预览 " * 15
         client.elements[0]["label"] = "Private editor name"
-        result = runtime.call("wda_type_text", {"selector": {"label": "Private editor name"}, "text": secret})
+        result = runtime.call("pua_type_text", {"selector": {"label": "Private editor name"}, "text": secret})
         self.assertTrue(result["action_executed"])
         encoded = json.dumps(screen.events, ensure_ascii=False)
         self.assertNotIn(secret, encoded)
@@ -327,10 +327,10 @@ class ScreenProtocolTests(unittest.TestCase):
                 runtime, client, screen = self.runtime()
                 if secure_field:
                     client.elements[0]["kind"] = "XCUIElementTypeSecureTextField"
-                    name, args, code = "wda_type_text", {"selector": {"label": "Target"}, "text": "never typed"}, "not_editable"
+                    name, args, code = "pua_type_text", {"selector": {"label": "Target"}, "text": "never typed"}, "not_editable"
                 else:
                     client.locked = True
-                    name, args, code = "wda_tap", {"x": 100, "y": 220}, "phone_locked"
+                    name, args, code = "pua_tap", {"x": 100, "y": 220}, "phone_locked"
                 with self.assertRaises(WDAError) as caught:
                     runtime.call(name, args)
                 self.assertEqual(caught.exception.code, code)
@@ -342,7 +342,7 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         for method in ("begin", "end", "gesture", "set_viewport"):
             setattr(screen, method, Mock(side_effect=OSError("display unavailable")))
-        result = runtime.call("wda_tap", {"x": 120, "y": 240})
+        result = runtime.call("pua_tap", {"x": 120, "y": 240})
         self.assertTrue(result["action_executed"])
         self.assertEqual([path for _, path, _ in client.calls], ["/wda/locked", "/window/size", "/wda/tap"])
         self.assertEqual([path for _, path, _ in client.actions()], ["/wda/tap"])
@@ -351,13 +351,13 @@ class ScreenProtocolTests(unittest.TestCase):
         runtime, client, screen = self.runtime()
         screen.start=Mock(side_effect=OSError("display unavailable"))
         with patch.object(runtime.setup_manager,"mirroring_running",return_value=False):
-            self.assertTrue(runtime.call("wda_ready",{"screenshot":False,"recover":False})["ready"])
+            self.assertTrue(runtime.call("pua_ready",{"screenshot":False,"recover":False})["ready"])
 
     def test_nonsecure_noneditable_target_does_not_pause_the_preview(self):
         runtime, client, screen = self.runtime()
         client.elements[0]["kind"]="XCUIElementTypeButton"
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_type_text",{"selector":{"label":"Target"},"text":"never typed"})
+            runtime.call("pua_type_text",{"selector":{"label":"Target"},"text":"never typed"})
         self.assertEqual(caught.exception.code,"not_editable")
         self.assertFalse(screen.is_paused)
         self.assertEqual(client.actions(),[])
@@ -376,7 +376,7 @@ class ScreenProtocolTests(unittest.TestCase):
         phone = self.toolbar(runtime)
         runtime.phone.pending_input = {"token": "t"}
         before = runtime.phone.accepted_actions
-        result = runtime.call("wda_screen_action", {"action": "home"})
+        result = runtime.call("pua_screen_action", {"action": "home"})
         self.assertEqual(result, {"ok": True, "action": "home"})
         self.assertEqual(phone.calls, [("POST", "/wda/homescreen", {})])
         phone.close.assert_called_once_with()
@@ -392,9 +392,9 @@ class ScreenProtocolTests(unittest.TestCase):
         with (Path(self.directory.name) / "operation.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaises(WDAError) as caught:
-                runtime.call("wda_screen_action", {"action": "home"})
+                runtime.call("pua_screen_action", {"action": "home"})
             # Refreshing the preview never needs the phone lock.
-            self.assertTrue(runtime.call("wda_screen_action", {"action": "refresh"})["ok"])
+            self.assertTrue(runtime.call("pua_screen_action", {"action": "refresh"})["ok"])
         self.assertEqual(caught.exception.code, "device_busy")
         self.assertFalse(caught.exception.details["action_executed"])
         self.assertEqual(phone.actions(), [])
@@ -402,13 +402,13 @@ class ScreenProtocolTests(unittest.TestCase):
     def test_toolbar_refresh_restarts_only_the_preview_and_reports_service_state(self):
         runtime, client, screen = self.runtime()
         phone = self.toolbar(runtime)
-        result = runtime.call("wda_screen_action", {"action": "refresh"})
+        result = runtime.call("pua_screen_action", {"action": "refresh"})
         self.assertEqual((result["ok"], result["service_ready"], result["stream_id"]), (True, True, "restarted"))
         self.assertEqual([kind for kind, _ in screen.events], ["restart"])
         self.assertEqual(phone.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
         self.assertEqual(client.calls, [])
         phone.status_ready = False
-        self.assertFalse(runtime.call("wda_screen_action", {"action": "refresh"})["service_ready"])
+        self.assertFalse(runtime.call("pua_screen_action", {"action": "refresh"})["service_ready"])
 
     def test_toolbar_screenshot_copies_the_native_capture_and_leaves_no_file(self):
         runtime, client, screen = self.runtime()
@@ -420,7 +420,7 @@ class ScreenProtocolTests(unittest.TestCase):
             return Mock(returncode=0)
 
         with patch("iphone_use.subprocess.run", side_effect=run):
-            result = runtime.call("wda_screen_action", {"action": "screenshot"})
+            result = runtime.call("pua_screen_action", {"action": "screenshot"})
         self.assertEqual(result, {"ok": True, "action": "screenshot", "copied": True, "width": 1, "height": 1})
         command, data, mode = copied[0]
         self.assertEqual((data, mode), (phone.screenshot, 0o600))
@@ -431,7 +431,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(phone.calls, [("GET", "/screenshot", None)])
         self.assertFalse(list((Path(self.directory.name)).glob("**/*.png")))
         with patch("iphone_use.subprocess.run", return_value=Mock(returncode=1)), self.assertRaises(WDAError) as caught:
-            runtime.call("wda_screen_action", {"action": "screenshot"})
+            runtime.call("pua_screen_action", {"action": "screenshot"})
         self.assertEqual(caught.exception.code, "clipboard_unavailable")
         self.assertFalse(list((Path(self.directory.name)).glob(".clipboard-*")))
 
@@ -441,21 +441,21 @@ class ScreenProtocolTests(unittest.TestCase):
         screen.is_paused = True
         for action in ("home", "screenshot"):
             with self.subTest(action=action), self.assertRaises(WDAError) as caught:
-                runtime.call("wda_screen_action", {"action": action})
+                runtime.call("pua_screen_action", {"action": action})
             self.assertEqual(caught.exception.code, "preview_paused")
         self.assertEqual(phone.calls, [])
-        self.assertFalse(runtime.call("wda_screen_action", {"action": "refresh"})["paused"])
+        self.assertFalse(runtime.call("pua_screen_action", {"action": "refresh"})["paused"])
         with self.assertRaises(WDAError) as caught:
-            runtime.call("wda_screen_action", {"action": "tap"})
+            runtime.call("pua_screen_action", {"action": "tap"})
         self.assertEqual(caught.exception.code, "invalid_argument")
 
     def test_toolbar_results_are_structured_for_the_app_and_answered_off_the_tool_queue(self):
         runtime, client, screen = self.runtime()
         self.toolbar(runtime)
-        result = self.call_over_stdio(runtime, "wda_screen_action", {"action": "home"})
+        result = self.call_over_stdio(runtime, "pua_screen_action", {"action": "home"})
         self.assertEqual(result["structuredContent"], {"ok": True, "action": "home"})
         screen.is_paused = True
-        refused = self.call_over_stdio(runtime, "wda_screen_action", {"action": "home"})
+        refused = self.call_over_stdio(runtime, "pua_screen_action", {"action": "home"})
         self.assertTrue(refused["isError"])
         self.assertEqual(refused["structuredContent"]["error"]["code"], "preview_paused")
         self.assertEqual(len(runtime.responses), 0)
@@ -466,9 +466,9 @@ class ScreenProtocolTests(unittest.TestCase):
         found = {"ok": True, "devices": [{"udid": "other", "name": "Someone's iPad", "model": "iPad Air"},
                                          {"udid": "00008150-TESTTESTTEST", "name": "Private Phone Name", "model": "iPhone 17 Pro Max"}]}
         with patch.object(runtime.setup_manager, "discover", return_value=found) as discover:
-            runtime.call("wda_screen", {})
+            runtime.call("pua_screen", {})
             runtime._device_lookup.join(timeout=5)
-            runtime.call("wda_screen_frame", {})
+            runtime.call("pua_screen_frame", {})
         self.assertEqual(screen.device, {"model": "iPhone 17 Pro Max"})
         discover.assert_called_once_with()
         cached = json.loads((Path(self.directory.name) / "device.json").read_text())
@@ -476,7 +476,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual((Path(self.directory.name) / "device.json").stat().st_mode & 0o777, 0o600)
         again, _, later = self.runtime()
         with patch.object(again.setup_manager, "discover") as discover:
-            again.call("wda_screen", {})
+            again.call("pua_screen", {})
             again._device_lookup.join(timeout=5)
         discover.assert_not_called()
         self.assertEqual(later.device, {"model": "iPhone 17 Pro Max"})
@@ -484,7 +484,7 @@ class ScreenProtocolTests(unittest.TestCase):
     def test_unconfigured_runtime_never_looks_for_a_device(self):
         runtime, client, screen = self.runtime()
         with patch.object(runtime.setup_manager, "discover") as discover:
-            runtime.call("wda_screen_frame", {})
+            runtime.call("pua_screen_frame", {})
             runtime._device_lookup.join(timeout=5)
         discover.assert_not_called()
         self.assertIsNone(screen.device)

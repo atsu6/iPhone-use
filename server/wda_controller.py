@@ -41,7 +41,7 @@ def fail(code, message, **details):
 
 def stale(message,reason,scope="page",**details):
     fail("stale_observation",message,action_executed=False,reason=reason,freshness_scope=scope,
-         recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"same_observation_retry":False,"replay_action":False,
+         recovery={"next_tool":"pua_observe","next_arguments":{"mode":"both"},"same_observation_retry":False,"replay_action":False,
                    "next_step":"Inspect the current app and viewport before reusing coordinates. An observation ID is optional; changing text, numbers or screenshot pixels does not invalidate its app/viewport context."},**details)
 
 
@@ -82,7 +82,7 @@ def predicate_literal(value):
 
 def predicate(selector):
     if not isinstance(selector,dict) or not selector or set(selector)-SELECTOR_FIELDS:
-        fail("invalid_selector", "Use label/label_contains/name/value/type/enabled, or a standalone WDA predicate; index picks one match.")
+        fail("invalid_selector", "Use label/label_contains/name/value/type/enabled, or a standalone PUA predicate; index picks one match.")
     if "index" in selector:
         index=selector["index"]
         if isinstance(index,bool) or not isinstance(index,int) or not 0 <= index <= 199:
@@ -173,7 +173,7 @@ class PhoneController:
         self.pending_input=None
 
     def reset(self):
-        """Forget context tied to a WDA session that was closed or replaced."""
+        """Forget context tied to a PUA session that was closed or replaced."""
         self.snapshots.clear()
         self._viewport_cache=None
         self.pending_input=None
@@ -226,7 +226,7 @@ class PhoneController:
         result=self.client.request("GET", "/wda/activeAppInfo",timeout=timeout).get("value") or {}
         app=result.get("bundleId")
         if not isinstance(app,str) or not app or app.startswith("local.pid."):
-            fail("wda_foreground_unavailable","WDA cannot resolve a running foreground application. This is a WDA/XCTest channel problem, not a selector or schema error.",foreground_app=app,recovery={"tool":"wda_ready","arguments":{"screenshot":False},"replay_action":False})
+            fail("pua_foreground_unavailable","PUA cannot resolve a running foreground application. This is a PUA/XCTest channel problem, not a selector or schema error.",foreground_app=app,recovery={"tool":"pua_ready","arguments":{"screenshot":False},"replay_action":False})
         return app
 
     def tree(self, include_invisible=False, expensive_visibility=False):
@@ -235,11 +235,11 @@ class PhoneController:
             path+="&excluded_attributes=visible"
         raw=self.client.session("GET",path)
         if not isinstance(raw,str):
-            fail("invalid_response", "WDA source is not XML text.")
+            fail("invalid_response", "PUA source is not XML text.")
         try:
             tree=ET.fromstring(raw)
         except ET.ParseError as exc:
-            fail("invalid_response", f"WDA XML parse failed: {exc}.")
+            fail("invalid_response", f"PUA XML parse failed: {exc}.")
         root=tree.attrib if tree.attrib.get("type")=="XCUIElementTypeApplication" else {}
         # The page source root names the foreground app and spans the screen, so one read
         # usually answers what activeAppInfo and window/size would be asked separately.
@@ -314,7 +314,7 @@ class PhoneController:
         except (ValueError,TypeError) as exc:
             fail("invalid_response", "Invalid screenshot encoding.")
         if not data.startswith(wda_image.PNG_SIGNATURE):
-            fail("invalid_response","WDA screenshot is not PNG.")
+            fail("invalid_response","PUA screenshot is not PNG.")
         artifacts=self.state_dir/"artifacts";artifacts.mkdir(mode=0o700,parents=True,exist_ok=True)
         dest=artifacts/(dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")+"-"+uuid.uuid4().hex[:8]+".png")
         dest.write_bytes(data);dest.chmod(0o600)
@@ -353,10 +353,10 @@ class PhoneController:
         return viewport
 
     def query(self,selector,limit=CANDIDATE_LIMIT):
-        """Matches in tree order, with whatever attributes WDA returned inline."""
+        """Matches in tree order, with whatever attributes PUA returned inline."""
         found=self.client.session("POST","/elements",{"using":"predicate string","value":predicate(selector)}) or []
         if not isinstance(found,list):
-            fail("invalid_response","WDA elements result is not a list.")
+            fail("invalid_response","PUA elements result is not a list.")
         index=selector.get("index")
         inline=all(isinstance(item,dict) and isinstance(item.get("rect"),dict) for item in found)
         if index is not None:
@@ -380,7 +380,7 @@ class PhoneController:
             element["rect"]=self.client.session("GET","/element/"+quote(element["element_id"],safe="")+"/rect")
         rect=element["rect"]
         if not isinstance(rect,dict) or not all(isinstance(rect.get(key),(int,float)) and not isinstance(rect.get(key),bool) and math.isfinite(rect[key]) for key in ("x","y","width","height")):
-            fail("invalid_response","WDA element rect is not numeric.")
+            fail("invalid_response","PUA element rect is not numeric.")
         return rect
 
     def element_hittable(self,element):
@@ -411,24 +411,24 @@ class PhoneController:
             elif "image" not in observed:observed["image"]=self.capture(observed["viewport"])
         except WDAError as failure:error.details["observation_error"]={"code":failure.code,"message":str(failure)}
         if error.code=="offscreen_target":
-            tool,step="wda_swipe","Inspect the attached screenshot FIRST. The match lies outside the viewport; check the actual list, direction and overlays before deciding whether to swipe toward it. Then use the resulting screenshot to locate it."
+            tool,step="pua_swipe","Inspect the attached screenshot FIRST. The match lies outside the viewport; check the actual list, direction and overlays before deciding whether to swipe toward it. Then use the resulting screenshot to locate it."
         elif error.code=="occluded_target":
-            tool,step="wda_tap","Inspect the attached screenshot FIRST. A popup may cover the target; dismiss its visible close/cancel control before tapping the field or target. tap_point is the background element's location, NOT proof it can be clicked."
+            tool,step="pua_tap","Inspect the attached screenshot FIRST. A popup may cover the target; dismiss its visible close/cancel control before tapping the field or target. tap_point is the background element's location, NOT proof it can be clicked."
         elif error.code in ("search_exhausted","no_scroll_progress","scroll_context_changed","modal_requires_region","blocked_scroll_region"):
             tool,step=None,"Inspect the attached screenshot FIRST for the last row/end marker, unchanged content, wrong region, fixed header or popup. Decide whether another swipe is warranted and choose the visible target/region/direction; do not automatically repeat scrolling or increase its budget. No progress alone does not prove an empty or complete list."
         elif error.code in ("postcondition_failed","input_mismatch"):
             tool,step=None,"Inspect the attached screenshot FIRST to establish the actual page, field text or submission result. Continue only the missing work; do not blindly repeat the previous click, input or submission."
         elif typing:
-            tool,step="wda_tap","Inspect the attached screenshot FIRST for a popup or wrong page. Tap the visible editable field with wda_tap x/y, then call wda_type_text with text and no selector. If a prior tap failed to focus the field, do not repeat the same point blindly; choose a new target from the current screenshot."
+            tool,step="pua_tap","Inspect the attached screenshot FIRST for a popup or wrong page. Tap the visible editable field with pua_tap x/y, then call pua_type_text with text and no selector. If a prior tap failed to focus the field, do not repeat the same point blindly; choose a new target from the current screenshot."
         else:
-            tool,step="wda_tap","Inspect the attached screenshot FIRST, then tap the visible target with wda_tap x/y; a returned tap or tap_point is already in iPhone points."
+            tool,step="pua_tap","Inspect the attached screenshot FIRST, then tap the visible target with pua_tap x/y; a returned tap or tap_point is already in iPhone points."
         recovery={**error.details.get("recovery",{}),"use":"coordinates" if error.code in SELECTOR_FAILURES else "screenshot","visual_check_required":True,"replay_action":False,
-                  "next_step":step+" Image pixels x image.pixel_to_point give iPhone points. Inspect the image content, not its base64 text; through functions.exec forward image blocks with image(block), or open observation.image.path with view_image. If no screenshot is available, take one wda_observe(mode=screenshot) before acting. Do not try other selector spellings or read the tree again first."}
+                  "next_step":step+" Image pixels x image.pixel_to_point give iPhone points. Inspect the image content, not its base64 text; through functions.exec forward image blocks with image(block), or open observation.image.path with view_image. If no screenshot is available, take one pua_observe(mode=screenshot) before acting. Do not try other selector spellings or read the tree again first."}
         recovery.pop("next_tool",None);recovery.pop("next_arguments",None)
         if tool:recovery["next_tool"]=tool
         if "image" not in error.details.get("observation",{}):
-            recovery.update(next_tool="wda_observe",next_arguments={"mode":"screenshot"})
-        if recovery.get("next_tool")=="wda_tap" and not typing and error.code!="occluded_target" and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
+            recovery.update(next_tool="pua_observe",next_arguments={"mode":"screenshot"})
+        if recovery.get("next_tool")=="pua_tap" and not typing and error.code!="occluded_target" and "tap_point" in error.details:recovery["next_arguments"]=dict(error.details["tap_point"])
         error.details["recovery"]=recovery
 
     def find(self,selector,limit=10):
@@ -447,7 +447,7 @@ class PhoneController:
         candidates=[element for element in found["elements"] if on_screen(element)]
         if not candidates and complete:
             fail("offscreen_target","Several elements match, but none is inside the viewport. Scroll the intended one into view and observe again.",action_executed=False,matches=matches,
-                 candidates=[self.describe(element) for element in found["elements"][:CANDIDATE_LIMIT]],viewport=viewport,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False})
+                 candidates=[self.describe(element) for element in found["elements"][:CANDIDATE_LIMIT]],viewport=viewport,recovery={"next_tool":"pua_observe","next_arguments":{"mode":"both"},"replay_action":False})
         if editable:
             fields=[element for element in candidates if element.get("type") in EDITABLE]
             if fields:candidates=fields
@@ -465,13 +465,13 @@ class PhoneController:
                     self.last_target={"matches":matches,"chosen":"innermost_of_nested_matches","index":element["index"]}
                     return element
             fail("occluded_target","The matching elements are nested at one place and none is reported hittable; no tap was sent. If the screen shows the target uncovered, tap its tap point with x/y; if something covers it, deal with that first.",action_executed=False,matches=matches,
-                 candidates=[self.describe(element) for element in ordered],viewport=viewport,recovery={"use":"coordinates","next_tool":"wda_tap","replay_action":False})
+                 candidates=[self.describe(element) for element in ordered],viewport=viewport,recovery={"use":"coordinates","next_tool":"pua_tap","replay_action":False})
         for element in listed:self.element_hittable(element)
         fail("ambiguous_target","Several separate elements match. Tap the intended candidate's tap point with x/y, or choose it by selector.index.",action_executed=False,matches=matches,
              candidates=[self.describe(element) for element in listed],candidates_truncated=not complete or len(listed)<len(candidates),recovery=recovery)
 
     def resolve(self,selector,editable=False,found=None):
-        """One reachable element for the selector, with its WDA path and tap point."""
+        """One reachable element for the selector, with its PUA path and tap point."""
         result=found if found is not None else self.query(selector)
         self.last_target=None
         if result["matches"]==0:
@@ -483,10 +483,10 @@ class PhoneController:
         rect=self.element_rect(element)
         cx=rect["x"]+rect["width"]/2;cy=rect["y"]+rect["height"]/2
         if rect["width"]<=0 or rect["height"]<=0 or not (0<=cx<viewport["width"] and 0<=cy<viewport["height"]):
-            fail("offscreen_target","Target center is outside the viewport. Scroll the actual list into view, observe again and re-find the target; a stopped batch has not completed its failed step.",action_executed=False,target_rect=rect,viewport=viewport,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False})
+            fail("offscreen_target","Target center is outside the viewport. Scroll the actual list into view, observe again and re-find the target; a stopped batch has not completed its failed step.",action_executed=False,target_rect=rect,viewport=viewport,recovery={"next_tool":"pua_observe","next_arguments":{"mode":"both"},"replay_action":False})
         path="/element/"+quote(element["element_id"],safe="")
         if not self.element_hittable(element):
-            fail("occluded_target","Target was found but is not reported hittable; no tap was sent, so nothing on the phone changed. If the screen shows the target uncovered, tap tap_point with x/y; if an overlay, picker or fixed header covers it, deal with that first.",action_executed=False,target_rect=rect,tap_point={"x":round(cx),"y":round(cy)},viewport=viewport,recovery={"use":"coordinates","next_tool":"wda_tap","next_arguments":{"x":round(cx),"y":round(cy)},"replay_action":False})
+            fail("occluded_target","Target was found but is not reported hittable; no tap was sent, so nothing on the phone changed. If the screen shows the target uncovered, tap tap_point with x/y; if an overlay, picker or fixed header covers it, deal with that first.",action_executed=False,target_rect=rect,tap_point={"x":round(cx),"y":round(cy)},viewport=viewport,recovery={"use":"coordinates","next_tool":"pua_tap","next_arguments":{"x":round(cx),"y":round(cy)},"replay_action":False})
         if editable:
             if "type" not in element:element["type"]=self.client.session("GET",path+"/attribute/type")
             if element["type"] not in EDITABLE:
@@ -526,7 +526,7 @@ class PhoneController:
             return False
 
     def observe_after(self,mode,max_nodes=100):
-        """Post-action observation. A tree read may let WDA wait for the transition to end first."""
+        """Post-action observation. A tree read may let PUA wait for the transition to end first."""
         if self.settle_seconds>0 and mode=="screenshot":
             # A screenshot has no such wait in WDA; give the transition a moment instead.
             time.sleep(min(self.settle_seconds,0.5))
@@ -584,7 +584,7 @@ class PhoneController:
         while True:
             remaining=deadline-time.monotonic()
             if remaining<=0:
-                fail("postcondition_failed","Activation was accepted, but the requested app did not become foreground within five seconds. Inspect loading, login or system prompts before continuing; do not replay activation automatically.",requested_app=bundle_id,foreground_app=app,foreground_verified=False,recovery={"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False})
+                fail("postcondition_failed","Activation was accepted, but the requested app did not become foreground within five seconds. Inspect loading, login or system prompts before continuing; do not replay activation automatically.",requested_app=bundle_id,foreground_app=app,foreground_verified=False,recovery={"next_tool":"pua_observe","next_arguments":{"mode":"both"},"replay_action":False})
             app=self.active_app(timeout=remaining)
             if app==bundle_id:break
             time.sleep(min(.1,max(0,deadline-time.monotonic())))
@@ -656,7 +656,7 @@ class PhoneController:
 
     def focused_field(self):
         """The editable element that has keyboard focus, for typing after a coordinate tap."""
-        missing="No text field has keyboard focus; no text was entered. Inspect the screenshot for a blocking popup or wrong target, then tap the visible field with wda_tap x/y. Do not repeat a failed point blindly."
+        missing="No text field has keyboard focus; no text was entered. Inspect the screenshot for a blocking popup or wrong target, then tap the visible field with pua_tap x/y. Do not repeat a failed point blindly."
         try:found=self.client.session("GET","/element/active")
         except WDAError as error:
             if error.code!="no such element":raise
@@ -694,7 +694,7 @@ class PhoneController:
             self.pending_input=plan
             return {"action_executed":True,"action_complete":False,"input_complete":False,"verified":False,"verification_deferred":True,
                     "characters":plan["typed"],"remaining_characters":plan["total"]-plan["typed"],"submitted":False,"continue_token":plan["token"],
-                    "next_step":"Call wda_type_text with only continue_token to type the rest. Do not resend the text or act on the phone in between."}
+                    "next_step":"Call pua_type_text with only continue_token to type the rest. Do not resend the text or act on the phone in between."}
         self.pending_input=None
         if plan["verify"]:
             actual=self.client.session("GET",plan["path"]+"/attribute/value")
@@ -786,7 +786,7 @@ class PhoneController:
         if modals:
             contained=lambda m:area["x"]>=m["rect"]["x"] and area["y"]>=m["rect"]["y"] and area["x"]+area["width"]<=m["rect"]["x"]+m["rect"]["width"] and area["y"]+area["height"]<=m["rect"]["y"]+m["rect"]["height"]
             if region is None or not all(contained(m) for m in modals):
-                details={"action_executed":False,"verified":False,"region":area,"native_modals":self.modal_report(modals),"recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"replay_action":False,"next_step":"Handle the existing modal first, or choose a fresh explicit scroll region wholly inside its intended list. Do not scroll the underlying page through a modal."}}
+                details={"action_executed":False,"verified":False,"region":area,"native_modals":self.modal_report(modals),"recovery":{"next_tool":"pua_observe","next_arguments":{"mode":"both"},"replay_action":False,"next_step":"Handle the existing modal first, or choose a fresh explicit scroll region wholly inside its intended list. Do not scroll the underlying page through a modal."}}
                 observed=self.scroll_observation(before,viewport,"tree" if observe in ("tree","both") else "none",_max_nodes)
                 if observed:details["observation"]=observed
                 fail("modal_requires_region" if region is None else "blocked_scroll_region","Native modals are present. The intended scroll area must be explicit and inside every modal's bounds; otherwise handle the foreground modal first.",**details)
@@ -817,7 +817,7 @@ class PhoneController:
             if expect:result["postcondition"]=self.wait(expect)
             return result
         details={"action_executed":True,"verified":False,"changed":False,"attempts":1,"region":area,
-                 "recovery":{"next_tool":"wda_observe","next_arguments":{"mode":"both"},"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, including custom pickers/overlays that may not appear as native modals, or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
+                 "recovery":{"next_tool":"pua_observe","next_arguments":{"mode":"both"},"next_step":"Inspect the current page and list entrance. If this is an overview, tap the actual list entry; if at the end, reconcile counts. Otherwise inspect a screenshot, including custom pickers/overlays that may not appear as native modals, or another stable region.","same_gesture_retry":False,"end_of_list_proven":False}}
         observed=self.scroll_observation(after,v,"tree" if observe in ("tree","both") else "none",_max_nodes)
         if observed:details["observation"]=observed
         fail("no_scroll_progress","Gestures executed but stable accessibility anchors did not show movement in the requested direction. The page may be an overview, boundary, blocked region or custom-rendered list. Changing numbers alone are not scroll progress. This does not prove an empty or complete list; inspect returned state before choosing the next action.",**details)
@@ -901,7 +901,7 @@ class PhoneController:
                     result=allowed[step["op"]](**step.get("args",{}))
                     if result.get("input_complete") is False:
                         return {"completed_steps":len(results),"stopped_at":index,"stop_reason":"input_continues","results":results+[result],"complete":False,
-                                "next_step":"Call wda_type_text with the returned continue_token until input_complete, then send the steps after stopped_at."}
+                                "next_step":"Call pua_type_text with the returned continue_token until input_complete, then send the steps after stopped_at."}
                     results.append(result)
                     if result.get("submitted") and not result.get("submission_verified"):
                         return {"completed_steps":len(results),"stopped_at":index,"stop_reason":"submission_requires_verification","results":results,"complete":False}

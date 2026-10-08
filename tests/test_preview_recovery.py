@@ -33,7 +33,7 @@ class PreviewRecoveryTests(unittest.TestCase):
         self.runtime.setup_manager.mirroring_running = Mock(return_value=False)
 
     def ready(self):
-        return self.runtime.call("wda_ready", {"screenshot": False, "recover": False})
+        return self.runtime.call("pua_ready", {"screenshot": False, "recover": False})
 
     def lock_failure(self):
         self.client.locked = True
@@ -63,19 +63,19 @@ class PreviewRecoveryTests(unittest.TestCase):
                 if legacy:
                     self.hub._state_path.write_text(json.dumps({"paused": True}))
                 else:
-                    self.runtime.call("wda_screen", {"action": "pause"})
+                    self.runtime.call("pua_screen", {"action": "pause"})
                 self.lock_failure()
                 reason = "unknown" if legacy else "authentication"
                 self.assertEqual(self.other.start()["pause_reason"], reason)
                 self.client.locked = False
                 self.assertTrue(self.ready()["preview"]["paused"])
-                self.assertTrue(self.runtime.call("wda_screen", {})["paused"])
+                self.assertTrue(self.runtime.call("pua_screen", {})["paused"])
                 probe = FakeWDA()
                 probe.close = Mock()
                 with patch("iphone_use.WDAClient", return_value=probe):
                     self.assertFalse(self.runtime.screen_action("refresh")["paused"])
                 self.assertEqual(probe.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
-                self.assertFalse(self.runtime.call("wda_screen", {"action": "resume"})["paused"])
+                self.assertFalse(self.runtime.call("pua_screen", {"action": "resume"})["paused"])
 
     def test_failed_health_check_does_not_clear_a_lock_pause(self):
         self.lock_failure()
@@ -114,7 +114,7 @@ class PreviewRecoveryTests(unittest.TestCase):
                 def checked(method, path, payload=None):
                     if path == "/wda/locked":
                         if condition == "probe_error":
-                            raise WDAError("wda_unreachable", "unavailable")
+                            raise WDAError("pua_unreachable", "unavailable")
                         if condition == "new_auth_pause":
                             self.other.set_paused(True)
                     return request(method, path, payload)
@@ -138,7 +138,7 @@ class PreviewRecoveryTests(unittest.TestCase):
 
     def test_no_focus_returns_visual_replan_without_typing_or_proposed_old_point(self):
         with self.assertRaises(WDAError) as caught:
-            self.runtime.call("wda_type_text", {"text": "query"})
+            self.runtime.call("pua_type_text", {"text": "query"})
         error = caught.exception
         self.assertEqual(error.code, "no_focused_field")
         self.assertFalse(error.details["action_executed"])

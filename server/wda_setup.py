@@ -111,7 +111,7 @@ def _diagnose(text):
     text = text.lower()
     cases = [
         (("not authorized for performing ui testing actions", "xctdaemonerror code=41", "xctdaemonerror code = 41"),
-         "XCTest UI automation authorization is unavailable even if WDA status.ready is true. Inspect setup status, stop only this plugin's owned start job, start it again and verify wda_ready with a current UI observation. Preserve external services and ask their owner to restart them. If authorization still fails, check Developer Mode and Enable UI Automation on the unlocked iPhone; do not bypass trust or authentication prompts."),
+         "XCTest UI automation authorization is unavailable even if WDA status.ready is true. Inspect setup status, stop only this plugin's owned start job, start it again and verify pua_ready with a current UI observation. Preserve external services and ask their owner to restart them. If authorization still fails, check Developer Mode and Enable UI Automation on the unlocked iPhone; do not bypass trust or authentication prompts."),
         (("maximum number", "three apps", "3 apps", "0xe8008029"),
          "Personal Team app limit: review development apps on the phone yourself. Do not uninstall automatically; remove an app only with the owner's explicit instruction, or use a paid team."),
         (("no accounts", "authentication", "not logged in", "unable to log in", "session has expired"),
@@ -440,7 +440,7 @@ class SetupManager:
                             and (self._publishing_pid(job) or self._owned(job, base_url=self.base_url))):
                         return {"ok": True, "job_id": job["id"], "already_running": True,
                                 "job": self._job_status(job), "recovery": {"state": job["state"], "job_id": job["id"], "recovery_of": job.get("recovery_of")},
-                                "next_steps": ["Poll wda_setup status with this job_id, then verify wda_ready again. Do not queue another restart."]}
+                                "next_steps": ["Poll pua_setup status with this job_id, then verify pua_ready again. Do not queue another restart."]}
                 for job in reversed(recoveries):
                     try:
                         last_attempt = max(dt.datetime.fromisoformat(job[key].replace("Z", "+00:00"))
@@ -460,7 +460,7 @@ class SetupManager:
                 if len(targets) != 1:
                     return {"ok": False, "error": "The current WDA listener is not uniquely owned by a matching live plugin start job; automatic recovery refused.",
                             "recovery": {"state": "manual"},
-                            "next_steps": ["Preserve external WDA services. Ask their owner to restart them, or inspect wda_setup status and start a service owned by this plugin."]}
+                            "next_steps": ["Preserve external WDA services. Ask their owner to restart them, or inspect pua_setup status and start a service owned by this plugin."]}
                 self._source(config)
                 self._require_build(config)
                 if sys.platform != "darwin" or not all(shutil.which(name) for name in ("xcodebuild", "node", "npm")):
@@ -476,7 +476,7 @@ class SetupManager:
                 return result
         except (ValueError, OSError, KeyError) as error:
             return {"ok": False, "error": _redact(error), "recovery": {"state": "manual"},
-                    "next_steps": _diagnose(str(error)) or ["Inspect wda_setup status and correct the reported prerequisite before recovery."]}
+                    "next_steps": _diagnose(str(error)) or ["Inspect pua_setup status and correct the reported prerequisite before recovery."]}
 
     def _group_running(self, group, timeout=2):
         members = _run(["ps", "-ax", "-o", "pid=,pgid=,stat="], timeout=timeout)

@@ -47,7 +47,7 @@ const tools: Record<ToolName, HTMLButtonElement> = {
   screenshot: document.getElementById('tool-screenshot') as HTMLButtonElement,
 };
 const app = new App(
-  { name: 'iPhone Use Screen', version: '0.3.2' },
+  { name: 'iPhone Use Screen', version: '0.3.6' },
   { availableDisplayModes: ['fullscreen'] },
   { autoResize: false },
 );
@@ -84,7 +84,7 @@ const FAILED: Record<string, string> = {
   device_busy: '手机正在执行操作，请稍后再试',
   preview_paused: '认证接管期间已暂停',
   clipboard_unavailable: '截图未能写入剪贴板',
-  wda_unreachable: '未连接到手机',
+  pua_unreachable: '未连接到手机',
 };
 
 const validSize = (value: unknown): value is Size => {
@@ -166,15 +166,15 @@ function retainFrame() {
 
 const visible = () => !disposed && !suspended && !document.hidden;
 
-// Bake the soft rounded ring and its corner envelope into one layout-sized picture.
-// Both the halo and the crisp rim disappear at each edge's midpoint.
-function glowMask(width: number, height: number, radius: number, band: number) {
+// Bake each soft ring phase once per layout. Top/bottom centers retain a little light,
+// then join more strongly as the existing color and dot phases crossfade.
+function glowMask(width: number, height: number, radius: number, band: number, bridge: number) {
   const round = (value: number) => Math.round(value * 100) / 100;
   const bloom = Math.min(width, height) * .27;
   const corners = [[0, 0], [width, 0], [0, height], [width, height]]
     .map(([x, y]) => `<circle cx='${round(x)}' cy='${round(y)}' r='${round(bloom)}'/>`).join('');
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${round(width)}' height='${round(height)}'>`
-    + `<defs><linearGradient id='x'><stop stop-color='#fff'/><stop offset='.16' stop-color='#fff' stop-opacity='.85'/><stop offset='.36' stop-color='#fff' stop-opacity='0'/><stop offset='.64' stop-color='#fff' stop-opacity='0'/><stop offset='.84' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
+    + `<defs><linearGradient id='x'><stop stop-color='#fff'/><stop offset='.16' stop-color='#fff' stop-opacity='.85'/><stop offset='.36' stop-color='#fff' stop-opacity='${bridge}'/><stop offset='.64' stop-color='#fff' stop-opacity='${bridge}'/><stop offset='.84' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
     + `<linearGradient id='y' x2='0' y2='1'><stop stop-color='#fff'/><stop offset='.1' stop-color='#fff' stop-opacity='.85'/><stop offset='.28' stop-color='#fff' stop-opacity='0'/><stop offset='.72' stop-color='#fff' stop-opacity='0'/><stop offset='.9' stop-color='#fff' stop-opacity='.85'/><stop offset='1' stop-color='#fff'/></linearGradient>`
     + `<mask id='ends'><rect width='100%' height='100%' fill='url(#y)'/></mask><mask id='corners'><rect width='100%' height='100%' fill='url(#x)' mask='url(#ends)'/></mask></defs>`
     + `<filter id='f' x='-30%' y='-30%' width='160%' height='160%'><feGaussianBlur stdDeviation='${round(band * .3)}'/></filter>`
@@ -219,8 +219,11 @@ function fitFrame() {
   device.style.setProperty('--bezel', `${bezel * scale}px`);
   const radius = shortSide * .12 * scale;
   device.style.setProperty('--screen-radius', `${radius}px`);
-  device.style.setProperty('--glow-mask', glowMask(size.width * scale, size.height * scale,
-    radius, Math.min(bezel * scale * 3.8, radius)));
+  const band = Math.min(bezel * scale * 3.8, radius);
+  for (const [phase, bridge] of [.12, .32, .62].entries()) {
+    device.style.setProperty(phase === 0 ? '--glow-mask' : `--glow-mask-${phase}`,
+      glowMask(size.width * scale, size.height * scale, radius, band, bridge));
+  }
   const dotStep = Math.max(5, bezel * scale * .95);
   for (let phase = 0; phase < 3; phase++) {
     device.style.setProperty(`--glow-dots-${phase}`, glowDots(dotStep, phase * Math.PI * 2 / 3));
@@ -373,7 +376,7 @@ async function poll() {
     if (!visible()) return;
     const generation = frameGeneration;
     const result = await app.callServerTool({
-      name: 'wda_screen_frame',
+      name: 'pua_screen_frame',
       arguments: { after_seq: frameSeq, last_event_id: eventId },
     }, { timeout: REQUEST_TIMEOUT });
     if (!visible() || generation !== frameGeneration) return;
@@ -407,7 +410,7 @@ async function act(name: ToolName) {
   try {
     if (!ready) await connect();
     const result = await app.callServerTool({
-      name: 'wda_screen_action',
+      name: 'pua_screen_action',
       arguments: { action: name },
     }, { timeout: ACTION_TIMEOUT });
     const data = result.structuredContent as (Partial<Preview> & { service_ready?: boolean; error?: { code?: string } }) | undefined;

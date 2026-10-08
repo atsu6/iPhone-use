@@ -29,7 +29,7 @@ class RecoveryTests(unittest.TestCase):
         self.manager.recover.return_value = {"ok": True, "job_id": "recovery-test", "recovery": {"state": "queued"}}
         self.runtime.setup_manager = self.manager
 
-    def assert_error(self, code, tool="wda_ready", **args):
+    def assert_error(self, code, tool="pua_ready", **args):
         with self.assertRaises(WDAError) as caught:
             self.runtime.call(tool, args)
         self.assertEqual(caught.exception.code, code)
@@ -51,7 +51,7 @@ class RecoveryTests(unittest.TestCase):
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "request", side_effect=request):
-            result = self.runtime.call("wda_ready", {"screenshot": False})
+            result = self.runtime.call("pua_ready", {"screenshot": False})
         self.assertTrue(result["ready"])
         self.assertEqual(result["state"], "ready")
         self.assertTrue(result["proof"]["foreground_resolved"])
@@ -64,14 +64,14 @@ class RecoveryTests(unittest.TestCase):
 
     def test_persistent_foreground_error_queues_recovery_and_explicit_poll_guidance(self):
         self.client.app = "local.pid.0"
-        result = self.runtime.call("wda_ready", {"screenshot": False})
+        result = self.runtime.call("pua_ready", {"screenshot": False})
         self.assert_pending_state(result)
         self.assertEqual(result["category"], "channel_runtime")
         self.assertTrue(result["session_read_retried"])
-        self.assertEqual(result["cause"]["code"], "wda_foreground_unavailable")
-        self.assertEqual(result["recovery"]["status_tool"], "wda_setup")
+        self.assertEqual(result["cause"]["code"], "pua_foreground_unavailable")
+        self.assertEqual(result["recovery"]["status_tool"], "pua_setup")
         self.assertEqual(result["recovery"]["status_arguments"], {"action": "status", "job_id": "recovery-test"})
-        self.assertEqual(result["recovery"]["next_tool"], "wda_ready")
+        self.assertEqual(result["recovery"]["next_tool"], "pua_ready")
         self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": False, "recover": True})
         self.manager.recover.assert_called_once_with()
         self.assertEqual(sum(path == "/session" for _, path, _ in self.client.calls), 2)
@@ -80,7 +80,7 @@ class RecoveryTests(unittest.TestCase):
     def test_local_pid_stale_error_from_source_uses_same_bounded_recovery(self):
         fault = WDAError("stale element reference", "Application local.pid.0 is not running")
         with patch.object(self.client, "source", side_effect=fault) as source:
-            result = self.runtime.call("wda_ready", {"screenshot": False})
+            result = self.runtime.call("pua_ready", {"screenshot": False})
         self.assertEqual(source.call_count, 2)
         self.assert_pending_state(result)
         self.assertTrue(result["session_read_retried"])
@@ -89,14 +89,14 @@ class RecoveryTests(unittest.TestCase):
 
     def test_diagnose_mode_explains_runtime_failure_without_service_restart(self):
         self.client.app = "local.pid.0"
-        result = self.runtime.call("wda_ready", {"screenshot": False, "recover": False})
+        result = self.runtime.call("pua_ready", {"screenshot": False, "recover": False})
         self.assert_not_ready_state(result, "recovery_required")
         self.assertEqual(result["reason"], "recovery_disabled")
         self.assertTrue(result["session_read_retried"])
         self.assertEqual(result["category"], "channel_runtime")
-        self.assertEqual(result["cause"]["code"], "wda_foreground_unavailable")
+        self.assertEqual(result["cause"]["code"], "pua_foreground_unavailable")
         self.assertEqual(result["recovery"]["state"], "disabled")
-        self.assertEqual(result["recovery"]["next_tool"], "wda_ready")
+        self.assertEqual(result["recovery"]["next_tool"], "pua_ready")
         self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": False, "recover": True})
         self.assertIn("user", result["recovery"]["permission_note"].lower())
         self.manager.recover.assert_not_called()
@@ -105,7 +105,7 @@ class RecoveryTests(unittest.TestCase):
     def test_authorization_code_41_skips_session_read_retry_and_queues_recovery(self):
         fault = WDAError("unknown error", "Error Domain=XCTDaemonErrorDomain Code=41 Not authorized for performing UI testing actions")
         with patch.object(self.client, "source", side_effect=fault) as source:
-            result = self.runtime.call("wda_ready", {"screenshot": False})
+            result = self.runtime.call("pua_ready", {"screenshot": False})
         self.assertEqual(source.call_count, 1)
         self.assert_pending_state(result)
         self.assertFalse(result["session_read_retried"])
@@ -115,7 +115,7 @@ class RecoveryTests(unittest.TestCase):
     def test_unproven_service_owner_never_claims_recovery_started(self):
         self.client.app = "local.pid.0"
         self.manager.recover.return_value = {"ok": False, "error": "owned service not found", "next_steps": ["Use the original owner to restart WDA"]}
-        error = self.assert_error("wda_recovery_required", screenshot=False)
+        error = self.assert_error("pua_recovery_required", screenshot=False)
         self.assertFalse(error["ready"])
         self.assertIn("owned service", error["message"])
         self.assertNotIn("job_id", error["recovery"])
@@ -124,16 +124,16 @@ class RecoveryTests(unittest.TestCase):
 
     def test_pending_service_recovery_handles_temporarily_unreachable_status(self):
         self.manager.pending_recovery.return_value = {"job_id": "in-flight", "state": "restarting"}
-        fault = WDAError("wda_unreachable", "Service is restarting")
+        fault = WDAError("pua_unreachable", "Service is restarting")
         with patch.object(self.client, "request", side_effect=fault):
-            result = self.runtime.call("wda_ready", {"screenshot": False})
+            result = self.runtime.call("pua_ready", {"screenshot": False})
         self.assert_pending_state(result)
         self.assertEqual(result["recovery"]["job_id"], "in-flight")
         self.manager.recover.assert_not_called()
         self.assert_no_phone_mutation()
 
     def test_cold_start_failure_directs_setup_without_starting_or_claiming_ready(self):
-        for code in ("wda_unreachable", "not_ready"):
+        for code in ("pua_unreachable", "not_ready"):
             for recover in (True, False):
                 with self.subTest(code=code, recover=recover):
                     fault = WDAError(code, "Service is not accepting connections")
@@ -142,7 +142,7 @@ class RecoveryTests(unittest.TestCase):
                     self.assertFalse(error["ready"])
                     self.assertFalse(error["action_executed"])
                     self.assertTrue(error["initialization_required"])
-                    self.assertEqual(error["recovery"]["next_tool"], "wda_setup")
+                    self.assertEqual(error["recovery"]["next_tool"], "pua_setup")
                     self.assertEqual(error["recovery"]["next_arguments"], {"action": "status"})
                     self.assertFalse(error["recovery"]["replay_action"])
                     self.assertNotIn("proof", error)
@@ -168,7 +168,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_diagnostic_recovery_guidance_preserves_requested_screenshot(self):
         self.client.app = "local.pid.0"
-        result = self.runtime.call("wda_ready", {"screenshot": True, "recover": False})
+        result = self.runtime.call("pua_ready", {"screenshot": True, "recover": False})
         self.assert_not_ready_state(result, "recovery_required")
         self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": True, "recover": True})
         self.manager.recover.assert_not_called()
@@ -176,16 +176,16 @@ class RecoveryTests(unittest.TestCase):
 
     def test_pending_recovery_keeps_diagnostic_mode_in_next_ready_arguments(self):
         self.manager.pending_recovery.return_value = {"job_id": "already-running", "state": "restarting"}
-        fault = WDAError("wda_unreachable", "Service is restarting")
+        fault = WDAError("pua_unreachable", "Service is restarting")
         with patch.object(self.client, "request", side_effect=fault):
-            result = self.runtime.call("wda_ready", {"screenshot": False, "recover": False})
+            result = self.runtime.call("pua_ready", {"screenshot": False, "recover": False})
         self.assert_pending_state(result)
         self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": False, "recover": False})
         self.manager.recover.assert_not_called()
         self.assert_no_phone_mutation()
 
     def test_healthy_ready_contains_state_and_does_not_try_recovery(self):
-        result = self.runtime.call("wda_ready", {"screenshot": False, "recover": False})
+        result = self.runtime.call("pua_ready", {"screenshot": False, "recover": False})
         self.assertTrue(result["ready"])
         self.assertEqual(result["state"], "ready")
         self.assertTrue(result["proof"]["foreground_resolved"])
@@ -198,7 +198,7 @@ class RecoveryTests(unittest.TestCase):
         self.manager.pending_recovery.return_value = {"job_id": "waiting-to-stop-old-service", "state": "queued"}
         self.client.session_id = "old-session"
         self.runtime.phone.snapshots["old-observation"] = {"nodes": []}
-        result = self.runtime.call("wda_ready", {"screenshot": False, "recover": False})
+        result = self.runtime.call("pua_ready", {"screenshot": False, "recover": False})
         self.assert_pending_state(result)
         self.assertEqual(result["recovery"]["job_id"], "waiting-to-stop-old-service")
         self.assertEqual(result["recovery"]["next_arguments"], {"screenshot": False, "recover": False})
@@ -209,7 +209,7 @@ class RecoveryTests(unittest.TestCase):
     def test_recovery_cooldown_remains_actionable_error(self):
         self.client.app = "local.pid.0"
         self.manager.recover.return_value = {"ok": False, "error": "Recovery cooldown is active", "recovery": {"state": "cooldown", "retry_after_seconds": 120}}
-        error = self.assert_error("wda_recovery_required", screenshot=False)
+        error = self.assert_error("pua_recovery_required", screenshot=False)
         self.assertEqual(error["recovery"]["state"], "cooldown")
         self.assertEqual(error["recovery"]["retry_after_seconds"], 120)
         self.assertNotIn("job_id", error["recovery"])
@@ -254,10 +254,10 @@ class RecoveryTests(unittest.TestCase):
 
     def test_observe_foreground_failure_points_to_ready_without_restart(self):
         self.client.app = "local.pid.0"
-        error = self.assert_error("wda_foreground_unavailable", tool="wda_observe", mode="tree")
+        error = self.assert_error("pua_foreground_unavailable", tool="pua_observe", mode="tree")
         self.assertFalse(error["action_executed"])
         self.assertEqual(error["category"], "channel_runtime")
-        self.assertEqual(error["recovery"]["tool"], "wda_ready")
+        self.assertEqual(error["recovery"]["tool"], "pua_ready")
         self.assertFalse(error["recovery"]["replay_action"])
         self.manager.recover.assert_not_called()
         self.client.close.assert_not_called()
@@ -266,7 +266,7 @@ class RecoveryTests(unittest.TestCase):
     def test_successful_click_followed_by_stale_source_does_not_replay_click_or_restart(self):
         fault = WDAError("stale element reference", "Application local.pid.0 is not running")
         with patch.object(self.client, "source", side_effect=fault) as source:
-            error = self.assert_error("stale element reference", tool="wda_tap", selector={"label": "Target"}, observe="tree")
+            error = self.assert_error("stale element reference", tool="pua_tap", selector={"label": "Target"}, observe="tree")
         self.assertEqual(source.call_count, 1)
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/element/target/click"])
         self.assertEqual(self.runtime.phone.accepted_actions, 1)

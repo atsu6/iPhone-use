@@ -29,7 +29,7 @@ def main():
         rpc('ping',{})
         result={'server':init['serverInfo'],'tools':len(catalog['tools']),'protocol_ok':True}
         if args.ready:
-            ready=rpc('tools/call',{'name':'wda_ready','arguments':{'recover':False}})
+            ready=rpc('tools/call',{'name':'pua_ready','arguments':{'recover':False}})
             data=json.loads(ready['content'][0]['text'])
             if ready.get('isError'):
                 print(json.dumps({'ready':False,'error':data.get('error')},ensure_ascii=False));return 1

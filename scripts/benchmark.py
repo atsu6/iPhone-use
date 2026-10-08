@@ -8,7 +8,7 @@ are printed, never page content.
 
 This measures what the plugin controls: phone time, WDA requests and the bytes each
 result puts into the model context. Model latency and the number of model round trips
-belong to a real session; read them from wda_metrics there.
+belong to a real session; read them from pua_metrics there.
 """
 import argparse
 import importlib
@@ -59,43 +59,43 @@ class Benchmark:
 
     def scroll_back(self, count):
         for _ in range(count):
-            self.call(None, "wda_swipe", {"direction": "down"}, measured=False)
+            self.call(None, "pua_swipe", {"direction": "down"}, measured=False)
 
     def ready(self):
         task = self.task("ready")
-        data = self.call(task, "wda_ready", {"screenshot": False})
+        data = self.call(task, "pua_ready", {"screenshot": False})
         return data.get("ready") is True
 
     def open_and_read(self):
         task = self.task("open_app_read_page")
-        data = self.call(task, "wda_launch_app", {"bundle_id": SETTINGS, "observe": "tree"})
+        data = self.call(task, "pua_launch_app", {"bundle_id": SETTINGS, "observe": "tree"})
         task["nodes"] = data.get("observation", {}).get("total_nodes")
 
     def scroll_pages(self, pages):
         task = self.task(f"scroll_{pages}_pages")
         for _ in range(pages):
-            self.call(task, "wda_swipe", {"direction": "up", "observe": "tree"})
+            self.call(task, "pua_swipe", {"direction": "up", "observe": "tree"})
         self.scroll_back(pages)
 
     def collect(self, pages):
         task = self.task("collect_list")
-        data = self.call(task, "wda_collect_list", {"row_type": "Cell", "max_pages": pages})
+        data = self.call(task, "pua_collect_list", {"row_type": "Cell", "max_pages": pages})
         task["rows"] = len(data.get("rows", []))
         self.scroll_back(len(data.get("pages", [])))
 
     def long_text(self, characters):
         task = self.task(f"type_{characters}_characters")
         text = (PHRASE * (characters // len(PHRASE) + 1))[:characters]
-        if not self.call(task, "wda_find", {"selector": SEARCH}).get("matches"):
+        if not self.call(task, "pua_find", {"selector": SEARCH}).get("matches"):
             # Older layouts reveal the search field only after pulling the list down.
-            self.call(task, "wda_swipe", {"direction": "down"})
-            if not self.call(task, "wda_find", {"selector": SEARCH}).get("matches"):
+            self.call(task, "pua_swipe", {"direction": "down"})
+            if not self.call(task, "pua_find", {"selector": SEARCH}).get("matches"):
                 task["skipped"] = "no search field on this page"
                 return
         started = time.monotonic()
-        data = self.call(task, "wda_type_text", {"selector": SEARCH, "text": text, "verify": True})
+        data = self.call(task, "pua_type_text", {"selector": SEARCH, "text": text, "verify": True})
         while data.get("input_complete") is False:
-            data = self.call(task, "wda_type_text", {"continue_token": data["continue_token"]})
+            data = self.call(task, "pua_type_text", {"continue_token": data["continue_token"]})
         task["exact_readback"] = data.get("exact_readback", False)
         if "error" in data:
             # A request that timed out leaves the phone typing; let it finish before cleaning up.
@@ -108,7 +108,7 @@ class Benchmark:
 
     def screenshot(self):
         task = self.task("screenshot")
-        data = self.call(task, "wda_observe", {"mode": "screenshot"})
+        data = self.call(task, "pua_observe", {"mode": "screenshot"})
         image = data.get("image", {})
         task["image"] = {key: image[key] for key in ("mimeType", "width", "height") if key in image}
 
@@ -120,7 +120,7 @@ class Benchmark:
         self.collect(collect_pages)
         self.long_text(characters)
         self.screenshot()
-        self.call(None, "wda_press_button", {"name": "home"}, measured=False)
+        self.call(None, "pua_press_button", {"name": "home"}, measured=False)
         return self.summary(complete=True)
 
     def summary(self, complete):

@@ -199,7 +199,7 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(client.session("POST", "/elements", query), [{"ELEMENT": "found"}])
                 self.assertEqual(requests, [("POST", "/session/existing/elements", query)] * 2)
                 self.assertNotEqual(ports[0], ports[1])
-                self.assertEqual(client.records[0]["error"], "wda_unreachable")
+                self.assertEqual(client.records[0]["error"], "pua_unreachable")
             finally:
                 client.close()
 
@@ -283,12 +283,12 @@ class ClientTests(unittest.TestCase):
             self.assertTrue(readonly)
             budgets.append(budget)
             clock[0] += 0.025 if len(budgets) == 1 else budget
-            raise WDAError("wda_unreachable", "Read connection interrupted")
+            raise WDAError("pua_unreachable", "Read connection interrupted")
         with patch("wda_client.time.monotonic", side_effect=lambda: clock[0]), \
                 patch.object(client, "_request_once", side_effect=interrupted_read), \
                 self.assertRaises(WDAError) as caught:
             client.session("POST", "/elements", {})
-        self.assertEqual(caught.exception.code, "wda_unreachable")
+        self.assertEqual(caught.exception.code, "pua_unreachable")
         self.assertFalse(caught.exception.uncertain)
         self.assertEqual(len(budgets), 2)
         self.assertAlmostEqual(budgets[0], 0.08)

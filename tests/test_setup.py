@@ -220,7 +220,7 @@ class SetupTests(unittest.TestCase):
     def test_xctest_authorization_failure_has_owned_restart_diagnostic(self):
         hints = wda_setup._diagnose("Error Domain=XCTDaemonErrorDomain Code=41: Not authorized for performing UI testing actions")
         self.assertTrue(any("status.ready is true" in hint and "owned start job" in hint for hint in hints))
-        self.assertTrue(any("Preserve external services" in hint and "wda_ready" in hint for hint in hints))
+        self.assertTrue(any("Preserve external services" in hint and "pua_ready" in hint for hint in hints))
 
     def test_build_command_uses_explicit_build_for_testing_no_shell(self):
         self.configure()

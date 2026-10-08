@@ -161,7 +161,7 @@ class AppCatalog:
         config = self.setup_manager.config
         udid = config.get("udid") if isinstance(config, dict) else None
         if not isinstance(udid, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,64}", udid):
-            return [], False, "No selected device. Use wda_setup discover/configure, then retry source=installed."
+            return [], False, "No selected device. Use pua_setup discover/configure, then retry source=installed."
         device_key = hashlib.sha256(udid.encode()).hexdigest()
         cache_path = self.state_dir / "apps-installed-cache.json"
         cache = _read(cache_path, {})
@@ -289,7 +289,7 @@ class AppCatalog:
         result={"ok": ok,
                 "query": query, "country": country, "source": source, "candidates": ranked[:limit],
                 "total_matches": len(ranked), "searched_sources": searched, "warnings": warnings,
-                "next_action": "Choose the matching app/publisher, then wda_launch_app with its bundle_id and verify foreground. App Store/catalog metadata alone does not prove installation."}
+                "next_action": "Choose the matching app/publisher, then pua_launch_app with its bundle_id and verify foreground. App Store/catalog metadata alone does not prove installation."}
         if not ok:
             result["error"]={"code":"app_lookup_unavailable","message":" ".join(warnings) or "App lookup could not be completed.","uncertain":False}
         return result

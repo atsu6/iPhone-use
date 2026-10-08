@@ -1,12 +1,12 @@
 # 查找真实 app bundle ID
 
-已经知道且核验过的 bundle ID 可直接启动，不为每次 launch 重查安装清单。查常用 App 可先用 `wda_apps(source="catalog")` 离线检索本地目录；未知应用或需要区分用户实际安装的版本时用 source=auto，先查选定 iPhone 的已安装应用，再查本地目录，仍无候选才查 Apple。不要凭品牌名拼写 bundle ID，也不要连续试多个猜测值。
+已经知道且核验过的 bundle ID 可直接启动，不为每次 launch 重查安装清单。查常用 App 可先用 `pua_apps(source="catalog")` 离线检索本地目录；未知应用或需要区分用户实际安装的版本时用 source=auto，先查选定 iPhone 的已安装应用，再查本地目录，仍无候选才查 Apple。不要凭品牌名拼写 bundle ID，也不要连续试多个猜测值。
 
 ```json
 {"query":"招商银行","source":"auto"}
 ```
 
-本例应返回 `com.cmbchina.MPBBank`。检查名称、发布者和候选来源后，把 bundle_id 传给 `wda_launch_app`。正常启动乐观继续；下一步需要未知页面信息时在该次 launch 设置 observe，顺带查看实际前台和目标页，不另加默认启动验收。招商银行主应用与掌上生活信用卡应用是两个应用。
+本例应返回 `com.cmbchina.MPBBank`。检查名称、发布者和候选来源后，把 bundle_id 传给 `pua_launch_app`。正常启动乐观继续；下一步需要未知页面信息时在该次 launch 设置 observe，顺带查看实际前台和目标页，不另加默认启动验收。招商银行主应用与掌上生活信用卡应用是两个应用。
 
 - `source=auto`：先读取已选设备的安装列表（本地缓存 300 秒），合并本地目录。精确名称/别名优先；精确匹配存在时不混入子串候选。无本地候选才调用 Apple。
 - `source=installed`：只查已选 iPhone，缺少选定设备或读取失败时返回可执行的诊断。英文品牌别名可用本地目录映射到安装列表的 bundle ID。
@@ -24,7 +24,7 @@ https://itunes.apple.com/search?term=招商银行&country=cn&media=software&enti
 https://itunes.apple.com/lookup?id=392899425&country=cn&entity=software
 ```
 
-先用名称搜索并核对实际发布者与产品，再用稳定的 `trackId` Lookup 刷新。官方文档说明 ID 查询误匹配更少；不要自动选名称搜索第一条。`wda_apps` 使用 URL 编码、5 秒网络超时、响应大小限制、Apple HTTPS 域名/路径和跳转限制、15 分钟缓存和每分钟最多 18 次新请求，避免长时间阻塞或重复撞限流。刷新脚本按地区批量 Lookup 已审核 ID。
+先用名称搜索并核对实际发布者与产品，再用稳定的 `trackId` Lookup 刷新。官方文档说明 ID 查询误匹配更少；不要自动选名称搜索第一条。`pua_apps` 使用 URL 编码、5 秒网络超时、响应大小限制、Apple HTTPS 域名/路径和跳转限制、15 分钟缓存和每分钟最多 18 次新请求，避免长时间阻塞或重复撞限流。刷新脚本按地区批量 Lookup 已审核 ID。
 
 ```sh
 python3 scripts/update_app_catalog.py --search "应用名称" --country cn

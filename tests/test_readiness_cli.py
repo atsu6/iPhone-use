@@ -30,7 +30,7 @@ class FakeChild:
         self.stdin = CapturedInput()
         responses = [
             {"serverInfo": {"name": "iphone-use", "version": "test"}},
-            {"tools": [{"name": "wda_ready"}]},
+            {"tools": [{"name": "pua_ready"}]},
             {},
             ready_result,
         ]
@@ -51,7 +51,7 @@ class ReadinessCLITests(unittest.TestCase):
         with patch.object(iphone_use, "Runtime", return_value=runtime), \
                 patch.object(sys, "argv", ["iphone_use.py", "--ready"]), contextlib.redirect_stdout(output):
             status = iphone_use.main()
-        runtime.call.assert_called_once_with("wda_ready", {})
+        runtime.call.assert_called_once_with("pua_ready", {})
         runtime.close.assert_called_once_with()
         return status, json.loads(output.getvalue())
 
@@ -99,7 +99,7 @@ class ReadinessCLITests(unittest.TestCase):
         child.terminate.assert_not_called()
         ready_calls = [request for request in child.stdin.requests if request["method"] == "tools/call"]
         self.assertEqual(len(ready_calls), 1)
-        self.assertEqual(ready_calls[0]["params"], {"name": "wda_ready", "arguments": {"recover": False}})
+        self.assertEqual(ready_calls[0]["params"], {"name": "pua_ready", "arguments": {"recover": False}})
         return status, json.loads(output.getvalue())
 
     def test_read_only_smoke_expected_not_ready_keeps_state_without_proof_or_image(self):

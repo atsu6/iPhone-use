@@ -6,7 +6,7 @@
 
 Let Codex operate your real iPhone over USB. Describe a task in natural language: open apps, read screens, tap, scroll, enter text, collect lists, and watch the phone in a sidebar widget.
 
-The plugin connects to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (WDA). It includes a local MCP server, setup and usage skills, and a live screen widget. It reuses healthy connections and existing builds; when element targeting fails, it guides the model to inspect a screenshot and try coordinates.
+The plugin's PUA (Phone Use Agent) tools connect to [WebDriverAgent](https://github.com/appium/WebDriverAgent) (WDA). It includes a local MCP server, setup and usage skills, and a live screen widget. It reuses healthy connections and existing builds; when element targeting fails, it guides the model to inspect a screenshot and try coordinates.
 
 **Before using iPhone Use, install, sign, and start WDA Runner on your own iPhone.** WDA is the on-device execution service. The prompt and setup workflow below can help Codex complete the initial installation; a healthy existing WDA can be reused.
 
@@ -27,7 +27,7 @@ and continue there. Once tools are available, read the iphone-use-setup skill.
 Inspect existing configuration and reuse healthy WDA. For initial setup,
 discover my device, use my own Apple development team and signable bundle ID,
 fetch the pinned WDA, configure signing, build and start it. Continue until
-wda_ready returns ready=true, then show the phone screen. Do not reuse the
+pua_ready returns ready=true, then show the phone screen. Do not reuse the
 author's device identifiers or signing configuration.
 
 Help resolve missing dependencies. If Apple account login, device trust,
@@ -62,7 +62,7 @@ For manual Xcode setup:
 2. Open `WebDriverAgent.xcodeproj`, select the `WebDriverAgentRunner` scheme and your iPhone, and configure your Team and a signable Bundle Identifier in the Runner target's **Signing & Capabilities**.
 3. Use **Product → Test** to build, install, and start the runner. Complete any trust prompts on the phone. The WDA service must remain running.
 
-After installing the plugin and configuring USB connectivity, start phone tasks only when `wda_ready` returns `ready=true`. See [Appium's device preparation guide](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/) for device and signing requirements.
+After installing the plugin and configuring USB connectivity, start phone tasks only when `pua_ready` returns `ready=true`. See [Appium's device preparation guide](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/) for device and signing requirements.
 
 ## Install and connect
 
@@ -78,7 +78,7 @@ Reconnect or start a new chat, enable **iPhone Use**, and ask:
 
 > Use iphone-use-setup to configure my USB-connected iPhone, install and start WDA, verify READY, and show the phone screen.
 
-Setup covers diagnostics, device discovery, signing configuration, download, background build, and startup. Existing configurations and builds are reused. Phone tasks start only after `wda_ready` returns `ready=true`.
+Setup covers diagnostics, device discovery, signing configuration, download, background build, and startup. Existing configurations and builds are reused. Phone tasks start only after `pua_ready` returns `ready=true`.
 
 ## Features
 
@@ -115,7 +115,7 @@ Repeated preview opens in the same chat reuse the existing widget. Its toolbar o
 - **Reuse:** persistent HTTP connections, WDA sessions, healthy services, and builds reduce repeated work.
 - **Compact observations and compound actions:** omit duplicate tree fields, skip XML for screenshot-only reads, and reduce turns with batch / scroll-search / list collection.
 - **Background setup:** downloads, builds, and startup return queryable job IDs; repeated setup reuses matching active jobs.
-- **Screenshot fallback:** inspect the image and multiply pixels by `image.pixel_to_point` to obtain iPhone point coordinates for `wda_tap`.
+- **Screenshot fallback:** inspect the image and multiply pixels by `image.pixel_to_point` to obtain iPhone point coordinates for `pua_tap`.
 - **Explicit failure semantics:** a shared operation lock guards concurrent processes; uncertain mutations require reading the actual state before retrying.
 - **Preview lifecycle:** streamed frames are not saved to disk; lock-induced pauses and explicit pauses are distinguished, and Refresh can reconnect.
 
@@ -127,15 +127,15 @@ There are 17 model tools and 2 additional widget-only tools.
 
 | Tools | Purpose |
 | --- | --- |
-| `wda_doctor`, `wda_setup`, `wda_ready` | Diagnostics, configuration, background installation / startup, readiness |
-| `wda_observe`, `wda_find` | Trees, screenshots, and target queries |
-| `wda_apps`, `wda_launch_app` | App identifiers, installation evidence, app launch |
-| `wda_tap`, `wda_swipe`, `wda_press_button` | Taps, swipes, and device buttons |
-| `wda_type_text`, `wda_wait` | Unicode input and bounded waits |
-| `wda_batch`, `wda_scroll_find`, `wda_collect_list` | Compound actions, search, collection |
-| `wda_screen`, `wda_metrics` | Preview controls and bounded timing statistics |
+| `pua_doctor`, `pua_setup`, `pua_ready` | Diagnostics, configuration, background installation / startup, readiness |
+| `pua_observe`, `pua_find` | Trees, screenshots, and target queries |
+| `pua_apps`, `pua_launch_app` | App identifiers, installation evidence, app launch |
+| `pua_tap`, `pua_swipe`, `pua_press_button` | Taps, swipes, and device buttons |
+| `pua_type_text`, `pua_wait` | Unicode input and bounded waits |
+| `pua_batch`, `pua_scroll_find`, `pua_collect_list` | Compound actions, search, collection |
+| `pua_screen`, `pua_metrics` | Preview controls and bounded timing statistics |
 
-The `wda_*` tool names describe the underlying transport; the plugin, skills, and MCP service use the iPhone Use identity.
+Tools use the `pua_*` prefix for Phone Use Agent; the plugin, skills, and MCP service use the iPhone Use identity.
 
 Abnormal UI states return a screenshot for the model to inspect before choosing another action. Scroll search performs at most one swipe per call and stops if the target remains unreachable; occlusion, unproven scroll progress, input mismatch, and failed page expectations use the same fallback. Existing screenshots are reused, without automatic extra gestures or action replay.
 

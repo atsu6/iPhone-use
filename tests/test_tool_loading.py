@@ -1,6 +1,7 @@
 """Guard the published catalog against Codex's lossy 5 KB schema compaction."""
 import copy
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-from iphone_use import BATCH_OPS, Runtime, SCHEMAS, TOOLS, validate, validate_semantics
+from iphone_use import BATCH_OPS, INSTRUCTIONS, Runtime, SCHEMAS, TOOLS, validate, validate_semantics
 from wda_client import WDAError
 
 
@@ -78,7 +79,22 @@ def codex_supported_schema(value):
 class ToolLoadingTests(unittest.TestCase):
     def setUp(self):
         self.catalog = {tool["name"]: tool for tool in TOOLS}
-        self.batch = self.catalog["wda_batch"]["inputSchema"]
+        self.batch = self.catalog["pua_batch"]["inputSchema"]
+
+    def test_pua_names_are_consistent_across_the_published_contract_and_guidance(self):
+        self.assertEqual(set(self.catalog), {"pua_" + name for name in SCHEMAS})
+        self.assertNotIn("wda_", json.dumps(TOOLS) + INSTRUCTIONS)
+        for name, tool in self.catalog.items():
+            if name != "pua_screen":
+                self.assertEqual(tool["title"], "Pua " + name[4:].replace("_", " "))
+        public_names = set(self.catalog)
+        for document in (ROOT / "skills").rglob("*.md"):
+            body = document.read_text()
+            self.assertNotRegex(body, r"(?i)\bwda\b|wda_")
+            for reference in re.findall(r"pua_[a-z_]+", body):
+                self.assertTrue(reference in public_names or reference in {
+                    "pua_unreachable", "pua_foreground_unavailable", "pua_recovery_required"
+                }, f"{document.relative_to(ROOT)}: {reference}")
 
     def test_every_published_schema_fits_before_host_compaction(self):
         for name, tool in self.catalog.items():
@@ -91,11 +107,11 @@ class ToolLoadingTests(unittest.TestCase):
             with self.subTest(tool=name):
                 published = tool["inputSchema"]
                 self.assertEqual(without_documentation(expand_references(published)),
-                                 without_documentation(SCHEMAS[name[len("wda_"):]]))
+                                 without_documentation(SCHEMAS[name[len("pua_"):]]))
                 self.assertFalse(published["additionalProperties"])
 
     def test_selector_fields_are_documented_once_and_named_everywhere(self):
-        reference = self.catalog["wda_find"]["inputSchema"]["properties"]["selector"]
+        reference = self.catalog["pua_find"]["inputSchema"]["properties"]["selector"]
         self.assertTrue(all("description" in field for field in reference["properties"].values()))
         self.assertEqual(set(reference["properties"]),
                          {"label", "label_contains", "name", "value", "type", "enabled", "index", "predicate"})
@@ -185,7 +201,7 @@ class ToolLoadingTests(unittest.TestCase):
             with patch.object(runtime, "_call") as execute, patch.object(runtime.client, "request") as request:
                 for arguments in invalid_cases:
                     with self.subTest(arguments=arguments), self.assertRaises(WDAError) as caught:
-                        runtime.call("wda_batch", arguments)
+                        runtime.call("pua_batch", arguments)
                     self.assertEqual(caught.exception.code, "invalid_argument")
                     self.assertFalse(caught.exception.details["action_executed"])
                 execute.assert_not_called()

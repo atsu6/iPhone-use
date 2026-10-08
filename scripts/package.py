@@ -57,7 +57,7 @@ def validate():
     assert VERSION==manifest['version'] and len(TOOLS)==19
     assert sum(t.get('_meta',{}).get('ui',{}).get('visibility')!=['app'] for t in TOOLS)==17
     assert (ROOT/'assets/phone-screen.html').is_file()
-    assert next(t for t in TOOLS if t['name']=='wda_ready')['_meta']['ui']['resourceUri']==SCREEN_URI
+    assert next(t for t in TOOLS if t['name']=='pua_ready')['_meta']['ui']['resourceUri']==SCREEN_URI
     assert len(set(t['name'] for t in TOOLS))==len(TOOLS)
     for t in TOOLS:assert t['inputSchema']['additionalProperties'] is False
     return manifest

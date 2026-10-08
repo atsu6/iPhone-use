@@ -573,8 +573,8 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(any(path == "/wda/activeAppInfo" for _, path, _ in self.client.calls))
 
     def test_home_post_action_read_failure_retains_execution_evidence(self):
-        with patch.object(self.phone, "active_app", side_effect=WDAError("wda_unreachable", "read timed out")):
-            error = self.assert_code("wda_unreachable", lambda: self.phone.press_button("home", verify=True, observe="none"))
+        with patch.object(self.phone, "active_app", side_effect=WDAError("pua_unreachable", "read timed out")):
+            error = self.assert_code("pua_unreachable", lambda: self.phone.press_button("home", verify=True, observe="none"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["home_foreground_verified"])
         self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
@@ -686,13 +686,13 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(Path(error.details["observation"]["image"]["path"]).read_bytes(), self.client.screenshot)
                 self.assertNotIn("nodes", error.details["observation"])
                 if condition == "occluded":
-                    self.assertEqual(recovery["next_tool"], "wda_tap")
+                    self.assertEqual(recovery["next_tool"], "pua_tap")
                     self.assertNotIn("next_arguments", recovery)
                     self.assertIn("popup", recovery["next_step"])
                     self.assertIn("NOT proof", recovery["next_step"])
                     self.assertEqual(error.details["tap_point"], {"x": 195, "y": 222})
                 else:
-                    self.assertEqual(recovery["next_tool"], "wda_swipe")
+                    self.assertEqual(recovery["next_tool"], "pua_swipe")
                 self.assertEqual(self.client.actions(), [])
 
     def add_match(self, ident, **changes):
@@ -1012,11 +1012,11 @@ class ControllerTests(unittest.TestCase):
 
         def request(method, path, payload=None, timeout=None):
             if path == "/screenshot":
-                raise WDAError("wda_unreachable", "Screenshot channel disconnected")
+                raise WDAError("pua_unreachable", "Screenshot channel disconnected")
             return original(method, path, payload, timeout)
 
         with patch.object(self.client, "request", side_effect=request):
-            error = self.assert_code("wda_unreachable", lambda: self.phone.swipe(verify=True, observe="both"))
+            error = self.assert_code("pua_unreachable", lambda: self.phone.swipe(verify=True, observe="both"))
         self.assertTrue(error.details["action_executed"])
         self.assertFalse(error.details["action_complete"])
         self.assertEqual(self.client.swipe_count, 1)
@@ -1322,13 +1322,13 @@ class ControllerTests(unittest.TestCase):
         def request(method, path, payload=None, timeout=None):
             if path == "/screenshot":
                 self.client.calls.append((method, path, payload))
-                raise WDAError("wda_unreachable", "Screenshot disconnected")
+                raise WDAError("pua_unreachable", "Screenshot disconnected")
             return original(method, path, payload, timeout)
         self.client.elements.clear()
         with patch.object(self.client, "request", side_effect=request):
             error = self.assert_code("search_exhausted", lambda: self.phone.scroll_find({"label": "Missing"}, max_swipes=10))
         self.assertTrue(error.details["action_executed"])
-        self.assertEqual(error.details["observation_error"]["code"], "wda_unreachable")
+        self.assertEqual(error.details["observation_error"]["code"], "pua_unreachable")
         self.assertEqual(error.details["recovery"]["next_arguments"], {"mode": "screenshot"})
         self.assertEqual(self.client.swipe_count, 1)
         self.assertEqual(sum(path == "/screenshot" for _, path, _ in self.client.calls), 1)
@@ -1347,11 +1347,11 @@ class ControllerTests(unittest.TestCase):
         def request(method, path, payload=None, timeout=None):
             if path == "/screenshot":
                 self.client.calls.append((method, path, payload))
-                raise WDAError("wda_unreachable", "Screenshot disconnected")
+                raise WDAError("pua_unreachable", "Screenshot disconnected")
             return original(method, path, payload, timeout)
         with patch.object(self.client, "request", side_effect=request):
             error = self.assert_code("no_scroll_progress", lambda: self.phone.swipe(verify=True, observe="both"))
-        self.assertEqual(error.details["observation_error"]["code"], "wda_unreachable")
+        self.assertEqual(error.details["observation_error"]["code"], "pua_unreachable")
         self.assertTrue(error.details["action_executed"])
         self.assertEqual(error.details["observation"]["nodes"][0]["label"], "Row 1")
         self.assertEqual(self.client.swipe_count, 1)
@@ -1406,7 +1406,7 @@ class ControllerTests(unittest.TestCase):
         original = self.client.session
         def fail_later_query(method, path, payload=None, timeout=None):
             if path == "/elements" and self.client.swipe_count:
-                raise WDAError("wda_unreachable", "Read response lost", uncertain=False)
+                raise WDAError("pua_unreachable", "Read response lost", uncertain=False)
             return original(method, path, payload, timeout)
         with patch.object(self.client, "session", side_effect=fail_later_query):
             result = self.phone.batch([
@@ -1426,7 +1426,7 @@ class ControllerTests(unittest.TestCase):
         original = self.client.session
         def fail_later_query(method, path, payload=None, timeout=None):
             if path == "/elements" and self.client.swipe_count:
-                raise WDAError("wda_unreachable", "Read response lost", uncertain=False)
+                raise WDAError("pua_unreachable", "Read response lost", uncertain=False)
             return original(method, path, payload, timeout)
         with patch.object(self.client, "session", side_effect=fail_later_query), self.assertRaises(WDAError) as caught:
             self.phone.collect_list(max_pages=3, end_selector={"label": "Missing"})

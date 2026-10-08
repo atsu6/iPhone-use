@@ -6,7 +6,7 @@
 
 让 Codex 通过 USB 操作你的真实 iPhone。用自然语言描述任务，Codex 就能打开 App、读取页面、点击、滚动、输入文字、整理列表，并在侧边栏展示手机屏幕。
 
-iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
+iPhone Use 的 PUA（Phone Use Agent）工具使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
 
 **使用前，需要先在你自己的 iPhone 上安装、签名并启动 WDA Runner。** WDA 是运行在手机上的执行服务；下面的提示词和 setup 流程可以让 Codex 协助完成首次安装，已有健康的 WDA 可直接复用。
 
@@ -25,7 +25,7 @@ https://github.com/zhongerxin/iPhone-use
 如果当前聊天还没有加载新工具，明确告诉我重连或新开聊天后继续。
 工具可用后读取 iphone-use-setup 技能，检查现有配置，优先复用已有 WDA。
 首次配置时发现我的设备，使用我自己的 Apple 开发团队和可签名 bundle ID，
-获取固定版本 WDA、配置签名、构建并启动，直到 wda_ready 返回 ready=true，
+获取固定版本 WDA、配置签名、构建并启动，直到 pua_ready 返回 ready=true，
 然后打开手机屏幕。不要照搬作者的设备标识或签名信息。
 
 缺少依赖时说明具体缺项并帮助安装。Apple 账号登录、设备信任、开发者模式
@@ -61,7 +61,7 @@ Xcode 需要支持手机当前的 iOS 版本。无需越狱，也无需单独启
 2. 打开获取的 WDA 源码中的 `WebDriverAgent.xcodeproj`，选择 `WebDriverAgentRunner` scheme 和自己的 iPhone；在 Runner target 的 **Signing & Capabilities** 中选择自己的 Team 与可签名的 Bundle Identifier。
 3. 使用 **Product → Test** 构建、安装并运行 WDA Runner，按手机上的实际提示完成信任。运行测试会启动 WDA 服务；安装后仍需要该服务处于运行状态。
 
-安装插件并完成 USB 连接配置后，以 `wda_ready` 返回 `ready=true` 为准，再开始手机任务。设备与签名要求可参考 [Appium 真机准备说明](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)。
+安装插件并完成 USB 连接配置后，以 `pua_ready` 返回 `ready=true` 为准，再开始手机任务。设备与签名要求可参考 [Appium 真机准备说明](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)。
 
 ### 安装插件
 
@@ -81,7 +81,7 @@ sh scripts/install.sh
 
 > 用 iphone-use-setup 帮我配置通过 USB 连接的 iPhone，安装并启动 WDA，验证 READY，然后显示手机屏幕。
 
-技能引导 Codex 完成诊断、设备发现、签名配置、获取 WDA、后台构建与启动。已配置过的设备会复用配置和构建，正常任务不需要每次重装。`wda_ready` 返回 `ready=true` 后才开始手机任务。
+技能引导 Codex 完成诊断、设备发现、签名配置、获取 WDA、后台构建与启动。已配置过的设备会复用配置和构建，正常任务不需要每次重装。`pua_ready` 返回 `ready=true` 后才开始手机任务。
 
 ## 可以做什么
 
@@ -117,7 +117,7 @@ sh scripts/install.sh
 - **减少重复工作。** 复用 HTTP 连接、WDA session、健康服务与已有构建；首次任务确认 READY，后续沿健康通道继续。
 - **紧凑观察与组合动作。** 控件树省略重复字段；仅需截图时不生成 XML；batch、滚动查找和列表采集减少工具回合。
 - **安装任务异步执行。** 下载、构建与启动返回可查询的工作 ID，重复 setup 优先复用正在进行的工作。
-- **截图回退。** 元素定位失败时返回截图与处理指引；图像像素乘以 `image.pixel_to_point` 转为 iPhone 点坐标，再交给 `wda_tap`。
+- **截图回退。** 元素定位失败时返回截图与处理指引；图像像素乘以 `image.pixel_to_point` 转为 iPhone 点坐标，再交给 `pua_tap`。
 - **明确失败语义。** 多进程共享操作锁；动作超时或断线可能标记不确定，先读实际状态，避免盲目重放点击、输入或提交。
 - **实时预览与暂停恢复。** 屏幕流不落盘；区分锁屏与主动暂停，解锁后的 READY 可恢复锁屏预览，刷新可主动重连。
 
@@ -129,15 +129,15 @@ sh scripts/install.sh
 
 | 工具 | 用途 |
 | --- | --- |
-| `wda_doctor`、`wda_setup`、`wda_ready` | 环境诊断、设备配置、后台安装 / 启动与就绪检查 |
-| `wda_observe`、`wda_find` | 控件树、截图与目标查询 |
-| `wda_apps`、`wda_launch_app` | 查询 App 标识、读取安装证据和启动 App |
-| `wda_tap`、`wda_swipe`、`wda_press_button` | 点击、滑动、主屏幕等操作 |
-| `wda_type_text`、`wda_wait` | Unicode 输入与有界等待 |
-| `wda_batch`、`wda_scroll_find`、`wda_collect_list` | 组合动作、滚动查找与列表采集 |
-| `wda_screen`、`wda_metrics` | 预览开关与有界耗时统计 |
+| `pua_doctor`、`pua_setup`、`pua_ready` | 环境诊断、设备配置、后台安装 / 启动与就绪检查 |
+| `pua_observe`、`pua_find` | 控件树、截图与目标查询 |
+| `pua_apps`、`pua_launch_app` | 查询 App 标识、读取安装证据和启动 App |
+| `pua_tap`、`pua_swipe`、`pua_press_button` | 点击、滑动、主屏幕等操作 |
+| `pua_type_text`、`pua_wait` | Unicode 输入与有界等待 |
+| `pua_batch`、`pua_scroll_find`、`pua_collect_list` | 组合动作、滚动查找与列表采集 |
+| `pua_screen`、`pua_metrics` | 预览开关与有界耗时统计 |
 
-工具继续使用 `wda_*` 名称，因为底层执行通道为 WDA；插件名称、技能和 MCP 服务统一为 iPhone Use。
+工具统一使用 `pua_*` 名称，PUA 代表 Phone Use Agent；插件名称、技能和 MCP 服务为 iPhone Use。
 
 界面异常时先返回截图，再由模型判断下一步：滚动查找一次最多滑一次，仍找不到可点击目标就暂停；遮挡、滚动无进展、输入不符或预期页面未出现也走截图兜底。已有截图直接复用，不自动继续盲滑或重放操作。
 
