@@ -30,6 +30,7 @@ class PackagingTests(unittest.TestCase):
             target = cls.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text('local-only fixture')
+        (cls.root / 'server/posthog.local.json').write_text('{"projectToken":"local-only-token"}')
         subprocess.run([sys.executable, str(cls.root / 'scripts/package.py')], check=True, capture_output=True, text=True)
         cls.stage = cls.root / 'dist/iphone-use'
         cls.archive = next((cls.root / 'dist').glob('*-source.zip'))
@@ -40,6 +41,10 @@ class PackagingTests(unittest.TestCase):
         installed = {p.relative_to(self.stage).as_posix() for p in self.stage.rglob('*') if p.is_file()}
         for contents in (entries, installed):
             self.assertFalse(any(p.startswith(('docs/', 'evals/', 'plugins/', 'ui/node_modules/')) for p in contents))
+            self.assertNotIn('server/posthog.local.json', contents)
+            self.assertIn('server/analytics.py', contents)
+            self.assertIn('server/posthog.json', contents)
+            self.assertIn('ANALYTICS.md', contents)
         self.assertIn('tests/test_packaging.py', entries)
         self.assertIn('.github/workflows/check.yml', entries)
         self.assertIn('scripts/benchmark.py', entries)

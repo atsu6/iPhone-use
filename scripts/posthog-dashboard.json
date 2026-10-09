@@ -1,0 +1,372 @@
+{
+  "projectId": 653022,
+  "dashboardId": 2185876,
+  "name": "iPhone-use｜使用与稳定性",
+  "timezone": "Asia/Shanghai",
+  "insights": [
+    {
+      "name": "01｜每日活跃安装",
+      "description": "每日成功调用任务工具或 READY 的匿名安装数；排除诊断、setup、metrics 和预览控制。安装数不等于真实人数。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "dau",
+            "properties": [
+              {
+                "key": "outcome",
+                "value": [
+                  "success"
+                ],
+                "operator": "exact",
+                "type": "event"
+              },
+              {
+                "key": "tool_name",
+                "value": [
+                  "pua_doctor",
+                  "pua_setup",
+                  "pua_metrics",
+                  "pua_screen",
+                  "pua_screen_action"
+                ],
+                "operator": "is_not",
+                "type": "event"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "02｜每日 MCP 启动",
+      "description": "每日 MCP 进程首次 initialize 或首次工具调用的次数；重启会产生新启动，非聊天会话数。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_session_started",
+            "math": "total",
+            "properties": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "03｜工具使用分布",
+      "description": "按工具名统计调用次数，包括成功、等待和失败；屏幕帧轮询不计入。batch 计为一次调用。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "total",
+            "properties": []
+          }
+        ],
+        "breakdownFilter": {
+          "breakdowns": [
+            {
+              "property": "tool_name",
+              "type": "event"
+            }
+          ]
+        },
+        "trendsFilter": {
+          "display": "ActionsBarValue"
+        }
+      }
+    },
+    {
+      "name": "04｜READY 连接结果",
+      "description": "按 ready/recovering/recovery_required/not_ready/error 查看连接检查结果，待恢复不视为成功。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_ready_result",
+            "math": "total",
+            "properties": []
+          }
+        ],
+        "breakdownFilter": {
+          "breakdowns": [
+            {
+              "property": "ready_state",
+              "type": "event"
+            }
+          ]
+        },
+        "trendsFilter": {
+          "display": "ActionsBar"
+        }
+      }
+    },
+    {
+      "name": "05｜工具调用失败率",
+      "description": "每日 outcome=error 的调用数 / 全部调用数。pending 纳入分母，画面轮询排除；无调用日期显示的 0 不代表稳定性。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "total",
+            "properties": [
+              {
+                "key": "outcome",
+                "value": [
+                  "error"
+                ],
+                "operator": "exact",
+                "type": "event"
+              }
+            ]
+          },
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "total",
+            "properties": []
+          }
+        ],
+        "trendsFilter": {
+          "formulaNodes": [
+            {
+              "formula": "A/B",
+              "custom_name": "失败率"
+            }
+          ],
+          "aggregationAxisFormat": "percentage_scaled"
+        }
+      }
+    },
+    {
+      "name": "06｜各工具耗时",
+      "description": "按工具名展示平均与 P95 耗时（毫秒），计入运行锁等待，不含 PostHog 网络发送与 MCP 排队时间。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "avg",
+            "properties": [],
+            "math_property": "duration_ms",
+            "custom_name": "平均耗时"
+          },
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "p95",
+            "properties": [],
+            "math_property": "duration_ms",
+            "custom_name": "P95 耗时"
+          }
+        ],
+        "breakdownFilter": {
+          "breakdowns": [
+            {
+              "property": "tool_name",
+              "type": "event"
+            }
+          ]
+        },
+        "trendsFilter": {
+          "display": "ActionsTable",
+          "aggregationAxisFormat": "duration_ms"
+        }
+      }
+    },
+    {
+      "name": "07｜调用错误类别",
+      "description": "失败调用按允许的 error_code 汇总。未列入白名单的错误归为 other，不上传错误消息。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_tool_called",
+            "math": "total",
+            "properties": [
+              {
+                "key": "outcome",
+                "value": [
+                  "error"
+                ],
+                "operator": "exact",
+                "type": "event"
+              }
+            ]
+          }
+        ],
+        "breakdownFilter": {
+          "breakdowns": [
+            {
+              "property": "error_code",
+              "type": "event"
+            }
+          ]
+        },
+        "trendsFilter": {
+          "display": "ActionsBarValue"
+        }
+      }
+    },
+    {
+      "name": "08｜配置与启动操作",
+      "description": "pua_setup 调用按 action 与 outcome 分布。queued/running 只表示任务提交或等待，不代表后台构建或启动已完成。",
+      "query": {
+        "kind": "TrendsQuery",
+        "dateRange": {
+          "date_from": "-30d"
+        },
+        "interval": "day",
+        "properties": [
+          {
+            "key": "environment",
+            "value": [
+              "production"
+            ],
+            "operator": "exact",
+            "type": "event"
+          }
+        ],
+        "filterTestAccounts": false,
+        "series": [
+          {
+            "kind": "EventsNode",
+            "event": "iphone_use_setup_result",
+            "math": "total",
+            "properties": []
+          }
+        ],
+        "breakdownFilter": {
+          "breakdowns": [
+            {
+              "property": "setup_action",
+              "type": "event"
+            },
+            {
+              "property": "outcome",
+              "type": "event"
+            }
+          ]
+        },
+        "trendsFilter": {
+          "display": "ActionsBarValue"
+        }
+      }
+    }
+  ]
+}

@@ -23,6 +23,7 @@ from wda_setup import SetupManager, state_directory
 from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
+from analytics import Analytics
 
 PUAError=WDAError
 VERSION="0.3.6"
@@ -165,7 +166,7 @@ def published_schema(name):
 
 
 TOOLS=[{"name":"pua_"+name,"title":"Pua "+name.replace("_"," "),"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
-        "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
+        "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":name!="screen_frame"}} for name,schema in SCHEMAS.items()]
 for tool in TOOLS:
     if tool["name"] in ("pua_ready","pua_screen"):
         tool["_meta"]={"ui":{"resourceUri":SCREEN_URI}}
@@ -278,8 +279,24 @@ class Runtime:
         self.responses=collections.deque(maxlen=500)
         self._replied_at=None
         self._device_lookup=None
+        self.analytics=Analytics(self.state_dir,VERSION)
 
     def call(self,name,args):
+        started=time.monotonic();data=None;error=None
+        try:
+            data=self._dispatch(name,args)
+            return data
+        except WDAError as exc:
+            error=exc.code
+            raise
+        except Exception:
+            error="internal_error"
+            raise
+        finally:
+            try:self.analytics.tool_result(name,args,data,(time.monotonic()-started)*1000,error)
+            except Exception:pass
+
+    def _dispatch(self,name,args):
         # PUA has one active session. Serialize independent Codex MCP processes
         # sharing this runtime, and share only this plugin's session identity.
         if not isinstance(name,str) or not name.startswith("pua_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown PUA tool.")
@@ -548,7 +565,9 @@ class Runtime:
 
     def replied(self):self._replied_at=time.monotonic()
 
-    def close(self):self.screen.close();self.client.close()
+    def close(self):
+        try:self.screen.close();self.client.close()
+        finally:self.analytics.close()
 
 
 def result_content(data,structured=False):
@@ -641,6 +660,8 @@ def serve(runtime):
                 if method=="initialize":
                     offered=params.get("protocolVersion")
                     result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False}},"serverInfo":{"name":"iphone-use","version":VERSION},"instructions":INSTRUCTIONS}
+                    try:runtime.analytics.start()
+                    except Exception:pass
                 elif method=="ping":result={}
                 elif method=="tools/list":result={"tools":TOOLS}
                 elif method=="resources/list":
