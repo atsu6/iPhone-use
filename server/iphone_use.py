@@ -23,10 +23,11 @@ from wda_setup import SetupManager, state_directory
 from wda_apps import AppCatalog
 from wda_screen import ScreenHub
 import wda_image
+from analytics import Analytics
 
 PUAError=WDAError
-VERSION="0.3.6"
-SCREEN_URI="ui://iphone-use/phone-0.3.6.html"
+VERSION="0.3.7"
+SCREEN_URI="ui://iphone-use/phone-0.3.7.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
 # ID keeps repeated READY/open/pause/resume calls in that chat on one panel,
 # including after the MCP process reconnects; no device identifiers are needed.
@@ -84,7 +85,7 @@ SCHEMAS={
  "collect_list":obj({"row_type":string(),"max_pages":num(1,10,"integer"),"end_selector":SEL}),
  "apps":obj({"query":string(max_length=100),"country":string(max_length=2),"source":string(enum=["auto","catalog","installed","apple"]),"limit":num(1,30,"integer")},("query",)),
  "doctor":obj({}),"ready":obj({"screenshot":{"type":"boolean","default":True,"description":"画像も確認する。falseでもstatus/session/source/viewport/ロック解除は確認する。"},"recover":{"type":"boolean","default":True,"description":"通常は省略/true。持続するlocal.pid/XCTest障害で所有者確認済みPUAを1回復旧する。明示的な診断/再起動禁止だけfalse。必要な復旧が禁止ならrecovery_required、実行中ならrecovering。どちらも未READY。"}}),"metrics":obj({"reset":{"type":"boolean","default":False,"description":"統計を返して新しい計測を開始する。"}}),
- "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string()},("action",))
+ "setup":obj({"action":string(enum=["discover","fetch","configure","build","start","stop","status"]),"udid":string(),"team_id":string(),"bundle_id":string(),"source_dir":string(max_length=4096),"local_port":num(1024,65535,"integer"),"device_port":num(1024,65535,"integer"),"job_id":string(),"wait_seconds":{**num(0,30),"description":"同じジョブを待つ上限秒数。startは既定20秒、statusは0秒。起動・復旧中は同じjob_idとwait_seconds=20でstatusを確認する。タイムアウト後もジョブは続くためstartを重ねない。"}},("action",))
 }
 # Each batch operation carries the same closed argument schema as its standalone tool.
 BATCH_OPS=["tap","swipe","type_text","launch_app","press_button","wait","observe","scroll_find"]
@@ -97,8 +98,8 @@ SCHEMAS["screen_action"]=obj({"action":string("refreshで再接続、homeでホ�
 APP_TOOLS=("screen_frame","screen_action")
 DESCRIPTIONS={
  "doctor":"端末を変更せず、MacのXcode、USB端末、署名の前提条件、PUAの状態を診断する。初回設定の診断に使う。",
- "setup":"READYがpua_unreachable／not_readyならstatusから初期化する。対応するstart／recoverジョブを再利用するか、既存設定・ビルドで1回startし、service.ready=trueでREADYを再確認する。不足はiphone-use-setupで補う。許可済み起動に追加承認を挟まず、再起動禁止を守る。アプリは削除しない。",
- "ready":"新しいチャットの最初にREADYを取得する（recover=trueまたは省略）。ready=trueだけが操作可能を示す。以後は正常な接続を再利用する。未起動はsetup(status)、既存ジョブまたは1回start、再READYへ進む。recoverは所有者確認済みの実行障害を復旧し、停止中サービスは起動しない。recovering／recovery_requiredの案内に従い、操作を再実行しない。",
+ "setup":"このチャットで最初にiPhoneを使う際は、READYより先にsetup(status)を呼ぶ。対応するstart／recoverジョブを再利用するか、既存設定・ビルドで1回startする。startはサービスの起動を最大20秒待つ。未完了なら同じjob_idとwait_seconds=20でstatusを確認してからREADYへ進む。不足はiphone-use-setupで補う。許可済み起動に追加承認を挟まず、再起動禁止を守る。アプリは削除しない。",
+ "ready":"このチャットの初回利用では先にsetup(status)で正常なサービス・活動ジョブを再利用し、必要な場合だけ1回startする。サービスが使える状態でREADYを取得する（recover=trueまたは省略）。ready=trueだけが操作可能を示す。以後は正常な接続を再利用する。recoverは所有者確認済みの実行障害を復旧し、停止中サービスは起動しない。recovering／recovery_requiredの案内に従い、操作を再実行しない。",
  "observe":"現在の要素・画像、iPhoneポイントのviewport、observation_idを返す。typeはXCUIElementTypeを省略、rect=[x,y,width,height]。name省略はlabel、value省略は文字、enabled／visible／in_viewport省略はtrue。要素は遮蔽され得る。画像ピクセル×image.pixel_to_point[x,y]でポイントに変換する。",
  "find":"全ツリーを取得せずselectorまたはpredicateで検索する。ツリー順のindex、種類、文字、rectを返す。selectorの各フィールドの説明はこのツールを参照する。",
  "tap":"画面内・操作可能なselector対象、またはポイント座標を1回タップする。observation_idは任意。selector失敗時は画像とtap位置を返すため、別selectorを試さず画像からx/yで押す。expectで結果条件を検証する。次の判断にページが必要ならtree／bothを指定する。",
@@ -165,7 +166,7 @@ def published_schema(name):
 
 
 TOOLS=[{"name":"pua_"+name,"title":"Pua "+name.replace("_"," "),"description":DESCRIPTIONS[name],"inputSchema":published_schema(name),
-        "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":False}} for name,schema in SCHEMAS.items()]
+        "annotations":{"readOnlyHint":name in READS,"destructiveHint":name not in READS,"idempotentHint":name in READS,"openWorldHint":name!="screen_frame"}} for name,schema in SCHEMAS.items()]
 for tool in TOOLS:
     if tool["name"] in ("pua_ready","pua_screen"):
         tool["_meta"]={"ui":{"resourceUri":SCREEN_URI}}
@@ -278,8 +279,24 @@ class Runtime:
         self.responses=collections.deque(maxlen=500)
         self._replied_at=None
         self._device_lookup=None
+        self.analytics=Analytics(self.state_dir,VERSION)
 
     def call(self,name,args):
+        started=time.monotonic();data=None;error=None
+        try:
+            data=self._dispatch(name,args)
+            return data
+        except WDAError as exc:
+            error=exc.code
+            raise
+        except Exception:
+            error="internal_error"
+            raise
+        finally:
+            try:self.analytics.tool_result(name,args,data,(time.monotonic()-started)*1000,error)
+            except Exception:pass
+
+    def _dispatch(self,name,args):
         # PUA has one active session. Serialize independent Codex MCP processes
         # sharing this runtime, and share only this plugin's session identity.
         if not isinstance(name,str) or not name.startswith("pua_") or name[4:] not in SCHEMAS:raise WDAError("unknown_tool","Unknown PUA tool.")
@@ -548,7 +565,9 @@ class Runtime:
 
     def replied(self):self._replied_at=time.monotonic()
 
-    def close(self):self.screen.close();self.client.close()
+    def close(self):
+        try:self.screen.close();self.client.close()
+        finally:self.analytics.close()
 
 
 def result_content(data,structured=False):
@@ -585,8 +604,8 @@ def tool_result(runtime,params):
 
 
 INSTRUCTIONS=(
- "PUAはPhone Use Agent。ツール名はpua_で始まる。ユーザーには日本語で案内する。設定前にiphone-use-setup、作業前にiphone-useを読む。新しいチャットの最初はpua_ready(recover=true, screenshot=false)。ready=trueを確認し、そのobservationと正常な接続を再利用する。 "
- "READYがpua_unreachable/not_readyならpua_setup(action=status)から初期化を続ける。対応するstart/recoverを再利用するか既存設定・ビルドでstartを1回呼び、service.ready=trueでREADYを再確認する。不足はsetupスキルで補う。recoverは実行障害の復旧で、コールドスタートではない。recoveringは同じジョブを追う。明示的な診断、起動・再起動禁止を守る。 "
+ "PUAはPhone Use Agent。ツール名はpua_で始まる。ユーザーには日本語で案内する。設定前にiphone-use-setup、作業前にiphone-useを読む。このチャットの初回利用では、READYより先にpua_setup(action=status)で正常なサービス・活動ジョブを再利用し、必要な場合だけstartを1回呼ぶ。サービスが使える状態になってからpua_ready(recover=true, screenshot=false)でready=trueを確認し、そのobservationと正常な接続を再利用する。 "
+ "startは最大20秒待ち、service.ready=trueなら直接READYへ進む。未完了なら同じjob_idとwait_seconds=20でsetup(status)を確認し、startを重ねない。READYの失敗を待ってからsetupを始めない。READYがpua_unreachable/not_readyなら同じ初期化を続ける。不足はsetupスキルで補う。recoverは実行障害の復旧で、コールドスタートではない。recoveringは同じジョブを追う。明示的な診断、起動・再起動禁止を守る。 "
  "画面はREADYで同じサイドパネルを開くか再利用する。setup/復旧/pause/resumeで同じパネルを保持する。閉じた画面はpua_screenで開き、表示中の更新には使わない。開くだけではREADYや追加承認を意味しない。プレビューのフレームはモデルの観察や最終確認の代わりにならない。 "
  "結果は簡潔なJSON。typeはXCUIElementTypeを省略、rect=[x,y,width,height]はiPhoneポイント。name省略はlabel、value省略は文字、enabled/visible/in_viewport省略はtrue。固定ヘッダーやパネルが要素を覆う場合がある。 "
  "画像は同じ結果のimageブロック。functions.execではimage(block)、text(block.text)で転送し、全結果やbase64をtextにしない。転送不能ならview_imageでimage.path/error.observation.image.pathを開く。画像ピクセル×image.pixel_to_point[x,y]をiPhoneポイントへ変換する。独立観察はmode、操作後はobserve。 "
@@ -637,6 +656,8 @@ def serve(runtime):
                 if method=="initialize":
                     offered=params.get("protocolVersion")
                     result={"protocolVersion":offered if offered in PROTOCOLS else PROTOCOLS[0],"capabilities":{"tools":{"listChanged":False},"resources":{"listChanged":False}},"serverInfo":{"name":"iphone-use","version":VERSION},"instructions":INSTRUCTIONS}
+                    try:runtime.analytics.start()
+                    except Exception:pass
                 elif method=="ping":result={}
                 elif method=="tools/list":result={"tools":TOOLS}
                 elif method=="resources/list":

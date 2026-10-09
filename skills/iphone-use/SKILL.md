@@ -1,6 +1,6 @@
 ---
 name: iphone-use
-description: PUA（Phone Use Agent）のMCPツールで実機のiPhoneを操作する。新しいチャットではまず初期化してREADYを取得し、サービスが未起動ならsetupで続ける。移動、タップ、入力、スクロールを実行し、次の判断に必要な観察で進捗も確認する。重要な最終結果を検証し、アプリ検索、リスト収集、画面サイドバー、パスワードやFace IDのユーザー引き継ぎを扱う。ユーザーには日本語で案内する。
+description: PUA（Phone Use Agent）のMCPツールで実機のiPhoneを操作する。新しいチャットでは先にsetupでサービスを確認・起動してからREADYを取得する。移動、タップ、入力、スクロールを実行し、次の判断に必要な観察で進捗も確認する。重要な最終結果を検証し、アプリ検索、リスト収集、画面サイドバー、パスワードやFace IDのユーザー引き継ぎを扱う。ユーザーには日本語で案内する。
 ---
 
 # PUAでiPhone上の作業を実行する
@@ -13,7 +13,7 @@ description: PUA（Phone Use Agent）のMCPツールで実機のiPhoneを操作�
 
 ## READYと認証
 
-新しいチャットで最初にiPhoneを使うときは`pua_ready(recover=true, screenshot=false)`を呼ぶ。文字の作業ではstatus、session、tree、viewport、ロック解除の確認を残し、不要な画像は取らない。このチャットですでにREADYで接続が正常なら再利用する。`recover=false`はユーザーが再起動を明示的に禁止した場合や読み取り専用の診断を求めた場合に限り、制限を守る。
+新しいチャットで最初にiPhoneを使うときは、先に`pua_setup(action="status")`を呼び、[起動と復旧](references/startup.md)に従って正常なサービスか活動中のジョブを再利用する。必要なサービスがなければstartを一度だけ呼ぶ。サービスが使える状態になってから`pua_ready(recover=true, screenshot=false)`を呼ぶ。READYの失敗を待ってからsetupを始めない。文字の作業ではstatus、session、tree、viewport、ロック解除の確認を残し、不要な画像は取らない。このチャットですでにREADYで接続が正常なら再利用する。`recover=false`はユーザーが再起動を明示的に禁止した場合や読み取り専用の診断を求めた場合に限り、制限を守る。
 
 - `ready=true, state="ready"`：その`observation`を次の判断に使う。直後にobserve、doctor、移動テストを重複実行しない。
 - `ready=false, state="recovering"`または`state="recovery_required"`：errorがなくMCPのisErrorがfalseでも、操作可能という意味ではない。[起動と復旧](references/startup.md)に従い同じジョブを調べる。

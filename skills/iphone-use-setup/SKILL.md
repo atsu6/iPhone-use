@@ -1,6 +1,6 @@
 ---
 name: iphone-use-setup
-description: PUA（Phone Use Agent）を設定し、ユーザー自身のiPhoneで実行サービスを署名・インストール・起動する。新しいチャットではREADYから始め、既存の設定とビルドを再利用する。USB・Xcodeを診断し、画面サイドバーを表示する。初回導入、コールドスタート、切断復旧、署名期限切れに使い、日本語で案内する。
+description: PUA（Phone Use Agent）を設定し、ユーザー自身のiPhoneで実行サービスを署名・インストール・起動する。新しいチャットでは先にsetupでサービスを確認・起動してからREADYを取得し、既存の設定とビルドを再利用する。USB・Xcodeを診断し、画面サイドバーを表示する。初回導入、コールドスタート、切断復旧、署名期限切れに使い、日本語で案内する。
 ---
 
 # iPhoneをREADYにする
@@ -9,7 +9,7 @@ description: PUA（Phone Use Agent）を設定し、ユーザー自身のiPhone�
 
 ## 現在の状態を調べる
 
-このチャットでREADYを取得していなければ`pua_ready(recover=true, screenshot=false)`を呼び、操作前に確認する。以前のチャットのREADYやプラグイン導入を証拠にしない。このチャットですでにREADYで接続が正常なら、doctor／discover／build／startを繰り返さない。初回設定や具体的な不足がある場合は`pua_doctor`と`pua_setup(action="discover")`でXcode、接続端末、署名、ポート、プロセスを調べる。複数端末はユーザーの指定に従い、条件に合う端末が1台だけならそれを使う。UDID、Team ID、ログ、署名設定はユーザーのMacに保存し、ソースやGitに入れない。
+このチャットでREADYを取得していなければ、先に`pua_setup(action="status")`を呼び、下の手順で正常なサービスか活動中のジョブを再利用する。必要なサービスがなければstartを一度だけ呼ぶ。サービスが使える状態になってから`pua_ready(recover=true, screenshot=false)`を呼び、操作前に確認する。READYの失敗を待ってからsetupを始めない。以前のチャットのREADYやプラグイン導入を証拠にしない。このチャットですでにREADYで接続が正常なら、doctor／discover／build／startを繰り返さない。初回設定や具体的な不足がある場合は`pua_doctor`と`pua_setup(action="discover")`でXcode、接続端末、署名、ポート、プロセスを調べる。複数端末はユーザーの指定に従い、条件に合う端末が1台だけならそれを使う。UDID、Team ID、ログ、署名設定はユーザーのMacに保存し、ソースやGitに入れない。
 
 通常は`recover=true`または省略する。falseは明示的な再起動禁止・読み取り専用診断に限る。画像が不要なら`screenshot=false`。READYのproofはstatus、利用可能なsession、実際の前面アプリ、viewport、ロック解除、現在のobservationを含む。その観察を次に使い、直後のobserveや移動テストを重ねない。ミラーリングが動作中でツリーが空なら`mirroring_conflict`となり、ミラーリングを終了して再確認する。Runnerアイコン、BUILD SUCCEEDED、開いたポートだけではREADYではない。
 
@@ -22,9 +22,9 @@ READYは対応ホストで画面サイドバーも開く。閉じた画面の再
 `recover=true`は、所有者を確認したサービスの継続する`local.pid.0`／XCTest障害を復旧できるが、初回設定やコールドスタートを自動完了しない。`pua_unreachable`、接続拒否、`not_ready`なら以下を続ける。
 
 1. `pua_setup(action="status")`で`configured`、`service`、`jobs`を読む。configured=trueなら既存の端末・署名・ポートを保持する。falseの場合だけ不足を初回手順で補う。
-2. 現在の設定／endpointに合うstart／recoverがqueuedまたはrunningなら同じidを記録して`pua_setup(action="status", job_id=...)`で調べる。statusは`jobs`配列を返すためidで選ぶ。無関係な古いジョブを待たない。対応するfetch／buildが実行中ならそれも再利用する。
+2. 現在の設定／endpointに合うstart／recoverがqueuedまたはrunningなら同じidを記録して`pua_setup(action="status", job_id=..., wait_seconds=20)`で待つ。statusは`jobs`配列を返すためidで選ぶ。無関係な古いジョブを待たない。対応するfetch／buildが実行中ならそれも再利用する。
 3. `service.ready=true`でもsession／前面／viewportをREADYで確認する。startがrunningでもサービスが使えればREADYへ進む。recoverは`recovery_phase="serving"`になってからREADY。長期動作するRunnerのsucceededを待たない。
-4. 設定済み、サービス停止、対応する活動ジョブなしなら`pua_setup(action="start")`を一度呼んで有効なビルドを使う。新しい`job_id`またはalready_running=trueの`job.id`で同じジョブを追う。ソース不足を明示された場合だけfetch、有効なビルド不足・署名期限切れ・バイナリー非互換ならbuildしてからstart。失敗は正確なログとnext_stepsから処理し、startのループを作らない。
+4. 設定済み、サービス停止、対応する活動ジョブなしなら`pua_setup(action="start")`を一度呼んで有効なビルドを使う。startは最大20秒待ち、サービスが使える状態かジョブの終了を確認したら早く返る。固定のsleepではない。`service.ready=true`ならstatusを重ねずREADYへ進む。未完了なら、新しい`job_id`またはalready_running=trueの`job.id`を記録し、`pua_setup(action="status", job_id=..., wait_seconds=20)`で同じジョブを待つ。タイムアウト後もジョブは続くためstartを重ねない。ソース不足を明示された場合だけfetch、有効なビルド不足・署名期限切れ・バイナリー非互換ならbuildしてからstart。失敗は正確なログとnext_stepsから処理し、startのループを作らない。
 5. READYになったらその観察から元の作業を続ける。USB、Xcode、署名、権限の実際の障害を処理する。本人の信頼・ログイン・解除が必要なら先頭選択肢「完了したので続けてください」の質問ツールを使う。読み取り専用や再起動禁止を初期化で迂回しない。
 
 既存ウィジェットを再利用する。ユーザーが先に画面表示を求めた場合は、未表示なら`pua_screen()`を呼び、初期化と許可済み作業を続ける。明示されていない承認待ちを追加しない。未起動の空白は全作業の失敗ではない。

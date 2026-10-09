@@ -2,7 +2,7 @@
 
 **日本語** · [中文](README.zh-CN.md) · [English](README.en.md)
 
-[zhongerxin/iPhone-use](https://github.com/zhongerxin/iPhone-use) v0.3.6を日本語化した非公式フォークです。日本語化の範囲と確認内容は[日本語版について](LOCALIZATION.ja.md)を参照してください。
+iPhone Use v0.3.7の日本語ガイドです。日本語化の範囲は[日本語対応について](LOCALIZATION.ja.md)を参照してください。
 
 ![Codexから実機のiPhoneを操作し、画面をリアルタイムに表示する例](assets/iphone-use-demo.png)
 
@@ -10,19 +10,21 @@ USBで接続した自分のiPhoneを、Codexから自然言語で操作できま
 
 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）を介してiPhoneと通信します。ローカルのMCPサーバー、導入・操作用スキル、リアルタイム画面ウィジェットを含みます。既存の接続やビルドを再利用し、要素を特定できないときはスクリーンショットを確認して座標によるタップを試します。
 
-**利用前に、自分のiPhoneでWDA Runnerを署名・インストール・起動する必要があります。** WDAはiPhone側で操作を実行するサービスです。以下の導入手順とセットアップ用スキルでCodexが初期設定を支援します。正常な既存のWDAがあれば再利用できます。
+**プラグインは既定でPostHogに匿名の利用統計（起動、ツール呼び出し、接続状態、所要時間、エラーの種類）を送信します。ランダムなインストール識別子を使い、iPhoneの画面、入力内容、端末識別子は送信しません。`IPHONE_USE_ANALYTICS=0`または`DO_NOT_TRACK=1`を設定してMCPサービスを再起動すると無効にできます。詳細は[統計について](ANALYTICS.md)を参照してください。
+
+利用前に、自分のiPhoneでWDA Runnerを署名・インストール・起動する必要があります。** WDAはiPhone側で操作を実行するサービスです。以下の導入手順とセットアップ用スキルでCodexが初期設定を支援します。正常な既存のWDAがあれば再利用できます。
 
 ## Codexに導入を依頼する
 
-Mac上のCodexに次のように依頼してください。日本語版はこのフォークから取得します。すでにクローンまたはZIPを展開済みの場合は、URLの代わりにそのローカルディレクトリを指定できます。
+Mac上のCodexに次のように依頼してください。下記のリポジトリから取得します。すでにクローンまたはZIPを展開済みの場合は、URLの代わりにそのローカルディレクトリを指定できます。
 
 ```text
 この日本語版iPhone Useをインストールして設定してください：
-https://github.com/atsu6/iPhone-use
+https://github.com/zhongerxin/iPhone-use
 
 最初にREADMEとインストールスクリプトを読んでください。
 Codex CLI、Python、Node.js、npm、完全版Xcode、USB接続したiPhoneを確認し、
-この日本語版のフォークを適切なローカルディレクトリにクローンしてください。
+このリポジトリを適切なローカルディレクトリにクローンしてください。
 そのディレクトリで sh scripts/install.sh を実行してください。
 
 このチャットで新しいツールを読み込めない場合は、再接続または新しいチャットが
@@ -72,7 +74,7 @@ Xcodeで手動設定する場合：
 日本語版のフォークをクローンして導入します。
 
 ```sh
-git clone https://github.com/atsu6/iPhone-use.git
+git clone https://github.com/zhongerxin/iPhone-use.git
 cd iPhone-use
 sh scripts/install.sh
 ```

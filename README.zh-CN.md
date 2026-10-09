@@ -1,12 +1,14 @@
 # iPhone Use
 
-[日本語](README.md) · **中文** · [English](README.en.md)
+**中文** · [English](README.en.md) · [日本語](README.ja.md)
 
 ![iPhone Use 在 Codex 中操作真实 iPhone 并实时展示手机屏幕](assets/iphone-use-demo.png)
 
 让 Codex 通过 USB 操作你的真实 iPhone。用自然语言描述任务，Codex 就能打开 App、读取页面、点击、滚动、输入文字、整理列表，并在侧边栏展示手机屏幕。
 
 iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（WDA）与 iPhone 通信，包含本地 MCP 服务、安装与使用技能，以及实时屏幕 widget。它优先复用现有连接与构建；控件定位失败时，指导模型查看截图并尝试坐标点击。
+
+插件默认向独立的 PostHog 项目发送匿名使用统计，包括启动、工具调用、连接状态、耗时和错误类别。使用随机安装标识，不上传手机画面、输入内容或设备标识。设置 `IPHONE_USE_ANALYTICS=0` 或 `DO_NOT_TRACK=1` 并重启 MCP 服务可关闭。详见 [埋点与分析说明](ANALYTICS.md)。
 
 **使用前，需要先在你自己的 iPhone 上安装、签名并启动 WDA Runner。** WDA 是运行在手机上的执行服务；下面的提示词和 setup 流程可以让 Codex 协助完成首次安装，已有健康的 WDA 可直接复用。
 
@@ -61,7 +63,7 @@ Xcode 需要支持手机当前的 iOS 版本。无需越狱，也无需单独启
 2. 打开获取的 WDA 源码中的 `WebDriverAgent.xcodeproj`，选择 `WebDriverAgentRunner` scheme 和自己的 iPhone；在 Runner target 的 **Signing & Capabilities** 中选择自己的 Team 与可签名的 Bundle Identifier。
 3. 使用 **Product → Test** 构建、安装并运行 WDA Runner，按手机上的实际提示完成信任。运行测试会启动 WDA 服务；安装后仍需要该服务处于运行状态。
 
-安装插件并完成 USB 连接配置后，以 `pua_ready` 返回 `ready=true` 为准，再开始手机任务。设备与签名要求可参考 [Appium 真机准备说明](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)。
+本对话首次使用先调用 `pua_setup(action="status")`，复用健康服务或活动工作；缺少服务才 start 一次。start 默认最多等待 20 秒，超时后按同一 job 查询，不重复启动。服务就绪后，以 `pua_ready` 返回 `ready=true` 为准，再开始手机任务。设备与签名要求可参考 [Appium 真机准备说明](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)。
 
 ### 安装插件
 
