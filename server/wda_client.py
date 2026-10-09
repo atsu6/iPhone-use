@@ -10,6 +10,9 @@ from urllib.parse import urlsplit
 # separate rect and type reads. Both keys are handled by the pinned WDA's settings.
 ELEMENT_RESPONSE_ATTRIBUTES = "type,label,rect,enabled,attribute/name,attribute/value"
 SESSION_SETTINGS = {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0,
+                    # Full-resolution streams at 10 FPS were killed on a real
+                    # iPhone 17 Pro Max. Keep capture light without rescaling.
+                    "mjpegServerFramerate": 2,
                     "shouldUseCompactResponses": False,
                     "elementResponseAttributes": ELEMENT_RESPONSE_ATTRIBUTES}
 
