@@ -2,7 +2,7 @@
 
 **日本語** · [中文](README.zh-CN.md) · [English](README.en.md)
 
-iPhone Use v0.3.7の日本語ガイドです。日本語化の範囲は[日本語対応について](LOCALIZATION.ja.md)を参照してください。
+iPhone Use v0.3.8の日本語ガイドです。日本語化の範囲は[日本語対応について](LOCALIZATION.ja.md)を参照してください。
 
 ![Codexから実機のiPhoneを操作し、画面をリアルタイムに表示する例](assets/iphone-use-demo.png)
 

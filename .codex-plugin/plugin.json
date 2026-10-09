@@ -1,6 +1,6 @@
 {
   "name": "iphone-use",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "CodexからUSB経由で実機のiPhoneを操作。導入ガイド、アプリの自動操作、リアルタイム画面表示、スクリーンショットによる復旧に対応。 新しいチャットでは先にsetupでサービスを確認・起動し、使える状態になってからREADYを取得します。",
   "author": {
     "name": "ZHONG XIN"

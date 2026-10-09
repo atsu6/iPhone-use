@@ -65,6 +65,8 @@ for (const block of result.content ?? []) {
 
 ## アプリと通常の操作
 
+iPhoneの画像、動画、文書などをMacで読み取り・処理・納品する必要がある場合は、[AirDropでMacへファイルを送る](references/airdrop.md)を参照する。送信後はダウンロードフォルダーで受け取ったファイルを確認する。
+
 確認済みのbundle IDなら直接起動する。オフラインのアプリ検索は`pua_apps(source="catalog", query=...)`または[アプリ一覧](references/apps.md)。未知・同名のアプリは`source="auto"`で実機候補を探し、それでもなければAppleを検索する。IDを連続して推測しない。招商銀行の本体は`com.cmbchina.MPBBank`。ストア情報はインストールの証拠ではなく、`installed_verified=true`を確認する。起動後の必要な観察で実際の前面も読み、追加の起動確認を既定で挟まない。
 
 - `pua_launch_app`：一度有効化して次へ進む。既定は`verify=false, observe="none"`。重要な入口の確認が必要なら`verify=true`または`expect`。
