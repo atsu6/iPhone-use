@@ -135,7 +135,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(tools["pua_screen"]["_meta"]["openai/ui"]["entrypoints"], [{"type": "thread"}])
         for name in ("pua_screen_frame", "pua_screen_action"):
             self.assertEqual(tools[name]["_meta"]["ui"]["visibility"], ["app"])
-        self.assertEqual(tools["pua_screen_action"]["inputSchema"]["properties"]["action"]["enum"], ["refresh", "home", "screenshot", "tap", "drag"])
+        self.assertEqual(tools["pua_screen_action"]["inputSchema"]["properties"]["action"]["enum"], ["refresh", "home", "screenshot", "tap", "drag", "viewport"])
         self.assertTrue(tools["pua_screen_action"]["annotations"]["destructiveHint"])
         self.assertFalse(tools["pua_screen_action"]["annotations"]["idempotentHint"])
         visible = [item for item in tools.values()
@@ -363,6 +363,19 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(caught.exception.code,"not_editable")
         self.assertFalse(screen.is_paused)
         self.assertEqual(client.actions(),[])
+
+    def test_viewport_recovery_refreshes_cached_geometry_without_a_gesture(self):
+        runtime, client, screen = self.runtime()
+        runtime.phone.viewport()
+        client.size = {"width": 844, "height": 390}
+        result = runtime.call("pua_screen_action", {"action": "viewport"})
+        self.assertEqual(result["viewport"]["width"], 844)
+        self.assertIn(("viewport", client.size), screen.events)
+        self.assertEqual(client.actions(), [])
+        screen.set_paused(True)
+        with self.assertRaises(WDAError) as caught:
+            runtime.call("pua_screen_action", {"action": "viewport"})
+        self.assertEqual(caught.exception.code, "preview_paused")
 
     def test_pointer_actions_map_exact_points_and_invalidate_model_focus(self):
         runtime, client, screen = self.runtime()

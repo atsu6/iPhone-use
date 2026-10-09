@@ -802,3 +802,53 @@ test('wheel normalizes line/page input and removes listener on teardown', async 
     assert.equal(h.elements.screen.handlers.has('wheel'),false);
   }
 });
+
+test('new frames reject input until their own load, including late loads from replaced frames', async () => {
+  const h = await livePointerHarness();
+  const oldLoad = h.elements.image.onload;
+  h.app.ontoolresult({ structuredContent: preview({ frame: frame(2) }) });
+  oldLoad(); // Even the same data URL belongs to a different frame generation.
+  h.pointer('pointerdown', 60, 120); h.pointer('pointerup', 60, 120);
+  h.elements.screen.handlers.get('wheel')({ ...pointerEvent(110,220), deltaY: 80, deltaX: 0, deltaMode: 0 });
+  await flush();
+  assert.equal(h.calls.length, 0);
+  h.elements.image.onload();
+  h.pointer('pointerdown', 60, 120); h.pointer('pointerup', 60, 120); await flush();
+  assert.equal(h.calls.filter(c => c.arguments.action === 'tap').length, 1);
+});
+
+test('polling recovers rotated viewport and restores input without another phone tool', async () => {
+  let resolveViewport;
+  const h = await harness({ reply: params => params.arguments.action === 'viewport'
+    ? new Promise(resolve => { resolveViewport = resolve; })
+    : Promise.resolve({ structuredContent: preview({ frame_available: true,
+        frame: { ...frame(2), width: 1800, height: 900 }, viewport: { width: 400, height: 800 } }) }) });
+  await h.tick();
+  h.elements.image.onload();
+  const click = () => {
+    h.elements.screen.handlers.get('pointerdown')(pointerEvent(110,220));
+    h.elements.screen.handlers.get('pointerup')(pointerEvent(110,220));
+  };
+  click(); await flush();
+  assert.equal(h.calls.filter(c => c.arguments.action === 'tap').length, 0);
+  resolveViewport({ structuredContent: { viewport: { width: 800, height: 400 } } });
+  await flush(); click(); await flush();
+  const tap = h.calls.find(c => c.arguments.action === 'tap');
+  assert.equal(tap.arguments.width, 800);
+  assert.equal(tap.arguments.height, 400);
+  assert.equal(tap.arguments.x, 400);
+  assert.equal(tap.arguments.y, 200);
+});
+
+test('viewport recovery failures are throttled while frame polling continues', async () => {
+  const h = await harness({ reply: params => Promise.resolve(params.arguments.action === 'viewport'
+    ? { isError: true }
+    : { structuredContent: preview({ frame_available: true,
+        frame: { ...frame(), width: 1800, height: 900 }, viewport: { width: 400, height: 800 } }) }) });
+  await h.tick();
+  for (let i = 0; i < 7; i++) await h.tick();
+  assert.equal(h.calls.filter(c => c.arguments.action === 'viewport').length, 1);
+  assert.equal(h.calls.filter(c => c.name === 'pua_screen_frame').length, 8);
+  await h.tick();
+  assert.equal(h.calls.filter(c => c.arguments.action === 'viewport').length, 2);
+});

@@ -341,8 +341,16 @@ function consume(value: unknown) {
       dimensions = { width: frame.width, height: frame.height };
       fitFrame();
     }
+    decodedAt = -Infinity;
     failedFrame = false;
-    image.src = `data:${frame.mimeType};base64,${frame.data}`;
+    const source = `data:${frame.mimeType};base64,${frame.data}`;
+    const generation = frameGeneration;
+    image.onload = () => {
+      if (disposed || generation !== frameGeneration || frame.seq !== frameSeq || image.src !== source || failedFrame) return;
+      decodedAt = performance.now();
+      lastGoodFrame = { source, size: { width: frame.width, height: frame.height } };
+    };
+    image.src = source;
     image.hidden = false;
     emptyState.hidden = true;
     device.hidden = false;
@@ -390,6 +398,7 @@ async function poll() {
     if (!visible() || generation !== frameGeneration) return;
     if (result.isError) throw new Error('preview unavailable');
     consume(result.structuredContent);
+    await recoverViewport();
     failures = 0;
     const preview = result.structuredContent as Partial<Preview> | undefined;
     nextDelay = preview?.paused || preview?.frame_available === false
@@ -448,6 +457,25 @@ let freshUntil = -Infinity;
 let failedFrame = false;
 type PointerStart = { id: number; point: Point; client: Point; at: number; generation: number; stream?: string; size: Size; moved: boolean };
 let pointer: PointerStart | undefined;
+let viewportRetryAt = -Infinity;
+async function recoverViewport() {
+  if (!visible() || acting || root.dataset.live !== 'live' || root.dataset.inputBusy === 'true'
+      || !validSize(dimensions) || !validSize(viewport)
+      || Math.abs(dimensions.width / dimensions.height - viewport.width / viewport.height) < .01
+      || performance.now() < viewportRetryAt) return;
+  // A rotated MJPEG frame can arrive without any phone tool updating the cached viewport.
+  // Refresh only on mismatch; failures are throttled and never replay a gesture.
+  viewportRetryAt = performance.now() + 2000;
+  const generation = frameGeneration, stream = streamId;
+  try {
+    const result = await app.callServerTool({
+      name: 'pua_screen_action', arguments: { action: 'viewport' },
+    }, { timeout: ACTION_TIMEOUT });
+    const data = result.structuredContent as Partial<Preview> | undefined;
+    if (visible() && generation === frameGeneration && stream === streamId
+        && !result.isError && validSize(data?.viewport)) viewport = data.viewport;
+  } catch { /* Keep input disabled until geometry can be verified by a later poll. */ }
+}
 function canPoint() {
   return visible() && !acting && root.dataset.live === 'live' && root.dataset.inputBusy !== 'true'
     && !failedFrame && !image.hidden && !!image.src && validSize(viewport) && validSize(dimensions)
@@ -581,10 +609,6 @@ function visibilityChanged() {
 
 const resizeObserver = new ResizeObserver(fitFrame);
 resizeObserver.observe(stage);
-image.onload = () => {
-  if (!failedFrame) decodedAt = performance.now();
-  if (dimensions && image.src) lastGoodFrame = { source: image.src, size: dimensions };
-};
 image.onerror = () => {
   failedFrame = true;
   decodedAt = -Infinity;

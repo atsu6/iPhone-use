@@ -94,7 +94,7 @@ SCHEMAS["ready"]["examples"]=[{"recover":True,"screenshot":False}]
 SCHEMAS["screen"]=obj({"action":string("Default open displays the live iPhone sidebar. Pause before password/Face ID takeover; resume only after the user confirms completion.",enum=["open","pause","resume"])})
 SCHEMAS["screen_frame"]=obj({"after_seq":num(0,9007199254740991,"integer"),"last_event_id":num(0,9007199254740991,"integer")})
 SCHEMAS["screen_action"]=obj({
- "action":string("Preview controls: refresh, home, screenshot, or a user pointer tap/drag in iPhone points.",enum=["refresh","home","screenshot","tap","drag"]),
+ "action":string("Preview controls: refresh, home, screenshot, refresh viewport geometry, or a user pointer tap/drag in iPhone points.",enum=["refresh","home","screenshot","tap","drag","viewport"]),
  "x":num(0,10000),"y":num(0,10000),"to_x":num(0,10000),"to_y":num(0,10000),
  "width":num(1,10000),"height":num(1,10000),"duration":num(.05,1)
 },("action",))
@@ -313,7 +313,7 @@ class Runtime:
         if name in ("pua_screen","pua_screen_frame","pua_screen_action"):self.identify_device()
         # Cached preview polling does not share the PUA action/session lock.
         if name=="pua_screen_frame":return self.screen.frame(**args)
-        if name=="pua_screen_action" and args["action"] not in ("tap","drag"):return self.screen_action(args["action"])
+        if name=="pua_screen_action" and args["action"] not in ("tap","drag","viewport"):return self.screen_action(args["action"])
         if name=="pua_screen":
             action=args.get("action","open")
             if action=="pause":self.screen.set_paused(True)
@@ -373,13 +373,14 @@ class Runtime:
         self._device_lookup.start()
 
     def screen_gesture(self,args):
-        """App-only pointer input, under the shared operation lock and session."""
+        """App-only pointer input and geometry recovery, under the shared operation lock and session."""
         if self.screen.paused():
             raise WDAError("preview_paused","Preview is paused; no gesture was sent.",details={"action_executed":False})
         if self.client.request("GET","/wda/locked").get("value") is not False:
             self.screen.set_paused(True,reason="device_locked")
             raise WDAError("phone_locked","Unlock the iPhone before using the preview.",details={"action_executed":False})
         viewport=self.phone.viewport()
+        if args["action"]=="viewport":return {"viewport":viewport}
         if any(args[key]!=viewport[key] for key in ("width","height")):
             raise WDAError("stale_viewport","The phone rotated. Wait for a fresh frame before trying again.",details={"action_executed":False})
         points=[(args["x"],args["y"])]
@@ -728,7 +729,7 @@ def serve(runtime):
                     arrived=time.monotonic()
                     if params.get("name") not in ("pua_screen_frame","pua_screen","pua_screen_action"):
                         jobs.put((ident,params,arrived));continue
-                    if params.get("name")=="pua_screen_action" and isinstance(params.get("arguments"),dict) and params["arguments"].get("action") in ("tap","drag"):
+                    if params.get("name")=="pua_screen_action" and isinstance(params.get("arguments"),dict) and params["arguments"].get("action") in ("tap","drag","viewport"):
                         if screen_gate.acquire(blocking=False):
                             screen_worker=threading.Thread(target=screen_work,args=(ident,params),name="wda-screen-action",daemon=True)
                             screen_worker.start();continue
