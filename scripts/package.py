@@ -9,8 +9,8 @@ import sys
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','ANALYTICS.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
-DIRS=('assets','server','skills')
+FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','README.ja.md','ANALYTICS.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/src/localization.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
+DIRS=('assets','server','skills','locales')
 INSTALL_SCRIPTS=('phone.py','wda.sh','update_app_catalog.py','check_screen_ui.py','package.py','install.sh','register_mcp.py')
 SOURCE_DIRS=('scripts','tests','.github')
 TOOLING_FILES=('package.json','package-lock.json','forward.mjs','screen-stream.mjs')
@@ -63,8 +63,28 @@ def validate():
     return manifest
 
 
+def stage_language(stage,language):
+    """Change only presentation and the explicit MCP locale in the install copy."""
+    if language=='ja':
+        translation=json.loads((ROOT/'locales/ja/plugin.json').read_text())
+        for name in ('plugin.json','.codex-plugin/plugin.json'):
+            path=stage/name
+            manifest=json.loads(path.read_text())
+            manifest['description']=translation['description']
+            interface=manifest['interface'] if name.startswith('.') else manifest['extensions']['com.openai']['interface']
+            interface.update(translation['interface'])
+            path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
+        for source in (stage/'skills').glob('*/SKILL.ja.md'):
+            source.with_name('SKILL.md').write_bytes(source.read_bytes())
+    for name in ('mcp.json','.mcp.json'):
+        path=stage/name
+        config=json.loads(path.read_text())
+        config['mcpServers']['iphone_use'].setdefault('env',{})['IPHONE_USE_LANGUAGE']=language
+        path.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
+
+
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--validate-only',action='store_true');parser.add_argument('--stage-only',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--validate-only',action='store_true');parser.add_argument('--stage-only',action='store_true');parser.add_argument('--language',choices=('default','ja'),default='default');args=parser.parse_args()
     manifest=validate()
     if args.validate_only:
         print('Plugin manifests, 2 skills, 17 model tools and 2 app-only preview tools validated.');return
@@ -73,6 +93,7 @@ def main():
     stage.mkdir(parents=True)
     for source,rel in package_files():
         target=stage/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
+    stage_language(stage,args.language)
     if args.stage_only:print(stage);return
     archive=ROOT/'dist'/f"{manifest['name']}-{manifest['version']}-source.zip"
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
