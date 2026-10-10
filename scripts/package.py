@@ -14,6 +14,7 @@ DIRS=('assets','server','skills','locales')
 INSTALL_SCRIPTS=('phone.py','wda.sh','update_app_catalog.py','check_screen_ui.py','package.py','install.sh','register_mcp.py')
 SOURCE_DIRS=('scripts','tests','.github')
 TOOLING_FILES=('package.json','package-lock.json','forward.mjs','screen-stream.mjs')
+DEFAULT_FILES=('plugin.json','.codex-plugin/plugin.json','skills/iphone-use/SKILL.md','skills/iphone-use-setup/SKILL.md')
 
 
 def package_files(source_package=False):
@@ -32,6 +33,10 @@ def package_files(source_package=False):
         rel=source.relative_to(ROOT)
         if any(part in ('__pycache__','node_modules','.pytest_cache') for part in rel.parts):continue
         if source.suffix in ('.pyc','.jsonl') or source.name in ('.DS_Store','posthog.local.json'):continue
+        # Installed copies may have translated these files in place. Package
+        # their retained originals, including when recreating a source ZIP.
+        original=ROOT/'locales/default'/rel
+        if rel.as_posix() in DEFAULT_FILES and original.is_file():source=original
         yield source,rel
 
 
@@ -65,6 +70,12 @@ def validate():
 
 def stage_language(stage,language):
     """Change only presentation and the explicit MCP locale in the install copy."""
+    # Keep the original presentation available for later locale switches from
+    # this install copy; the repository itself remains untouched.
+    for name in DEFAULT_FILES:
+        original=stage/'locales/default'/name
+        original.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(stage/name,original)
     if language=='ja':
         translation=json.loads((ROOT/'locales/ja/plugin.json').read_text())
         for name in ('plugin.json','.codex-plugin/plugin.json'):

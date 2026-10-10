@@ -42,6 +42,60 @@ def contract(value):
 
 
 class LocalizationTests(unittest.TestCase):
+    def test_installed_japanese_copy_can_restore_default_and_select_japanese_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = {name: (ROOT/name).read_bytes() for name in
+                        ('plugin.json', '.codex-plugin/plugin.json',
+                         'skills/iphone-use/SKILL.md', 'skills/iphone-use-setup/SKILL.md')}
+            spec = importlib.util.spec_from_file_location('locale_packaging', ROOT/'scripts/package.py')
+            packaging = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(packaging)
+            source = Path(directory)/'source'
+            for path, relative in packaging.package_files(source_package=True):
+                copied = source/relative
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                copied.write_bytes(path.read_bytes())
+            current = source
+            for language in ('ja', 'default', 'ja', 'default'):
+                # Each rebuild starts inside the previous install copy, not the checkout.
+                subprocess.run([sys.executable, str(current/'scripts/package.py'),
+                                '--stage-only', '--language', language], check=True, capture_output=True)
+                current = current/'dist/iphone-use'
+                for name, canonical in original.items():
+                    expected = canonical
+                    if language == 'ja':
+                        if 'SKILL.md' not in name:
+                            continue
+                        expected = (ROOT/name.replace('SKILL.md', 'SKILL.ja.md')).read_bytes()
+                    self.assertEqual((current/name).read_bytes(), expected, name)
+                manifest = json.loads((current/'plugin.json').read_text())
+                short = manifest['extensions']['com.openai']['interface']['shortDescription']
+                self.assertEqual(short, 'CodexからiPhoneを操作' if language == 'ja' else
+                                 json.loads(original['plugin.json'])['extensions']['com.openai']['interface']['shortDescription'])
+                for name in ('mcp.json', '.mcp.json'):
+                    self.assertEqual(json.loads((current/name).read_text())['mcpServers']['iphone_use']['env']['IPHONE_USE_LANGUAGE'], language)
+                self.assertEqual('ユーザーには日本語で案内する' in catalog(current, language)[0]['instructions'], language == 'ja')
+
+    def test_source_zip_from_japanese_install_keeps_canonical_manifests_and_skills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spec = importlib.util.spec_from_file_location('locale_packaging', ROOT/'scripts/package.py')
+            packaging = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(packaging)
+            source = Path(directory)/'source'
+            for path, relative in packaging.package_files(source_package=True):
+                copied = source/relative
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                copied.write_bytes(path.read_bytes())
+            subprocess.run([sys.executable, str(source/'scripts/package.py'), '--stage-only', '--language', 'ja'],
+                           check=True, capture_output=True)
+            installed = source/'dist/iphone-use'
+            subprocess.run([sys.executable, str(installed/'scripts/package.py')], check=True, capture_output=True)
+            archive = next((installed/'dist').glob('*-source.zip'))
+            with zipfile.ZipFile(archive) as package:
+                for name in ('plugin.json', '.codex-plugin/plugin.json',
+                             'skills/iphone-use/SKILL.md', 'skills/iphone-use-setup/SKILL.md'):
+                    self.assertEqual(package.read('iphone-use/'+name), (ROOT/name).read_bytes(), name)
+
     def test_installer_forwards_only_supported_language_options_before_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             python = Path(directory)/'python3'
