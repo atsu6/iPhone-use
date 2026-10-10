@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build separate source and install packages, keeping the complete widget."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -19,6 +20,8 @@ DEFAULT_FILES=('plugin.json','.codex-plugin/plugin.json','skills/iphone-use/SKIL
 
 def package_files(source_package=False):
     """Local docs, evals, experiments and dependency installs are never shipped."""
+    snapshot=ROOT/'locales/default/selected-sha256.json'
+    selected=json.loads(snapshot.read_text()) if snapshot.is_file() else {}
     sources=[ROOT/name for name in FILES]
     for dirname in DIRS+(SOURCE_DIRS if source_package else ()):
         sources.extend((ROOT/dirname).rglob('*'))
@@ -33,10 +36,10 @@ def package_files(source_package=False):
         rel=source.relative_to(ROOT)
         if any(part in ('__pycache__','node_modules','.pytest_cache') for part in rel.parts):continue
         if source.suffix in ('.pyc','.jsonl') or source.name in ('.DS_Store','posthog.local.json'):continue
-        # Installed copies may have translated these files in place. Package
-        # their retained originals, including when recreating a source ZIP.
+        # Restore only unchanged selected copies. Edited source files belong
+        # to the new release and must not be replaced by an older snapshot.
         original=ROOT/'locales/default'/rel
-        if rel.as_posix() in DEFAULT_FILES and original.is_file():source=original
+        if rel.as_posix() in DEFAULT_FILES and original.is_file() and selected.get(rel.as_posix())==hashlib.sha256(source.read_bytes()).hexdigest():source=original
         yield source,rel
 
 
@@ -87,6 +90,8 @@ def stage_language(stage,language):
             path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n')
         for source in (stage/'skills').glob('*/SKILL.ja.md'):
             source.with_name('SKILL.md').write_bytes(source.read_bytes())
+    selected={name:hashlib.sha256((stage/name).read_bytes()).hexdigest() for name in DEFAULT_FILES}
+    (stage/'locales/default/selected-sha256.json').write_text(json.dumps(selected,indent=2)+'\n')
     for name in ('mcp.json','.mcp.json'):
         path=stage/name
         config=json.loads(path.read_text())

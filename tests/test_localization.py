@@ -96,6 +96,47 @@ class LocalizationTests(unittest.TestCase):
                              'skills/iphone-use/SKILL.md', 'skills/iphone-use-setup/SKILL.md'):
                     self.assertEqual(package.read('iphone-use/'+name), (ROOT/name).read_bytes(), name)
 
+    def test_new_source_release_is_not_overwritten_by_retained_install_originals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            spec = importlib.util.spec_from_file_location('locale_packaging', ROOT/'scripts/package.py')
+            packaging = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(packaging)
+            source = target/'source'
+            for path, relative in packaging.package_files(source_package=True):
+                copied = source/relative
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                copied.write_bytes(path.read_bytes())
+            subprocess.run([sys.executable, str(source/'scripts/package.py'), '--stage-only', '--language', 'ja'],
+                           check=True, capture_output=True)
+            installed = source/'dist/iphone-use'
+            subprocess.run([sys.executable, str(installed/'scripts/package.py')], check=True, capture_output=True)
+            with zipfile.ZipFile(next((installed/'dist').glob('*-source.zip'))) as package:
+                package.extractall(target/'extracted')
+            updated = target/'extracted/iphone-use'
+            previous_version = json.loads((updated/'plugin.json').read_text())['version']
+            major, minor, patch = previous_version.split('.')
+            next_version = '.'.join((major, minor, str(int(patch)+1)))
+            for name in ('plugin.json', '.codex-plugin/plugin.json'):
+                path = updated/name
+                manifest = json.loads(path.read_text())
+                manifest['version'] = next_version
+                path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+'\n')
+            for skill in ('iphone-use', 'iphone-use-setup'):
+                path = updated/'skills'/skill/'SKILL.md'
+                path.write_text(path.read_text()+'\nNew release guidance.\n')
+            entrypoint = updated/'server/iphone_use.py'
+            entrypoint.write_text(entrypoint.read_text().replace('VERSION="'+previous_version+'"', 'VERSION="'+next_version+'"'))
+            # The source ZIP still includes the previous install's original copies.
+            subprocess.run([sys.executable, str(updated/'scripts/package.py'), '--stage-only'],
+                           check=True, capture_output=True)
+            rebuilt = updated/'dist/iphone-use'
+            for name in ('plugin.json', '.codex-plugin/plugin.json',
+                         'skills/iphone-use/SKILL.md', 'skills/iphone-use-setup/SKILL.md'):
+                self.assertEqual((rebuilt/name).read_bytes(), (updated/name).read_bytes(), name)
+            self.assertEqual(catalog(rebuilt)[0]['serverInfo']['version'],
+                             json.loads((rebuilt/'plugin.json').read_text())['version'])
+
     def test_installer_forwards_only_supported_language_options_before_registration(self):
         with tempfile.TemporaryDirectory() as directory:
             python = Path(directory)/'python3'
