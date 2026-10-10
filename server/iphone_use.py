@@ -27,7 +27,7 @@ from analytics import Analytics
 from localization import LANGUAGE, localize, instructions as localized_instructions
 
 PUAError=WDAError
-VERSION="0.3.9"
+VERSION="0.3.10"
 SCREEN_URI="ui://iphone-use/phone-"+VERSION+("-ja" if LANGUAGE=="ja" else "")+".html"
 SCREEN_ASSET="phone-screen.ja.html" if LANGUAGE=="ja" else "phone-screen.html"
 # Codex scopes reuse to the host, chat, server and UI resource. A stable result
